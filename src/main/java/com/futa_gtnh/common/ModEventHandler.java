@@ -3,6 +3,7 @@ package com.futa_gtnh.common;
 import net.minecraft.entity.player.EntityPlayerMP;
 
 import com.futa_gtnh.exchange.StorageActionHandler;
+import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.shared.SharedStorageManager;
 
 import cpw.mods.fml.common.FMLCommonHandler;
@@ -43,5 +44,24 @@ public class ModEventHandler {
         if (event.player instanceof EntityPlayerMP) {
             StorageActionHandler.forget((EntityPlayerMP) event.player);
         }
+    }
+
+    /**
+     * 每 tick 把迅步的移动速度修饰符调整成该有的样子。
+     *
+     * <p>
+     * 这里<b>刻意不按端分流</b>：这个事件两端都会触发，而方法本身是幂等的
+     * （倍率没变就什么都不做），所以服务端负责权威、客户端负责即时生效，
+     * 一份代码全包了。而且客户端也需要它 —— 属性的同步毕竟要等一个来回，
+     * 不本地也挂一份的话，戴上迅步要过一小会儿才有感觉。
+     *
+     * <p>
+     * 代价是每 tick 每个玩家要遍历一遍饰品栏（几格）加一次属性查表，
+     * 可以忽略。
+     */
+    @SubscribeEvent
+    public void onPlayerTick(TickEvent.PlayerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
+        ItemSwiftStep.applyWalkSpeedModifier(event.player);
     }
 }

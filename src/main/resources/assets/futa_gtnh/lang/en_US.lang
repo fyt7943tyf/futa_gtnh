@@ -5,16 +5,17 @@
 
 tile.futa_gtnh.shared_terminal.name=Shared Terminal
 container.futa_gtnh.shared_terminal=Shared Storage
-item.futa_gtnh.flight_charm.name=Flight Charm
+item.futa_gtnh.swift_step.name=Swift Step
 
-item.futa_gtnh.flight_charm.tooltip.speed=Flight speed: %sx (%s)
-item.futa_gtnh.flight_charm.tooltip.gui=Right-click: adjust speed
-item.futa_gtnh.flight_charm.tooltip.equip=Sneak + right-click: equip to a free bauble slot
+item.futa_gtnh.swift_step.tooltip.flight=Flight speed: %sx
+item.futa_gtnh.swift_step.tooltip.walk=Movement speed: %sx
+item.futa_gtnh.swift_step.tooltip.gui=Right-click: adjust speed
+item.futa_gtnh.swift_step.tooltip.equip=Sneak + right-click: equip to a free bauble slot
 
-futa_gtnh.flight_charm.gui.multiplier=Speed multiplier
-futa_gtnh.flight_charm.gui.result=Fly speed %s (vanilla %s)
-futa_gtnh.flight_charm.gui.range=Range %s ~ %s
-futa_gtnh.flight_charm.gui.hint=Only works while worn
+futa_gtnh.swift_step.gui.flight=Flight speed
+futa_gtnh.swift_step.gui.walk=Movement speed
+futa_gtnh.swift_step.gui.range=Multiplier range 1.00 ~ %s (server config wins)
+futa_gtnh.swift_step.gui.hint=Only works while worn
 
 key.categories.futa_gtnh=FutaGTNH
 key.futa_gtnh.shared_terminal=Open Shared Storage

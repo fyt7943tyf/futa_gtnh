@@ -234,9 +234,10 @@ API.registerGuiOverlayHandler(GuiSharedTerminal.class, 自定义handler, "crafti
 
 ---
 
-## 飞行护符
+## 迅步
 
-一个 Baubles 饰品：**戴在身上提高飞行移动速度**，右键可以打开界面自己调倍率。
+一个 Baubles 饰品：**戴在身上同时提高飞行速度和移动速度**，右键可以打开界面自己调倍率。
+图标参考《全境封锁2》的「迅步」具名手枪。
 
 ### 怎么拿 / 怎么用
 
@@ -255,43 +256,95 @@ API.registerGuiOverlayHandler(GuiSharedTerminal.class, 自定义handler, "crafti
 | 在背包界面里拖进饰品槽 | 同样可以装备（Baubles 的常规做法） |
 
 > 一个右键只能干一件事，而这个物品最需要的是调整界面，所以装备让给了潜行右键。
-> 佩戴有效期间物品会有附魔光效，一眼能看出「这个是开了加速的」。
+> 调过速度之后物品会有附魔光效，一眼能看出「这个是开过加速的」。
 
 ### 调整界面
 
-- 五档预设：**1x / 2x / 3x / 5x / 10x**（超出配置上限的会置灰）
-- 微调：**-0.25 / +0.25**
-- 界面上实时显示倍率和换算出来的实际飞行速度
+飞行和移动**各一组控件**，互不影响：
 
-**注意**：调到多少，取决于**服务端配置的上限**（默认 5 倍）。
+- 六档预设：**1x / 2x / 3x / 5x / 10x / 20x**（超出配置上限的会置灰）
+- 微调：**-0.25 / +0.25**
+- 每组都实时显示倍率和换算出来的实际速度
+
+**注意**：调到多少，取决于**服务端配置的上限**（默认 20 倍）。
 客户端界面按自己配置画按钮，但发上去的值会在服务端再夹一次 ——
 所以服务器主把这个值调小之后，改过的客户端也开不出火箭来。
 
-### 为什么速度改在客户端
+### 为什么速度这么快就到底了
 
-不是偷懒，是 API 逼的：1.7.10 的 `PlayerCapabilities.setFlySpeed()` 标着
-`@SideOnly(Side.CLIENT)` —— **服务端那份类里根本没有这个方法**，在服务端调用会
-`NoSuchMethodError`。而飞行速度本来就是个纯客户端参数：它在
+默认上限 20 倍不是随手定的，它差不多就是**专用服务器的物理上限**：
+
+- 飞行的终端速度约等于 `flySpeed × 9.1` 格/tick；
+- 20 倍时 `flySpeed = 1.0`，正好是 **9.1 格/tick**；
+- 而 `NetHandlerPlayServer` 在单轴超过 **10 格/tick** 时会判定 `moved too quickly`，
+  直接把你传送回上一个位置。
+
+所以再往上调就会出现「飞着飞着被拉回去」。想试的话把配置调大即可，
+但要有心理准备。
+
+> 这条检查**在单人和局域网主机上会被跳过**（只在专用服务器上生效），
+> 所以自己开档测的时候感觉不出来，上了服务器才会发现问题。
+
+### 两项速度的实现机制完全不同
+
+这不是设计选择，是 1.7.10 逼出来的 —— 这两项在原版里本来就走两条路：
+
+**移动速度走「移动速度属性」，服务端权威。**
+
+```java
+// EntityPlayer.onLivingUpdate()
+if (!this.worldObj.isRemote)          // ← 只在服务端
+{
+    iattributeinstance.setBaseValue((double) this.capabilities.getWalkSpeed());
+}
+this.setAIMoveSpeed((float) iattributeinstance.getAttributeValue());
+```
+
+原版每 tick 在服务端把 `walkSpeed` 写成该属性的基值。所以只要挂一个
+`AttributeModifier` 上去就行：公开 API、服务端权威、还会自动同步给客户端。
+
+运算方式用的是 1.7.10 里的 **operation 1（乘基值）**、`amount = 倍率 - 1`。
+这个数字不是猜的，`ModifiableAttributeInstance.computeValue()` 里写得很清楚：
+
+```
+operation 0:  d0 += amount
+operation 1:  d1 += d0 * amount      ← 乘基值
+operation 2:  d1 *= (1 + amount)
+```
+
+用 0 会变成加法（不按比例），用 2 则会连其它修饰符一起放大。
+
+**飞行速度没有属性可用，只能在客户端改。**
+
+它就是 `PlayerCapabilities.flySpeed` 这个私有字段，而 setter 标着
+`@SideOnly(Side.CLIENT)` —— **服务端那份类里根本没有这个方法**，调了会
+`NoSuchMethodError`。它本来就是纯客户端参数：在
 `EntityPlayer.moveEntityWithHeading` 里被读出来赋给 `jumpMovementFactor`，
-那段代码跑在客户端，服务端也无从验证玩家飞多快。
+那段代码跑在客户端。
 
-所以：**倍率存在物品 NBT 里（服务端写入），客户端读出来应用。**
+而**不能**用反射去写服务端那个私有字段：那样得把字段名 `"flySpeed"` 写死在代码里，
+生产环境的 jar 是混淆过的，字段名会变成 SRG 名（`field_XXXXXX`），
+运行时直接 `NoSuchFieldException`。
 
-还有一个细节：护符摘掉之后，飞行速度会**还原成接管前的值**，而不是无脑恢复成
-原版的 0.05。万一还有别的模组也在动 `flySpeed`，这样才不会被我们抹掉。
+> 顺带一提：移动速度的属性修饰符是**两端都挂**的。服务端那份是权威，
+> 客户端那份是为了即时生效（不等属性的网络同步）。两边用同一个 UUID，
+> 所以不会叠成双倍。
+
+还有一个细节：迅步摘掉之后，飞行速度会**还原成接管前的值**，而不是无脑恢复成
+原版的 `0.05`。万一还有别的模组也在动 `flySpeed`，这样才不会被我们抹掉。
 
 ### 配置
 
 | 配置项 | 默认 | 说明 |
 | --- | --- | --- |
-| `enableFlightCharm` | `true` | 是否注册飞行护符 |
-| `flightCharmMaxMultiplier` | `5.0` | 速度倍率上限（原版飞行速度的倍数），**以服务端为准** |
+| `enableSwiftStep` | `true` | 是否注册迅步 |
+| `swiftStepMaxMultiplier` | `20.0` | 速度倍率上限（原版速度的倍数），**以服务端为准** |
 
-> 原版飞行速度是 `0.05`，5 倍就是 `0.25` —— 已经相当快了，再往上容易跑赢区块加载。
+> 原版飞行速度是 `0.05`，移动速度是 `0.1`。倍率是对它们分别相乘的。
 
 ### 关于依赖
 
-飞行护符需要 **Baubles**（GTNH 自带）。没装的话护符不会被注册，模组其余部分照常工作。
+迅步需要 **Baubles**（GTNH 自带）。没装的话物品不会被注册，模组其余部分照常工作。
 
 这里有个坑值得记一笔：**Baubles-Expanded 的 modid 是 `Baubles|Expanded`，真的带一个竖线**，
 而竖线正是 FML 依赖串里的「或」分隔符 —— 在 `@Mod(dependencies = ...)` 里写

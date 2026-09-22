@@ -55,25 +55,28 @@ public class Config {
     public static boolean displayItemBecomesFluid = true;
 
     // ------------------------------------------------------------------
-    // 飞行护符
+    // 迅步（Baubles 饰品）
     // ------------------------------------------------------------------
 
-    /** 是否注册飞行护符。需要装了 Baubles，没装的话这项无效。 */
-    public static boolean enableFlightCharm = true;
+    /** 是否注册迅步。需要装了 Baubles，没装的话这项无效。 */
+    public static boolean enableSwiftStep = true;
 
     /**
-     * 飞行护符能把飞行速度提到原版的多少倍。
+     * 迅步能把飞行速度 / 移动速度提到原版的多少倍。
      *
      * <p>
      * 上限<b>由服务端说了算</b>：客户端界面按自己配置里的值画按钮，
      * 但发上来的倍率会在服务端再夹一次。所以把这个值调小之后，
-     * 就算客户端还显示着 5x，实际写进物品的也会被压到上限。
+     * 就算客户端还显示着 20x，实际写进物品的也会被压到上限。
      *
      * <p>
-     * 原版飞行速度是 0.05，5 倍就是 0.25 —— 已经相当快了，
-     * 再往上容易跑赢区块加载。
+     * 默认 20 差不多就是<b>专用服务器的物理上限</b>了：飞行终端速度约等于
+     * {@code flySpeed × 9.1} 格/tick，20 倍正好是 9.1 格/tick，而
+     * {@code NetHandlerPlayServer} 在单轴超过 10 格/tick 时会判定
+     * 「moved too quickly」并把你拉回原地。再往上就会开始被拉回
+     * （单人 / 局域网主机不受这条检查限制，所以自己开档感觉不出来）。
      */
-    public static double flightCharmMaxMultiplier = 5.0D;
+    public static double swiftStepMaxMultiplier = 20.0D;
 
     // ------------------------------------------------------------------
     // 合成
@@ -127,19 +130,19 @@ public class Config {
         enableRecipe = configuration
             .getBoolean("enableRecipe", Configuration.CATEGORY_GENERAL, enableRecipe, "是否注册共享终端的合成配方。");
 
-        enableFlightCharm = configuration.getBoolean(
-            "enableFlightCharm",
+        enableSwiftStep = configuration.getBoolean(
+            "enableSwiftStep",
             Configuration.CATEGORY_GENERAL,
-            enableFlightCharm,
-            "是否注册飞行护符（需要装了 Baubles；没装的话这一项无效）。");
+            enableSwiftStep,
+            "是否注册迅步饰品（需要装了 Baubles；没装的话这一项无效）。");
 
-        flightCharmMaxMultiplier = configuration.getFloat(
-            "flightCharmMaxMultiplier",
+        swiftStepMaxMultiplier = configuration.getFloat(
+            "swiftStepMaxMultiplier",
             Configuration.CATEGORY_GENERAL,
-            (float) flightCharmMaxMultiplier,
+            (float) swiftStepMaxMultiplier,
             1.0F,
-            50.0F,
-            "飞行护符的速度倍率上限（原版飞行速度的倍数）。实际上限由服务端决定。");
+            100.0F,
+            "迅步的速度倍率上限（原版速度的倍数）。实际上限由服务端决定；超过约 20 倍时专用服务器会因「moved too quickly」把人拉回。");
 
         if (configuration.hasChanged()) {
             configuration.save();

@@ -3,9 +3,9 @@ package com.futa_gtnh;
 import net.minecraft.client.Minecraft;
 import net.minecraft.item.ItemStack;
 
-import com.futa_gtnh.client.FlightCharmHandler;
-import com.futa_gtnh.client.GuiFlightCharm;
+import com.futa_gtnh.client.GuiSwiftStep;
 import com.futa_gtnh.client.KeyHandler;
+import com.futa_gtnh.client.SwiftStepClientHandler;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -21,7 +21,7 @@ public class ClientProxy extends CommonProxy {
     public void preInit(FMLPreInitializationEvent event) {
         super.preInit(event);
         KeyHandler.register();
-        FlightCharmHandler.register();
+        SwiftStepClientHandler.register();
     }
 
     @Override
@@ -35,15 +35,15 @@ public class ClientProxy extends CommonProxy {
     }
 
     /**
-     * 飞行护符的调整界面。
+     * 迅步的调整界面。
      *
      * <p>
-     * 覆盖 {@link CommonProxy#openFlightCharmGui}。之所以绕这一道，
-     * 是为了让 {@code ItemFlightCharm}（公共类）不用引用 {@code net.minecraft.client.*}。
+     * 覆盖 {@link CommonProxy#openSwiftStepGui}。之所以绕这一道，
+     * 是为了让 {@code ItemSwiftStep}（公共类）不用引用 {@code net.minecraft.client.*}。
      */
     @Override
-    public void openFlightCharmGui(ItemStack charm) {
+    public void openSwiftStepGui(ItemStack charm) {
         Minecraft.getMinecraft()
-            .displayGuiScreen(new GuiFlightCharm(charm));
+            .displayGuiScreen(new GuiSwiftStep(charm));
     }
 }

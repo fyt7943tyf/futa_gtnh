@@ -11,7 +11,7 @@ import com.futa_gtnh.command.CommandSharedStorage;
 import com.futa_gtnh.common.ForgeEventHandler;
 import com.futa_gtnh.common.GuiHandler;
 import com.futa_gtnh.common.ModEventHandler;
-import com.futa_gtnh.item.ItemFlightCharm;
+import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.shared.SharedStorageManager;
 
@@ -32,8 +32,8 @@ public class CommonProxy {
     /** 注册用的方块实例，{@code FutaGtnhMod} 里也持有同一个引用。 */
     public static BlockSharedTerminal blockSharedTerminal;
 
-    /** 飞行护符。没装 Baubles 时为 null。 */
-    public static ItemFlightCharm flightCharm;
+    /** 迅步。没装 Baubles 时为 null。 */
+    public static ItemSwiftStep swiftStep;
 
     public void preInit(FMLPreInitializationEvent event) {
         // 读取配置文件（config/futa_gtnh.cfg）
@@ -45,7 +45,7 @@ public class CommonProxy {
         ForgeEventHandler.register();
 
         registerBlocks();
-        registerFlightCharm();
+        registerSwiftStep();
         registerRecipes();
 
         NetworkRegistry.INSTANCE.registerGuiHandler(FutaGtnhMod.instance, new GuiHandler());
@@ -76,7 +76,7 @@ public class CommonProxy {
     }
 
     /**
-     * 注册飞行护符。
+     * 注册迅步。
      *
      * <p>
      * <b>用 {@code Loader.isModLoaded} 守卫，而不是在 {@code @Mod} 里写依赖声明。</b>
@@ -91,20 +91,20 @@ public class CommonProxy {
      *
      * <p>
      * 没装 Baubles 时只是不注册这个物品，模组本身照常工作 ——
-     * {@link ItemFlightCharm} 实现了 {@code IBauble}，不守卫的话类加载就会炸。
+     * {@link ItemSwiftStep} 实现了 {@code IBauble}，不守卫的话类加载就会炸。
      */
-    private void registerFlightCharm() {
-        if (!Config.enableFlightCharm) return;
+    private void registerSwiftStep() {
+        if (!Config.enableSwiftStep) return;
 
         if (!Loader.isModLoaded("Baubles|Expanded") && !Loader.isModLoaded("Baubles")) {
-            FutaGtnhMod.LOG.info("没有检测到 Baubles，跳过飞行护符的注册");
+            FutaGtnhMod.LOG.info("没有检测到 Baubles，跳过迅步的注册");
             return;
         }
 
-        flightCharm = new ItemFlightCharm();
-        GameRegistry.registerItem(flightCharm, ItemFlightCharm.NAME);
-        FutaGtnhMod.flightCharm = flightCharm;
-        FutaGtnhMod.LOG.info("已注册飞行护符（Baubles 已加载）");
+        swiftStep = new ItemSwiftStep();
+        GameRegistry.registerItem(swiftStep, ItemSwiftStep.NAME);
+        FutaGtnhMod.swiftStep = swiftStep;
+        FutaGtnhMod.LOG.info("已注册迅步饰品（Baubles 已加载）");
     }
 
     /**
@@ -130,25 +130,25 @@ public class CommonProxy {
                 new ItemStack(blockSharedTerminal, 1),
                 new Object[] { "GEG", "ECE", "GEG", 'G', "blockGlass", 'E', "enderpearl", 'C', "chestWood" }));
 
-        // 飞行护符：羽毛 + 金锭 + 钻石。全部走矿物词典，装了别的模组也成立
-        if (flightCharm != null) {
+        // 迅步：羽毛 + 金锭 + 钻石。全部走矿物词典，装了别的模组也成立
+        if (swiftStep != null) {
             GameRegistry.addRecipe(
                 new ShapedOreRecipe(
-                    new ItemStack(flightCharm, 1),
+                    new ItemStack(swiftStep, 1),
                     new Object[] { "FGF", "GDG", "FGF", 'F', "feather", 'G', "ingotGold", 'D', "gemDiamond" }));
         }
     }
 
     /**
-     * 打开飞行护符的调整界面。只有 {@link ClientProxy} 覆写了它。
+     * 打开迅步的调整界面。只有 {@link ClientProxy} 覆写了它。
      *
      * <p>
-     * 做成代理方法而不是让 {@code ItemFlightCharm} 直接 new 客户端界面类：
+     * 做成代理方法而不是让 {@code ItemSwiftStep} 直接 new 客户端界面类：
      * 那个物品是公共类，引用了 {@code net.minecraft.client.*} 的话，
      * 服务端就得依赖 JVM 的惰性符号解析才不会炸。走代理可以把
      * 「只有客户端才有的实现」老老实实关在 ClientProxy 里。
      */
-    public void openFlightCharmGui(ItemStack charm) {
+    public void openSwiftStepGui(ItemStack charm) {
         // 服务端不做任何事
     }
 

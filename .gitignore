@@ -64,6 +64,8 @@ layout.json
 # 反编译出来的 MC / Forge / GT 源码参考。
 # 同样是第三方反编译产物，而且随时可以用 gradlew 从 Gradle 缓存重新导出，没必要存。
 /.apidocs/
+# 核对 API 时临时解包源码用的目录（.apidocs 的继任者，同样别提交）
+/.tmpcheck/
 
 # 日志（构建日志、服务端日志等）
 *.log
