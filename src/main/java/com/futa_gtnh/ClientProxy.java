@@ -1,5 +1,10 @@
 package com.futa_gtnh;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.item.ItemStack;
+
+import com.futa_gtnh.client.FlightCharmHandler;
+import com.futa_gtnh.client.GuiFlightCharm;
 import com.futa_gtnh.client.KeyHandler;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
@@ -16,6 +21,7 @@ public class ClientProxy extends CommonProxy {
     public void preInit(FMLPreInitializationEvent event) {
         super.preInit(event);
         KeyHandler.register();
+        FlightCharmHandler.register();
     }
 
     @Override
@@ -26,5 +32,18 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void postInit(FMLPostInitializationEvent event) {
         super.postInit(event);
+    }
+
+    /**
+     * 飞行护符的调整界面。
+     *
+     * <p>
+     * 覆盖 {@link CommonProxy#openFlightCharmGui}。之所以绕这一道，
+     * 是为了让 {@code ItemFlightCharm}（公共类）不用引用 {@code net.minecraft.client.*}。
+     */
+    @Override
+    public void openFlightCharmGui(ItemStack charm) {
+        Minecraft.getMinecraft()
+            .displayGuiScreen(new GuiFlightCharm(charm));
     }
 }

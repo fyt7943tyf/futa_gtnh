@@ -2,6 +2,16 @@
 
 tile.futa_gtnh.shared_terminal.name=共享终端
 container.futa_gtnh.shared_terminal=全服共享背包
+item.futa_gtnh.flight_charm.name=飞行护符
+
+item.futa_gtnh.flight_charm.tooltip.speed=飞行速度：%s 倍（%s）
+item.futa_gtnh.flight_charm.tooltip.gui=右键：调整速度
+item.futa_gtnh.flight_charm.tooltip.equip=潜行 + 右键：装备到空的饰品槽
+
+futa_gtnh.flight_charm.gui.multiplier=速度倍率
+futa_gtnh.flight_charm.gui.result=实际飞行速度 %s（原版 %s）
+futa_gtnh.flight_charm.gui.range=可调范围 %s ~ %s
+futa_gtnh.flight_charm.gui.hint=需要戴在身上才生效；死亡不掉落
 
 key.categories.futa_gtnh=FutaGTNH
 key.futa_gtnh.shared_terminal=打开共享背包

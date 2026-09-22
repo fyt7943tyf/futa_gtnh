@@ -35,5 +35,6 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketStorageAction.Handler.class, PacketStorageAction.class, 2, Side.SERVER);
         INSTANCE.registerMessage(PacketOpenGui.Handler.class, PacketOpenGui.class, 3, Side.SERVER);
         INSTANCE.registerMessage(PacketAutoStore.Handler.class, PacketAutoStore.class, 5, Side.SERVER);
+        INSTANCE.registerMessage(PacketSetFlightSpeed.Handler.class, PacketSetFlightSpeed.class, 7, Side.SERVER);
     }
 }

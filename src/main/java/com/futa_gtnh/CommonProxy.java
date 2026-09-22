@@ -11,9 +11,11 @@ import com.futa_gtnh.command.CommandSharedStorage;
 import com.futa_gtnh.common.ForgeEventHandler;
 import com.futa_gtnh.common.GuiHandler;
 import com.futa_gtnh.common.ModEventHandler;
+import com.futa_gtnh.item.ItemFlightCharm;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.shared.SharedStorageManager;
 
+import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
@@ -30,6 +32,9 @@ public class CommonProxy {
     /** 注册用的方块实例，{@code FutaGtnhMod} 里也持有同一个引用。 */
     public static BlockSharedTerminal blockSharedTerminal;
 
+    /** 飞行护符。没装 Baubles 时为 null。 */
+    public static ItemFlightCharm flightCharm;
+
     public void preInit(FMLPreInitializationEvent event) {
         // 读取配置文件（config/futa_gtnh.cfg）
         Config.synchronizeConfiguration(event.getSuggestedConfigurationFile());
@@ -40,6 +45,7 @@ public class CommonProxy {
         ForgeEventHandler.register();
 
         registerBlocks();
+        registerFlightCharm();
         registerRecipes();
 
         NetworkRegistry.INSTANCE.registerGuiHandler(FutaGtnhMod.instance, new GuiHandler());
@@ -70,6 +76,38 @@ public class CommonProxy {
     }
 
     /**
+     * 注册飞行护符。
+     *
+     * <p>
+     * <b>用 {@code Loader.isModLoaded} 守卫，而不是在 {@code @Mod} 里写依赖声明。</b>
+     * Baubles-Expanded 的 modid 是 {@code "Baubles|Expanded"} —— 真的带一个竖线，
+     * 而竖线正是 FML 依赖串里的「或」分隔符，写成
+     * {@code required-after:Baubles|Expanded} 会被解析成「Baubles 或 Expanded」，
+     * 语义完全不是我们要的。
+     *
+     * <p>
+     * 两个候选 id 都试一下是因为 FML 的已加载列表里
+     * {@code Baubles} 和 {@code Baubles|Expanded} 都出现过，不确定哪个是权威 id。
+     *
+     * <p>
+     * 没装 Baubles 时只是不注册这个物品，模组本身照常工作 ——
+     * {@link ItemFlightCharm} 实现了 {@code IBauble}，不守卫的话类加载就会炸。
+     */
+    private void registerFlightCharm() {
+        if (!Config.enableFlightCharm) return;
+
+        if (!Loader.isModLoaded("Baubles|Expanded") && !Loader.isModLoaded("Baubles")) {
+            FutaGtnhMod.LOG.info("没有检测到 Baubles，跳过飞行护符的注册");
+            return;
+        }
+
+        flightCharm = new ItemFlightCharm();
+        GameRegistry.registerItem(flightCharm, ItemFlightCharm.NAME);
+        FutaGtnhMod.flightCharm = flightCharm;
+        FutaGtnhMod.LOG.info("已注册飞行护符（Baubles 已加载）");
+    }
+
+    /**
      * 共享终端的合成配方。
      *
      * <p>
@@ -91,6 +129,27 @@ public class CommonProxy {
             new ShapedOreRecipe(
                 new ItemStack(blockSharedTerminal, 1),
                 new Object[] { "GEG", "ECE", "GEG", 'G', "blockGlass", 'E', "enderpearl", 'C', "chestWood" }));
+
+        // 飞行护符：羽毛 + 金锭 + 钻石。全部走矿物词典，装了别的模组也成立
+        if (flightCharm != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(flightCharm, 1),
+                    new Object[] { "FGF", "GDG", "FGF", 'F', "feather", 'G', "ingotGold", 'D', "gemDiamond" }));
+        }
+    }
+
+    /**
+     * 打开飞行护符的调整界面。只有 {@link ClientProxy} 覆写了它。
+     *
+     * <p>
+     * 做成代理方法而不是让 {@code ItemFlightCharm} 直接 new 客户端界面类：
+     * 那个物品是公共类，引用了 {@code net.minecraft.client.*} 的话，
+     * 服务端就得依赖 JVM 的惰性符号解析才不会炸。走代理可以把
+     * 「只有客户端才有的实现」老老实实关在 ClientProxy 里。
+     */
+    public void openFlightCharmGui(ItemStack charm) {
+        // 服务端不做任何事
     }
 
     // ==================================================================

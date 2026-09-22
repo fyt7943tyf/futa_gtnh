@@ -28,6 +28,16 @@ dependencies {
     // GTNH 公共库（工具类、注册辅助、Mixin 支持）
     compileOnly("com.github.GTNewHorizons:GTNHLib:0.11.51:dev")
 
+    // ---- Baubles-Expanded ----
+    // 饰品系统。飞行护符实现它的 IBauble 接口。
+    //
+    // 注意它的 modid 是 "Baubles|Expanded"（真的带一个竖线），而竖线正是 FML
+    // 依赖串里的「或」分隔符 —— 所以 @Mod 的 dependencies 里<b>不能</b>写
+    // required-after:Baubles|Expanded，那会被解析成「Baubles 或 Expanded」。
+    // 改为在代码里用 Loader.isModLoaded 守卫注册。
+    compileOnly("com.github.GTNewHorizons:Baubles-Expanded:2.2.23-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Baubles-Expanded:2.2.23-GTNH:dev")
+
     // ---- runClient / runServer 里真正要加载的模组 ----
     //
     // ★ 这几行是必需的，不是可选的。

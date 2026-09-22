@@ -55,6 +55,27 @@ public class Config {
     public static boolean displayItemBecomesFluid = true;
 
     // ------------------------------------------------------------------
+    // 飞行护符
+    // ------------------------------------------------------------------
+
+    /** 是否注册飞行护符。需要装了 Baubles，没装的话这项无效。 */
+    public static boolean enableFlightCharm = true;
+
+    /**
+     * 飞行护符能把飞行速度提到原版的多少倍。
+     *
+     * <p>
+     * 上限<b>由服务端说了算</b>：客户端界面按自己配置里的值画按钮，
+     * 但发上来的倍率会在服务端再夹一次。所以把这个值调小之后，
+     * 就算客户端还显示着 5x，实际写进物品的也会被压到上限。
+     *
+     * <p>
+     * 原版飞行速度是 0.05，5 倍就是 0.25 —— 已经相当快了，
+     * 再往上容易跑赢区块加载。
+     */
+    public static double flightCharmMaxMultiplier = 5.0D;
+
+    // ------------------------------------------------------------------
     // 合成
     // ------------------------------------------------------------------
 
@@ -105,6 +126,20 @@ public class Config {
 
         enableRecipe = configuration
             .getBoolean("enableRecipe", Configuration.CATEGORY_GENERAL, enableRecipe, "是否注册共享终端的合成配方。");
+
+        enableFlightCharm = configuration.getBoolean(
+            "enableFlightCharm",
+            Configuration.CATEGORY_GENERAL,
+            enableFlightCharm,
+            "是否注册飞行护符（需要装了 Baubles；没装的话这一项无效）。");
+
+        flightCharmMaxMultiplier = configuration.getFloat(
+            "flightCharmMaxMultiplier",
+            Configuration.CATEGORY_GENERAL,
+            (float) flightCharmMaxMultiplier,
+            1.0F,
+            50.0F,
+            "飞行护符的速度倍率上限（原版飞行速度的倍数）。实际上限由服务端决定。");
 
         if (configuration.hasChanged()) {
             configuration.save();

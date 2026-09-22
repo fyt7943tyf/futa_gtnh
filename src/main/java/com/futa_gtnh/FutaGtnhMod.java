@@ -4,6 +4,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.futa_gtnh.block.BlockSharedTerminal;
+import com.futa_gtnh.item.ItemFlightCharm;
 import com.futa_gtnh.shared.SharedStorageManager;
 
 import cpw.mods.fml.common.Mod;
@@ -58,6 +59,9 @@ public class FutaGtnhMod {
 
     /** 共享终端方块。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockSharedTerminal blockSharedTerminal;
+
+    /** 飞行护符。没装 Baubles 时为 null。 */
+    public static ItemFlightCharm flightCharm;
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
