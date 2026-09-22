@@ -74,6 +74,11 @@ public class GuiLocatorWand extends GuiScreen {
     /** 当前页第一个结果所在的行。 */
     private int scrollRow;
     private boolean viewDirty = true;
+    /** 建索引期间隔多少次 tick 重新过滤一遍（见 {@link #updateScreen}）。 */
+    private int buildRefreshTimer;
+
+    /** 建索引时多久重新过滤一次列表，单位是 tick。 */
+    private static final int BUILD_REFRESH_INTERVAL = 10;
 
     @Override
     public boolean doesGuiPauseGame() {
@@ -141,8 +146,13 @@ public class GuiLocatorWand extends GuiScreen {
 
         boolean wasBuilding = BlockIndex.isBuilding();
         BlockIndex.tick();
-        // 索引还在长的时候每 tick 都要重新过滤，否则列表会冻结在打开界面那一瞬间的快照
-        if (wasBuilding) {
+        // 索引还在长的时候要定期重新过滤，否则列表会冻结在打开界面那一瞬间的快照。
+        //
+        // 但<b>不能每 tick 都过滤</b>：过滤是拿查询串扫一遍全表，而 GTNH 的方块条目
+        // 有好几万条，建索引的后期每 tick 扫一遍就是十几毫秒 —— 正好在玩家盯着
+        // 进度条的时候把帧率拖垮。一秒刷 6 次足够了，进度条又不是仪表盘。
+        if (wasBuilding && ++buildRefreshTimer >= BUILD_REFRESH_INTERVAL) {
+            buildRefreshTimer = 0;
             viewDirty = true;
         }
 
