@@ -127,10 +127,10 @@ public final class BlockIndex {
 
     private static String buildSearchText(ItemStack stack) {
         StringBuilder builder = new StringBuilder();
+        String displayName = null;
         try {
-            builder.append(
-                stack.getDisplayName()
-                    .toLowerCase(Locale.ROOT));
+            displayName = stack.getDisplayName();
+            builder.append(displayName.toLowerCase(Locale.ROOT));
         } catch (Throwable ignored) {
             // 个别物品取显示名会抛异常，跳过名字但保留注册名
         }
@@ -141,6 +141,9 @@ public final class BlockIndex {
                     registryName.toString()
                         .toLowerCase(Locale.ROOT));
         }
+        // 拼音（全拼 + 首字母）。1.7.10 的输入层没有输入法支持，
+        // 不挂上这个的话中文名的方块就只能靠注册名去搜了。
+        builder.append(Pinyin.searchSuffix(displayName));
         return builder.toString();
     }
 

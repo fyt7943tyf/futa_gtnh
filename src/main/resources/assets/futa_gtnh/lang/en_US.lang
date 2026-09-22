@@ -33,7 +33,7 @@ futa_gtnh.gui.auto.tip.on=ON: picked-up items go straight into the shared storag
 futa_gtnh.gui.auto.tip.off=OFF: picked-up items go into your own inventory as usual
 futa_gtnh.gui.auto.tip.persist=Personal setting, saved with your player data (survives death)
 
-futa_gtnh.gui.search.hint=Search ( @mod  *ore  #tooltip )
+futa_gtnh.gui.search.hint=Search ( pinyin  @mod  *ore  #tooltip )
 
 futa_gtnh.gui.page=Page %s/%s
 futa_gtnh.gui.types.item=%s items
@@ -58,7 +58,7 @@ item.futa_gtnh.locator_wand.tip.gui=Right-click: open the selection screen
 item.futa_gtnh.locator_wand.tip.clear=Sneak + right-click: stop tracking
 
 futa_gtnh.gui.locator.title=Locator Wand - choose a block to find
-futa_gtnh.gui.locator.search.hint=Search blocks (space = AND, @ = filter by mod)
+futa_gtnh.gui.locator.search.hint=Search blocks (pinyin or Chinese, space = AND, @ = mod filter)
 futa_gtnh.gui.locator.indexing=Building block index... %s%%
 futa_gtnh.gui.locator.empty=No matching blocks
 futa_gtnh.gui.locator.count=%s / %s blocks

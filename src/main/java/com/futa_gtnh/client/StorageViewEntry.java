@@ -50,7 +50,11 @@ public final class StorageViewEntry {
         this.modId = modId == null ? "" : modId;
         this.displayName = displayName == null ? "" : displayName;
         this.registryName = registryName == null ? "" : registryName;
-        this.searchName = this.displayName.toLowerCase(Locale.ROOT);
+        // 搜索文本 = 小写显示名 + 拼音（全拼与首字母）。
+        // 加拼音是因为 1.7.10 的输入层没有输入法支持，玩家没法把中文敲进搜索框；
+        // 挂上拼音之后「铁锭」敲 tieding 或 td 都能搜到。
+        // 只在这里算一次，之后每次敲键都直接复用。
+        this.searchName = this.displayName.toLowerCase(Locale.ROOT) + Pinyin.searchSuffix(this.displayName);
     }
 
     public static StorageViewEntry ofItem(ItemKey key, long amount) {

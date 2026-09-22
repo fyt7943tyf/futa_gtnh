@@ -459,6 +459,28 @@ public class GuiSharedTerminal extends GuiContainer {
         super.keyTyped(typedChar, keyCode);
     }
 
+    /**
+     * 把「只有字符、没有按键」的事件也转给 {@link #keyTyped}。
+     *
+     * <p>
+     * 1.7.10 的 {@code GuiScreen#handleKeyboardInput()} 只在
+     * {@code Keyboard.getEventKeyState()} 为真时才把字符转给 {@code keyTyped}，
+     * keyState 为假的事件会被直接丢掉。而输入法以及各种「往输入框里塞文字」的
+     * 辅助层送来的正是这种事件 —— 汉字就是这么没的。这里补一刀：只补
+     * {@code > 255} 的字符（汉字等非 Latin-1），普通按键仍旧原样交给原版处理，
+     * 不会重复插入。
+     */
+    @Override
+    public void handleKeyboardInput() {
+        if (!Keyboard.getEventKeyState()) {
+            char injected = Keyboard.getEventCharacter();
+            if (injected > 255) {
+                this.keyTyped(injected, 0);
+            }
+        }
+        super.handleKeyboardInput();
+    }
+
     @Override
     protected void actionPerformed(GuiButton button) {
         switch (button.id) {

@@ -29,7 +29,7 @@ futa_gtnh.gui.auto.tip.on=开：捡到的东西直接进共享背包，不留在
 futa_gtnh.gui.auto.tip.off=关：捡到的东西照常进你的背包
 futa_gtnh.gui.auto.tip.persist=这个开关是你个人的，会跟着存档保留（死亡也不重置）
 
-futa_gtnh.gui.search.hint=搜索（ @模组  *矿辞  #tooltip ）
+futa_gtnh.gui.search.hint=搜索（ 拼音  @模组  *矿辞  #tooltip ）
 
 futa_gtnh.gui.page=第 %s/%s 页
 futa_gtnh.gui.types.item=%s 种物品
@@ -54,7 +54,7 @@ item.futa_gtnh.locator_wand.tip.gui=右键：打开选择界面
 item.futa_gtnh.locator_wand.tip.clear=潜行 + 右键：取消当前追踪
 
 futa_gtnh.gui.locator.title=寻物魔杖 —— 选择要寻找的方块
-futa_gtnh.gui.locator.search.hint=搜索方块（空格分隔多个词，@ 按模组过滤）
+futa_gtnh.gui.locator.search.hint=搜索方块（拼音 或 中文，空格分词，@ 按模组）
 futa_gtnh.gui.locator.indexing=正在建立方块索引… %s%%
 futa_gtnh.gui.locator.empty=没有匹配的方块
 futa_gtnh.gui.locator.count=%s / %s 个方块
