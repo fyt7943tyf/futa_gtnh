@@ -3,6 +3,7 @@ package com.futa_gtnh.network;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.ItemStack;
 
+import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.item.ItemLocatorWand;
 import com.futa_gtnh.locator.LocatorManager;
 
@@ -16,13 +17,15 @@ import io.netty.buffer.ByteBuf;
  * 客户端 -&gt; 服务端：寻物魔杖的操作。
  *
  * <p>
- * 三个动作合成一个包，靠 {@link #action} 区分。三项校验，都是「不信客户端」那条原则：
+ * 四个动作合成一个包，靠 {@link #action} 区分。几条校验，都是「不信客户端」那条原则：
  *
  * <ul>
  * <li>玩家必须<b>手持寻物魔杖</b> —— 否则发这个包没有任何意义，
  * 直接丢掉，免得有人拿它当免费的区块扫描器刷。</li>
  * <li>{@link #START} 的目标方块由客户端传物品栈，但<b>服务端自己解析</b>成
  * Block + 元数据，不信任客户端给的方块 id。</li>
+ * <li>{@link #START_VEIN} 只传矿脉的<b>名字</b>，服务端自己去 GT 的目录里查。
+ * 客户端连「这条脉是什么材料」都说不上话，更别说伪造一条不存在的脉。</li>
  * <li>{@link #TELEPORT} 用的是服务端<b>自己记下的</b>上次结果，
  * 客户端连坐标都传不了 —— 所以伪造包最多只能传送到自己刚扫出来的地方。</li>
  * </ul>
@@ -32,9 +35,11 @@ public class PacketLocatorAction implements IMessage {
     public static final byte START = 0;
     public static final byte TELEPORT = 1;
     public static final byte CANCEL = 2;
+    public static final byte START_VEIN = 3;
 
     private byte action;
     private ItemStack target;
+    private String veinKey;
 
     public PacketLocatorAction() {}
 
@@ -42,9 +47,17 @@ public class PacketLocatorAction implements IMessage {
         this.action = action;
     }
 
+    /** 搜一个具体的方块。 */
     public static PacketLocatorAction start(ItemStack target) {
         PacketLocatorAction packet = new PacketLocatorAction(START);
         packet.target = target;
+        return packet;
+    }
+
+    /** 搜一条矿脉。 */
+    public static PacketLocatorAction startVein(String veinKey) {
+        PacketLocatorAction packet = new PacketLocatorAction(START_VEIN);
+        packet.veinKey = veinKey;
         return packet;
     }
 
@@ -52,6 +65,7 @@ public class PacketLocatorAction implements IMessage {
     public void fromBytes(ByteBuf buf) {
         action = buf.readByte();
         target = buf.readBoolean() ? ByteBufUtils.readItemStack(buf) : null;
+        veinKey = buf.readBoolean() ? ByteBufUtils.readUTF8String(buf) : null;
     }
 
     @Override
@@ -60,6 +74,10 @@ public class PacketLocatorAction implements IMessage {
         buf.writeBoolean(target != null);
         if (target != null) {
             ByteBufUtils.writeItemStack(buf, target);
+        }
+        buf.writeBoolean(veinKey != null);
+        if (veinKey != null) {
+            ByteBufUtils.writeUTF8String(buf, veinKey);
         }
     }
 
@@ -78,6 +96,10 @@ public class PacketLocatorAction implements IMessage {
                 case START:
                     if (message.target == null) return null;
                     LocatorManager.start(player, message.target);
+                    break;
+                case START_VEIN:
+                    if (message.veinKey == null) return null;
+                    LocatorManager.startVein(player, message.veinKey);
                     break;
                 case TELEPORT:
                     handleTeleport(player);
@@ -100,11 +122,11 @@ public class PacketLocatorAction implements IMessage {
                     LocatorManager.cancel(player);
                     break;
                 case NO_SAFE_SPOT:
-                    com.futa_gtnh.FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.no_safe_spot");
+                    FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.no_safe_spot");
                     break;
                 case NO_RESULT:
                 default:
-                    com.futa_gtnh.FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.no_result");
+                    FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.no_result");
                     break;
             }
         }

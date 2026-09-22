@@ -101,6 +101,23 @@ public class FutaGtnhMod {
         SharedStorageManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
     }
 
+    /**
+     * 所有模组都加载完之后，预热一次矿脉目录。
+     *
+     * <p>
+     * 放在这里而不是 preInit：GT 是把自己的矿脉列表在 postload 阶段填进
+     * {@code WorldgenGTOreLayer.sList} 的，早一步读会读到空表。
+     * 本模组声明了 {@code required-after:gregtech}，所以这个钩子一定跑在 GT 之后。
+     *
+     * <p>
+     * 就算时机还是不对也不会出事：{@code OreVeinCatalog} 对空表会自己重试
+     * （见那里的说明）。这里调一下主要是为了在日志里留下一行可以核对的数字。
+     */
+    @Mod.EventHandler
+    public void loadComplete(cpw.mods.fml.common.event.FMLLoadCompleteEvent event) {
+        com.futa_gtnh.locator.OreVeinCatalog.isAvailable();
+    }
+
     /** 服务端停止前落盘。此时各维度还没被卸载，写文件是安全的。 */
     @Mod.EventHandler
     public void serverStopping(FMLServerStoppingEvent event) {

@@ -16,6 +16,7 @@ import net.minecraft.util.StatCollector;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 
+import com.futa_gtnh.locator.OreVeinCatalog;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketLocatorAction;
 import com.futa_gtnh.network.PacketLocatorResult;
@@ -24,13 +25,22 @@ import com.futa_gtnh.network.PacketLocatorResult;
  * 寻物魔杖的选择界面。
  *
  * <p>
- * 故意做成纯客户端 {@code GuiScreen} 而不是 {@code GuiContainer}：
- * 这里没有任何「槽位」—— 选中的方块只是一个名字，不是要拿走的物品。
- * 用容器的话反而要为一个根本不存在的东西造一堆空槽位。
+ * 两个页签：
+ *
+ * <ul>
+ * <li><b>方块</b>：所有方块的网格，选一个就找最近的那一种方块。</li>
+ * <li><b>矿脉</b>：GT 的矿脉类型列表，选一条就找最近的<b>那条矿脉</b>。</li>
+ * </ul>
  *
  * <p>
- * 界面里的一切都是<b>请求</b>而非事实：点一个方块只是发个 START 包出去，
- * 「最近的在哪儿」永远由服务端回答。进度条画的也是服务端推回来的进度。
+ * 矿脉和方块的区别不只是「粒度」：一条矿脉由四种材料铺成，而且同一条矿脉
+ * 在不同的石头里是<b>不同的方块</b>（GTNH 里石头、花岗岩、深海石头各一个）。
+ * 所以按方块找永远只能找到其中一个石种的那份，按矿脉找才能「不管它长在哪种
+ * 石头里，都是同一种矿」。细节见 {@code locator.LocatorScan}。
+ *
+ * <p>
+ * 故意做成纯客户端 {@code GuiScreen} 而不是 {@code GuiContainer}：
+ * 这里没有任何「槽位」—— 选中的东西只是一个名字，不是要拿走的物品。
  *
  * <p>
  * 关闭界面<b>不会</b>取消追踪 —— 玩家正是要关掉界面去看那道光束的。
@@ -41,9 +51,10 @@ public class GuiLocatorWand extends GuiScreen {
     // ---- 布局 ----
     private static final int GUI_WIDTH = 268;
     private static final int GUI_HEIGHT = 190;
-    private static final int SEARCH_Y = 18;
+    private static final int TITLE_Y = 4;
+    private static final int SEARCH_Y = 20;
     private static final int GRID_X = 6;
-    private static final int GRID_Y = 36;
+    private static final int GRID_Y = 40;
     private static final int COLS = 9;
     private static final int ROWS = 7;
     private static final int CELL = 18;
@@ -55,22 +66,38 @@ public class GuiLocatorWand extends GuiScreen {
 
     private static final int BTN_TELEPORT = 0;
     private static final int BTN_STOP = 1;
+    private static final int BTN_TAB_BLOCKS = 2;
+    private static final int BTN_TAB_VEINS = 3;
+
+    private static final int TAB_BLOCKS = 0;
+    private static final int TAB_VEINS = 1;
 
     private static final int COLOR_PANEL = 0xC0101010;
     private static final int COLOR_SLOT = 0x40FFFFFF;
     private static final int COLOR_SLOT_HOVER = 0x80FFFFFF;
     private static final int COLOR_BORDER = 0xFF808080;
+    private static final int COLOR_SELECTED = 0xFF55FF55;
 
     private static final RenderItem ITEM_RENDER = RenderItem.getInstance();
 
-    private final List<ItemStack> results = new ArrayList<>();
+    /** 方块页签的过滤结果，就是 {@link BlockIndex} 里那一份。 */
+    private final List<ItemStack> blockResults = new ArrayList<>();
+    /** 矿脉页签的全部候选（已按当前维度过滤）。 */
+    private final List<OreVeinCatalog.Entry> allVeins = new ArrayList<>();
+    /** 矿脉页签的过滤结果。 */
+    private final List<OreVeinCatalog.Entry> veinResults = new ArrayList<>();
+    /** 与 {@link #allVeins} 一一对应的搜索文本（标题 + 材料 + 拼音）。 */
+    private final List<String> veinSearch = new ArrayList<>();
 
     private int guiLeft;
     private int guiTop;
     private GuiTextField searchField;
     private GuiButton teleportButton;
     private GuiButton stopButton;
+    private GuiButton blocksTab;
+    private GuiButton veinsTab;
 
+    private int tab = TAB_BLOCKS;
     /** 当前页第一个结果所在的行。 */
     private int scrollRow;
     private boolean viewDirty = true;
@@ -110,6 +137,28 @@ public class GuiLocatorWand extends GuiScreen {
         searchField.setFocused(true);
 
         buttonList.clear();
+
+        // 页签按钮放在标题那一行的右端
+        blocksTab = new GuiButton(
+            BTN_TAB_BLOCKS,
+            guiLeft + GUI_WIDTH - 6 - 100,
+            guiTop + TITLE_Y,
+            48,
+            16,
+            tr("futa_gtnh.gui.locator.tab.blocks"));
+        veinsTab = new GuiButton(
+            BTN_TAB_VEINS,
+            guiLeft + GUI_WIDTH - 6 - 50,
+            guiTop + TITLE_Y,
+            50,
+            16,
+            tr("futa_gtnh.gui.locator.tab.veins"));
+        buttonList.add(blocksTab);
+        buttonList.add(veinsTab);
+        // 拿不到 GT 的矿脉数据时干脆不显示这个页签，免得点进去一片空白
+        veinsTab.enabled = OreVeinCatalog.isAvailable();
+        if (!veinsTab.enabled) tab = TAB_BLOCKS;
+
         teleportButton = new GuiButton(
             BTN_TELEPORT,
             guiLeft + PANEL_X,
@@ -127,9 +176,32 @@ public class GuiLocatorWand extends GuiScreen {
         buttonList.add(teleportButton);
         buttonList.add(stopButton);
 
-        // 第一次打开界面时才真正开始索引；进度会显示在网格下面
+        loadVeins();
         BlockIndex.ensureStarted();
         viewDirty = true;
+    }
+
+    /**
+     * 读一次矿脉列表。
+     *
+     * <p>
+     * 和方块那几万条不一样，矿脉只有一百来条，不需要分帧建索引 ——
+     * 一次读完就好。按当前维度过滤掉不可能生成的，省得玩家白选。
+     */
+    private void loadVeins() {
+        allVeins.clear();
+        veinSearch.clear();
+        veinResults.clear();
+        if (!OreVeinCatalog.isAvailable()) return;
+
+        List<OreVeinCatalog.Entry> candidates = OreVeinCatalog.forWorld(mc == null ? null : mc.theWorld);
+        for (OreVeinCatalog.Entry entry : candidates) {
+            allVeins.add(entry);
+            // 搜索文本里带上拼音：矿脉名也是中文，而 1.7.10 打不出中文
+            veinSearch.add(
+                (entry.getTitle() + ' ' + entry.getMaterials()).toLowerCase(Locale.ROOT)
+                    + Pinyin.searchSuffix(entry.getTitle()));
+        }
     }
 
     // ==================================================================
@@ -144,16 +216,18 @@ public class GuiLocatorWand extends GuiScreen {
             searchField.updateCursorCounter();
         }
 
-        boolean wasBuilding = BlockIndex.isBuilding();
-        BlockIndex.tick();
-        // 索引还在长的时候要定期重新过滤，否则列表会冻结在打开界面那一瞬间的快照。
-        //
-        // 但<b>不能每 tick 都过滤</b>：过滤是拿查询串扫一遍全表，而 GTNH 的方块条目
-        // 有好几万条，建索引的后期每 tick 扫一遍就是十几毫秒 —— 正好在玩家盯着
-        // 进度条的时候把帧率拖垮。一秒刷 6 次足够了，进度条又不是仪表盘。
-        if (wasBuilding && ++buildRefreshTimer >= BUILD_REFRESH_INTERVAL) {
-            buildRefreshTimer = 0;
-            viewDirty = true;
+        if (tab == TAB_BLOCKS) {
+            boolean wasBuilding = BlockIndex.isBuilding();
+            BlockIndex.tick();
+            // 索引还在长的时候要定期重新过滤，否则列表会冻结在打开界面那一瞬间的快照。
+            //
+            // 但<b>不能每 tick 都过滤</b>：过滤是拿查询串扫一遍全表，而 GTNH 的方块条目
+            // 有好几万条，建索引的后期每 tick 扫一遍就是十几毫秒 —— 正好在玩家盯着
+            // 进度条的时候把帧率拖垮。一秒刷 6 次足够了，进度条又不是仪表盘。
+            if (wasBuilding && ++buildRefreshTimer >= BUILD_REFRESH_INTERVAL) {
+                buildRefreshTimer = 0;
+                viewDirty = true;
+            }
         }
 
         if (viewDirty) {
@@ -161,12 +235,51 @@ public class GuiLocatorWand extends GuiScreen {
             rebuildResults();
         }
 
+        updateTabLabels();
         refreshButtons();
     }
 
     private void rebuildResults() {
-        BlockIndex.filter(searchField == null ? "" : searchField.getText(), results);
+        String query = searchField == null ? "" : searchField.getText();
+        if (tab == TAB_BLOCKS) {
+            BlockIndex.filter(query, blockResults);
+        } else {
+            filterVeins(query);
+        }
         scrollRow = 0;
+    }
+
+    private void filterVeins(String query) {
+        veinResults.clear();
+        if (query == null || query.trim()
+            .isEmpty()) {
+            veinResults.addAll(allVeins);
+            return;
+        }
+
+        String[] words = query.trim()
+            .toLowerCase(Locale.ROOT)
+            .split("\\s+");
+        for (int i = 0; i < allVeins.size(); i++) {
+            String haystack = veinSearch.get(i);
+            boolean matches = true;
+            for (String word : words) {
+                String needle = word.startsWith("@") ? word.substring(1) : word;
+                if (needle.isEmpty()) continue;
+                if (!haystack.contains(needle)) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) veinResults.add(allVeins.get(i));
+        }
+    }
+
+    /** 当前页签选中的那个按钮要显示成「按下」的样子。 */
+    private void updateTabLabels() {
+        if (blocksTab == null) return;
+        blocksTab.enabled = tab != TAB_BLOCKS;
+        veinsTab.enabled = tab != TAB_VEINS && OreVeinCatalog.isAvailable();
     }
 
     private void refreshButtons() {
@@ -189,7 +302,7 @@ public class GuiLocatorWand extends GuiScreen {
         drawBorder(guiLeft, guiTop, GUI_WIDTH, GUI_HEIGHT);
 
         fontRendererObj
-            .drawStringWithShadow(tr("futa_gtnh.gui.locator.title"), guiLeft + GRID_X + 3, guiTop + 6, 0xFFFFFF);
+            .drawStringWithShadow(tr("futa_gtnh.gui.locator.title"), guiLeft + GRID_X + 3, guiTop + 8, 0xFFFFFF);
 
         drawSearchBox();
         drawGrid(mouseX, mouseY);
@@ -202,9 +315,9 @@ public class GuiLocatorWand extends GuiScreen {
             searchField.drawTextBox();
         }
 
-        ItemStack hovered = itemAt(mouseX, mouseY);
-        if (hovered != null) {
-            renderToolTip(hovered, mouseX, mouseY);
+        List<String> tooltip = tooltipAt(mouseX, mouseY);
+        if (tooltip != null) {
+            drawHoveringText(tooltip, mouseX, mouseY, fontRendererObj);
         }
     }
 
@@ -231,16 +344,16 @@ public class GuiLocatorWand extends GuiScreen {
         drawRect(guiLeft + GRID_X, guiTop + GRID_Y, guiLeft + GRID_X + GRID_W, guiTop + GRID_Y + GRID_H, 0xFF000000);
         drawBorder(guiLeft + GRID_X, guiTop + GRID_Y, GRID_W, GRID_H);
 
-        int visible = COLS * ROWS;
+        int count = resultCount();
 
         // 物品渲染必须开 GUI 光照，否则方块会是一片黑
         RenderHelper.enableGUIStandardItemLighting();
         float previousZ = ITEM_RENDER.zLevel;
         ITEM_RENDER.zLevel = 100.0F;
 
-        for (int slot = 0; slot < visible; slot++) {
-            int itemIndex = scrollRow * COLS + slot;
-            if (itemIndex >= results.size()) break;
+        for (int slot = 0; slot < COLS * ROWS; slot++) {
+            int index = scrollRow * COLS + slot;
+            if (index >= count) break;
 
             int cellX = guiLeft + GRID_X + (slot % COLS) * CELL;
             int cellY = guiTop + GRID_Y + (slot / COLS) * CELL;
@@ -253,12 +366,13 @@ public class GuiLocatorWand extends GuiScreen {
                 cellY + CELL - 1,
                 isHovered ? COLOR_SLOT_HOVER : COLOR_SLOT);
 
-            ItemStack stack = results.get(itemIndex);
             // 选中的那个描一圈绿边，不然滚走之后就找不着了
-            if (isSelected(stack)) {
-                drawBorder(cellX + 1, cellY + 1, CELL - 2, CELL - 2, 0xFF55FF55);
+            if (isSelectedAt(index)) {
+                drawBorder(cellX + 1, cellY + 1, CELL - 2, CELL - 2, COLOR_SELECTED);
             }
 
+            ItemStack stack = iconAt(index);
+            if (stack == null) continue;
             try {
                 ITEM_RENDER
                     .renderItemAndEffectIntoGUI(fontRendererObj, mc.getTextureManager(), stack, cellX + 1, cellY + 1);
@@ -270,14 +384,14 @@ public class GuiLocatorWand extends GuiScreen {
         ITEM_RENDER.zLevel = previousZ;
         RenderHelper.disableStandardItemLighting();
 
-        drawGridFooter();
+        drawGridFooter(count);
     }
 
     /** 网格下面的状态行 + 滚动条。 */
-    private void drawGridFooter() {
+    private void drawGridFooter(int count) {
         int bottom = guiTop + GRID_Y + GRID_H;
 
-        if (BlockIndex.isBuilding()) {
+        if (tab == TAB_BLOCKS && BlockIndex.isBuilding()) {
             fontRendererObj.drawStringWithShadow(
                 StatCollector.translateToLocalFormatted(
                     "futa_gtnh.gui.locator.indexing",
@@ -285,23 +399,22 @@ public class GuiLocatorWand extends GuiScreen {
                 guiLeft + GRID_X + 2,
                 bottom + 3,
                 0xFFAA00);
-        } else if (results.isEmpty()) {
+        } else if (count == 0) {
             fontRendererObj.drawStringWithShadow(
-                EnumChatFormatting.GRAY + tr("futa_gtnh.gui.locator.empty"),
+                EnumChatFormatting.GRAY
+                    + tr(tab == TAB_BLOCKS ? "futa_gtnh.gui.locator.empty" : "futa_gtnh.gui.locator.empty.veins"),
                 guiLeft + GRID_X + 2,
                 bottom + 3,
                 0xFFFFFF);
         } else {
-            fontRendererObj.drawStringWithShadow(
-                StatCollector
-                    .translateToLocalFormatted("futa_gtnh.gui.locator.count", results.size(), BlockIndex.size()),
-                guiLeft + GRID_X + 2,
-                bottom + 3,
-                0xA0A0A0);
+            String text = tab == TAB_BLOCKS
+                ? StatCollector.translateToLocalFormatted("futa_gtnh.gui.locator.count", count, BlockIndex.size())
+                : StatCollector.translateToLocalFormatted("futa_gtnh.gui.locator.count.veins", count, allVeins.size());
+            fontRendererObj.drawStringWithShadow(text, guiLeft + GRID_X + 2, bottom + 3, 0xA0A0A0);
         }
 
         // 滚动条：只有真的滚得动时才画
-        int totalRows = totalRows();
+        int totalRows = totalRows(count);
         if (totalRows > ROWS) {
             int trackX = guiLeft + GRID_X + GRID_W + 1;
             drawRect(trackX, guiTop + GRID_Y, trackX + 2, guiTop + GRID_Y + GRID_H, 0x40FFFFFF);
@@ -319,12 +432,13 @@ public class GuiLocatorWand extends GuiScreen {
 
         int x = guiLeft + PANEL_X + 4;
         int y = guiTop + GRID_Y + 4;
+        int hintY = guiTop + GRID_Y + GRID_H - 26;
 
-        ItemStack target = LocatorState.getTarget();
-        if (target == null) {
+        ItemStack icon = LocatorState.getIcon();
+        if (icon == null) {
             fontRendererObj
                 .drawStringWithShadow(EnumChatFormatting.GRAY + tr("futa_gtnh.gui.locator.pick"), x, y + 4, 0xFFFFFF);
-            drawHintLines(x, guiTop + GRID_Y + GRID_H - 26);
+            drawHintLines(x, hintY);
             return;
         }
 
@@ -332,7 +446,7 @@ public class GuiLocatorWand extends GuiScreen {
         float previousZ = ITEM_RENDER.zLevel;
         ITEM_RENDER.zLevel = 100.0F;
         try {
-            ITEM_RENDER.renderItemAndEffectIntoGUI(fontRendererObj, mc.getTextureManager(), target, x, y);
+            ITEM_RENDER.renderItemAndEffectIntoGUI(fontRendererObj, mc.getTextureManager(), icon, x, y);
         } catch (Throwable ignored) {
             // 同上：坏物品不该带崩界面
         }
@@ -340,13 +454,25 @@ public class GuiLocatorWand extends GuiScreen {
         RenderHelper.disableStandardItemLighting();
 
         fontRendererObj.drawStringWithShadow(
-            fontRendererObj.trimStringToWidth(target.getDisplayName(), PANEL_W - 28),
+            fontRendererObj.trimStringToWidth(LocatorState.getTitle(), PANEL_W - 28),
             x + 20,
             y + 4,
             0xFFFFFF);
 
-        drawStatusText(x, y + 22);
-        drawHintLines(x, guiTop + GRID_Y + GRID_H - 26);
+        int textY = y + 22;
+        // 矿脉模式多一行材料列表 —— 「铁矿脉」这种名字光看它自己说明不了什么
+        String subtitle = LocatorState.getSubtitle();
+        if (!subtitle.isEmpty()) {
+            fontRendererObj.drawStringWithShadow(
+                EnumChatFormatting.GRAY + fontRendererObj.trimStringToWidth(subtitle, PANEL_W - 8),
+                x,
+                textY,
+                0xFFFFFF);
+            textY += 12;
+        }
+
+        drawStatusText(x, textY);
+        drawHintLines(x, hintY);
     }
 
     private void drawStatusText(int x, int y) {
@@ -437,6 +563,62 @@ public class GuiLocatorWand extends GuiScreen {
     }
 
     // ==================================================================
+    // 结果访问（屏蔽两个页签的差异）
+    // ==================================================================
+
+    private int resultCount() {
+        return tab == TAB_BLOCKS ? blockResults.size() : veinResults.size();
+    }
+
+    private int totalRows(int count) {
+        return (count + COLS - 1) / COLS;
+    }
+
+    private ItemStack iconAt(int index) {
+        if (tab == TAB_BLOCKS) {
+            return index < blockResults.size() ? blockResults.get(index) : null;
+        }
+        if (index >= veinResults.size()) return null;
+        return OreVeinCatalog.iconOf(veinResults.get(index));
+    }
+
+    private boolean isSelectedAt(int index) {
+        if (tab == TAB_BLOCKS) {
+            return index < blockResults.size() && LocatorState.isBlockSelected(blockResults.get(index));
+        }
+        return index < veinResults.size() && LocatorState.isVeinSelected(
+            veinResults.get(index)
+                .getKey());
+    }
+
+    /** @return 鼠标指着的那个格子的提示文字；不在格子上或格子里没东西时返回 null */
+    private List<String> tooltipAt(int mouseX, int mouseY) {
+        int index = indexAt(mouseX, mouseY);
+        if (index < 0) return null;
+
+        if (tab == TAB_BLOCKS) {
+            if (index >= blockResults.size()) return null;
+            ItemStack stack = blockResults.get(index);
+            return stack == null ? null : stack.getTooltip(mc.thePlayer, mc.gameSettings.advancedItemTooltips);
+        }
+
+        if (index >= veinResults.size()) return null;
+        OreVeinCatalog.Entry entry = veinResults.get(index);
+
+        List<String> lines = new ArrayList<>();
+        lines.add(EnumChatFormatting.GOLD + entry.getTitle());
+        lines.add(EnumChatFormatting.GRAY + entry.getMaterials());
+        int[] range = OreVeinCatalog.heightRange(entry, mc.theWorld);
+        if (range != null) {
+            lines.add(
+                EnumChatFormatting.DARK_GRAY
+                    + StatCollector.translateToLocalFormatted("futa_gtnh.gui.locator.vein.range", range[0], range[1]));
+        }
+        lines.add(EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.locator.vein.tip"));
+        return lines;
+    }
+
+    // ==================================================================
     // 交互
     // ==================================================================
 
@@ -453,8 +635,8 @@ public class GuiLocatorWand extends GuiScreen {
         }
 
         int index = indexAt(mouseX, mouseY);
-        if (index >= 0 && index < results.size()) {
-            select(results.get(index));
+        if (index >= 0 && index < resultCount()) {
+            select(index);
             return;
         }
 
@@ -476,7 +658,7 @@ public class GuiLocatorWand extends GuiScreen {
         int mouseY = height - Mouse.getEventY() * height / mc.displayHeight - 1;
         if (!isInsideGrid(mouseX, mouseY)) return;
 
-        int maxScroll = Math.max(0, totalRows() - ROWS);
+        int maxScroll = Math.max(0, totalRows(resultCount()) - ROWS);
         scrollRow = Math.max(0, Math.min(maxScroll, scrollRow + (delta > 0 ? -1 : 1)));
     }
 
@@ -493,7 +675,7 @@ public class GuiLocatorWand extends GuiScreen {
             return;
         }
         if (keyCode == Keyboard.KEY_NEXT) {
-            scrollRow = Math.min(Math.max(0, totalRows() - ROWS), scrollRow + ROWS);
+            scrollRow = Math.min(Math.max(0, totalRows(resultCount()) - ROWS), scrollRow + ROWS);
             return;
         }
         super.keyTyped(typedChar, keyCode);
@@ -538,26 +720,42 @@ public class GuiLocatorWand extends GuiScreen {
                 NetworkHandler.INSTANCE.sendToServer(new PacketLocatorAction(PacketLocatorAction.CANCEL));
                 LocatorState.clear();
                 break;
+            case BTN_TAB_BLOCKS:
+            case BTN_TAB_VEINS:
+                switchTab(button.id == BTN_TAB_BLOCKS ? TAB_BLOCKS : TAB_VEINS);
+                break;
             default:
                 break;
         }
     }
 
-    private void select(ItemStack stack) {
-        if (stack == null) return;
-        // 先更新本地状态让界面立刻有反馈，真结果等服务端推回来
-        LocatorState.setTarget(stack);
-        NetworkHandler.INSTANCE.sendToServer(PacketLocatorAction.start(stack));
+    private void switchTab(int newTab) {
+        if (tab == newTab) return;
+        tab = newTab;
+        // 搜索词在两个页签里都保留，切过去照样能用
+        viewDirty = true;
+    }
+
+    private void select(int index) {
+        if (tab == TAB_BLOCKS) {
+            ItemStack stack = index < blockResults.size() ? blockResults.get(index) : null;
+            if (stack == null) return;
+            // 先更新本地状态让界面立刻有反馈，真结果等服务端推回来
+            LocatorState.setBlockTarget(stack);
+            NetworkHandler.INSTANCE.sendToServer(PacketLocatorAction.start(stack));
+        } else {
+            if (index >= veinResults.size()) return;
+            OreVeinCatalog.Entry entry = veinResults.get(index);
+            LocatorState
+                .setVeinTarget(entry.getKey(), entry.getTitle(), entry.getMaterials(), OreVeinCatalog.iconOf(entry));
+            NetworkHandler.INSTANCE.sendToServer(PacketLocatorAction.startVein(entry.getKey()));
+        }
         refreshButtons();
     }
 
     // ==================================================================
     // 工具
     // ==================================================================
-
-    private int totalRows() {
-        return (results.size() + COLS - 1) / COLS;
-    }
 
     private boolean isInsideGrid(int mouseX, int mouseY) {
         return mouseX >= guiLeft + GRID_X && mouseX < guiLeft + GRID_X + GRID_W
@@ -572,18 +770,8 @@ public class GuiLocatorWand extends GuiScreen {
         if (!isInsideGrid(mouseX, mouseY)) return -1;
         int col = (mouseX - guiLeft - GRID_X) / CELL;
         int row = (mouseY - guiTop - GRID_Y) / CELL;
-        return scrollRow * COLS + row * COLS + col;
-    }
-
-    private ItemStack itemAt(int mouseX, int mouseY) {
-        int index = indexAt(mouseX, mouseY);
-        return index >= 0 && index < results.size() ? results.get(index) : null;
-    }
-
-    private boolean isSelected(ItemStack stack) {
-        ItemStack target = LocatorState.getTarget();
-        if (target == null || stack == null) return false;
-        return target.getItem() == stack.getItem() && target.getItemDamage() == stack.getItemDamage();
+        int index = scrollRow * COLS + row * COLS + col;
+        return index < resultCount() ? index : -1;
     }
 
     private static String tr(String key) {

@@ -51,7 +51,7 @@ public final class LocatorManager {
     // ==================================================================
 
     /**
-     * 开始一次新的搜索。会先取消该玩家已有的任务和结果。
+     * 开始一次新的方块搜索。会先取消该玩家已有的任务和结果。
      *
      * @param target 客户端选中的方块，以物品形式传来（服务端自己解析成 Block + meta）
      */
@@ -60,16 +60,53 @@ public final class LocatorManager {
         JOBS.remove(id);
         RESULTS.remove(id);
 
-        LocatorScan scan = new LocatorScan(
-            player.worldObj,
+        submit(
+            player,
             id,
-            target,
-            MathHelper.floor_double(player.posX),
-            MathHelper.floor_double(player.posY),
-            MathHelper.floor_double(player.posZ));
+            new LocatorScan(
+                player.worldObj,
+                id,
+                target,
+                MathHelper.floor_double(player.posX),
+                MathHelper.floor_double(player.posY),
+                MathHelper.floor_double(player.posZ)));
+    }
 
+    /**
+     * 开始一次新的矿脉搜索。
+     *
+     * @param veinKey 矿脉在 GT 里的内部名（{@code WorldgenGTOreLayer#getName()}）。
+     *                <b>客户端只报名字</b>，具体是哪条矿脉由服务端自己去目录里查 ——
+     *                这样客户端就改不了「要找什么材料」这件事。
+     */
+    public static void startVein(EntityPlayerMP player, String veinKey) {
+        UUID id = player.getUniqueID();
+        JOBS.remove(id);
+        RESULTS.remove(id);
+
+        OreVeinCatalog.Entry vein = OreVeinCatalog.byKey(veinKey);
+        if (vein == null) {
+            // 客户端报了个服务端不认识的矿脉名（模组版本不一致，或者伪造的包）
+            send(player, PacketLocatorResult.notFound(0.0F));
+            return;
+        }
+
+        submit(
+            player,
+            id,
+            new LocatorScan(
+                player.worldObj,
+                id,
+                vein,
+                MathHelper.floor_double(player.posX),
+                MathHelper.floor_double(player.posY),
+                MathHelper.floor_double(player.posZ)));
+    }
+
+    private static void submit(EntityPlayerMP player, UUID id, LocatorScan scan) {
         if (!scan.isValid()) {
-            // 选中的东西不是方块（理论上界面只列方块，但客户端不可信）
+            // 选中的东西没法搜（不是方块，或者矿脉数据没了）。
+            // 理论上界面只列可搜的，但客户端不可信。
             send(player, PacketLocatorResult.notFound(0.0F));
             return;
         }

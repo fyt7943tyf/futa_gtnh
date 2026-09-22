@@ -15,6 +15,12 @@ import com.futa_gtnh.network.PacketLocatorResult;
  * 光束渲染和界面都从这里读。
  *
  * <p>
+ * 目标有两种：一个<b>方块</b>（{@link #setBlockTarget}）或者一条<b>矿脉</b>
+ * （{@link #setVeinTarget}）。两者的共同点是「界面要画一个图标、写一个标题」，
+ * 所以这里统一存图标 + 标题 + 副标题，另外把原始目标留着供界面判断
+ * 「这一格是不是当前选中的那个」。
+ *
+ * <p>
  * 光束<b>只在手持魔杖时才画</b>：不这么做的话，换到别的物品之后那道光还在天上飘，
  * 既碍眼又没意义。判断放在渲染器里做。
  */
@@ -25,13 +31,23 @@ public final class LocatorState {
     /** 比服务端的四个状态再多一个「什么都没选」。 */
     public static final byte STATE_NONE = -1;
 
-    private static ItemStack target;
+    /** 方块模式下的原始目标；矿脉模式下为 null。 */
+    private static ItemStack targetStack;
+    /** 矿脉模式下的内部名；方块模式下为 null。 */
+    private static String veinKey;
+
+    /** 界面显示用的图标、标题、副标题。两种模式共用。 */
+    private static ItemStack icon;
+    private static String title = "";
+    private static String subtitle = "";
+
     private static byte state = STATE_NONE;
     private static float progress;
     private static int posX;
     private static int posY;
     private static int posZ;
     private static double distance = -1.0D;
+
     /**
      * 结果是在哪个维度算出来的。
      *
@@ -45,8 +61,28 @@ public final class LocatorState {
     // 读写
     // ==================================================================
 
-    public static ItemStack getTarget() {
-        return target;
+    public static ItemStack getIcon() {
+        return icon;
+    }
+
+    public static String getTitle() {
+        return title;
+    }
+
+    /** 矿脉模式下是四个材料的列表；方块模式下是空串。 */
+    public static String getSubtitle() {
+        return subtitle;
+    }
+
+    /** @return 当前选的是不是这条矿脉 */
+    public static boolean isVeinSelected(String key) {
+        return veinKey != null && veinKey.equals(key);
+    }
+
+    /** @return 当前选的是不是这个方块 */
+    public static boolean isBlockSelected(ItemStack stack) {
+        if (targetStack == null || stack == null) return false;
+        return targetStack.getItem() == stack.getItem() && targetStack.getItemDamage() == stack.getItemDamage();
     }
 
     public static byte getState() {
@@ -78,9 +114,25 @@ public final class LocatorState {
         return resultDimension;
     }
 
-    /** 玩家选了新目标，等结果中。 */
-    public static void setTarget(ItemStack stack) {
-        target = stack;
+    /** 玩家选了一个方块，等结果中。 */
+    public static void setBlockTarget(ItemStack stack) {
+        targetStack = stack;
+        veinKey = null;
+        icon = stack;
+        title = stack == null ? "" : stack.getDisplayName();
+        subtitle = "";
+        state = PacketLocatorResult.STATE_RUNNING;
+        progress = 0.0F;
+        distance = -1.0D;
+    }
+
+    /** 玩家选了一条矿脉，等结果中。 */
+    public static void setVeinTarget(String key, String veinTitle, String materials, ItemStack veinIcon) {
+        targetStack = null;
+        veinKey = key;
+        icon = veinIcon;
+        title = veinTitle == null ? "" : veinTitle;
+        subtitle = materials == null ? "" : materials;
         state = PacketLocatorResult.STATE_RUNNING;
         progress = 0.0F;
         distance = -1.0D;
@@ -89,7 +141,7 @@ public final class LocatorState {
     /** 服务端回包。 */
     public static void applyResult(byte newState, float newProgress, int x, int y, int z, double newDistance) {
         // 界面已经清掉目标了（比如玩家关了界面又收到迟到的回包），忽略
-        if (newState != PacketLocatorResult.STATE_CANCELLED && target == null) {
+        if (newState != PacketLocatorResult.STATE_CANCELLED && targetStack == null && veinKey == null) {
             return;
         }
 
@@ -110,7 +162,11 @@ public final class LocatorState {
     }
 
     public static void clear() {
-        target = null;
+        targetStack = null;
+        veinKey = null;
+        icon = null;
+        title = "";
+        subtitle = "";
         state = STATE_NONE;
         progress = 0.0F;
         distance = -1.0D;
