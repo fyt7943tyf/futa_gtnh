@@ -10,6 +10,7 @@ import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.IChunkProvider;
 
 import com.futa_gtnh.Config;
+import com.futa_gtnh.FutaGtnhMod;
 
 /**
  * 一次「找最近的某种方块」的扫描任务。
@@ -38,6 +39,26 @@ public final class LocatorScan {
     private final UUID playerId;
     private final Block block;
     private final int meta;
+
+    /**
+     * 目标是不是 GT 的矿石方块。
+     *
+     * <p>
+     * GT 把「自然生成 / 玩家放置」编码成元数据里的一个标志位，所以对矿石不能做
+     * 精确元数据比较，得比「矿的身份」。见 {@link #metaMatches(int)} 和
+     * {@link GtOreSupport} 的类注释。
+     */
+    private final boolean gtOre;
+
+    /**
+     * GT 矿石比较是否可用。{@code null} 表示还没探测过。
+     *
+     * <p>
+     * {@link GtOreSupport} 引用着 {@code GTBlockOre}，而那个类只在较新的 GT5U 里有。
+     * 探测失败就全局降级成精确匹配，并且只报一次日志 —— 每开一次搜索就刷一条
+     * 堆栈日志没有任何意义。
+     */
+    private static Boolean gtOreSupport;
 
     private final int centerX;
     private final int centerY;
@@ -83,6 +104,59 @@ public final class LocatorScan {
         // ItemStack 的 damage 不一定是方块元数据：ItemBlock 会做一次映射，
         // 标准做法就是过一遍 Item#getMetadata
         this.meta = item == null ? 0 : item.getMetadata(target.getItemDamage());
+        this.gtOre = detectGtOre(this.block);
+    }
+
+    /**
+     * 判断目标是不是 GT 矿石，顺带探测 GT 的矿石 API 在不在。
+     *
+     * @return 这个目标方块需不需要走「同一种矿」的比较
+     */
+    private static boolean detectGtOre(Block block) {
+        if (block == null) return false;
+
+        if (gtOreSupport == null) {
+            try {
+                // 只为把 GtOreSupport 这个类加载起来；类加载失败会在这里抛出来
+                GtOreSupport.ping();
+                gtOreSupport = Boolean.TRUE;
+            } catch (Throwable t) {
+                gtOreSupport = Boolean.FALSE;
+                FutaGtnhMod.LOG.warn("拿不到 GT 的矿石元数据 API，寻物魔杖将退回精确元数据匹配" + "（世界自然生成的矿石可能搜不到）", t);
+            }
+        }
+        if (!gtOreSupport) return false;
+
+        try {
+            return GtOreSupport.isOre(block);
+        } catch (Throwable t) {
+            gtOreSupport = Boolean.FALSE;
+            return false;
+        }
+    }
+
+    /**
+     * 世界里的这个元数据算不算命中目标。
+     *
+     * <p>
+     * 先试精确相等 —— 这条对绝大多数方块就是全部逻辑。
+     *
+     * <p>
+     * 对 GT 的矿石再补一条「同一种矿」的比较：GT 用元数据里的一个标志位区分
+     * 「世界自然生成」和「玩家放下」，而寻物魔杖能选到的那份（创造标签页）
+     * 标志位是「非自然」。只认精确相等的话，就会出现
+     * <b>自己放的矿找得到、世界生成的矿怎么都找不到</b>的现象。
+     */
+    private boolean metaMatches(int worldMeta) {
+        if (worldMeta == meta) return true;
+        if (!gtOre) return false;
+
+        try {
+            return GtOreSupport.sameVariant(block, meta, worldMeta);
+        } catch (Throwable t) {
+            gtOreSupport = Boolean.FALSE;
+            return false;
+        }
     }
 
     public UUID getPlayerId() {
@@ -202,7 +276,7 @@ public final class LocatorScan {
             int yEnd = Math.min(maxY, yCursor + Math.max(1, budget / 64));
             for (int y = yCursor; y < yEnd; y++) {
                 if (chunk.getBlock(lx, y, lz) != block) continue;
-                if (chunk.getBlockMetadata(lx, y, lz) != meta) continue;
+                if (!metaMatches(chunk.getBlockMetadata(lx, y, lz))) continue;
 
                 long dx = wx - centerX;
                 long dy = y - centerY;
