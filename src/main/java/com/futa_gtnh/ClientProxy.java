@@ -2,10 +2,16 @@ package com.futa_gtnh;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.item.ItemStack;
+import net.minecraftforge.common.MinecraftForge;
 
+import com.futa_gtnh.client.GuiLocatorWand;
 import com.futa_gtnh.client.GuiSwiftStep;
 import com.futa_gtnh.client.KeyHandler;
+import com.futa_gtnh.client.LocatorBeamRenderer;
+import com.futa_gtnh.client.LocatorState;
 import com.futa_gtnh.client.SwiftStepClientHandler;
+import com.futa_gtnh.network.NetworkHandler;
+import com.futa_gtnh.network.PacketLocatorAction;
 
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -22,6 +28,10 @@ public class ClientProxy extends CommonProxy {
         super.preInit(event);
         KeyHandler.register();
         SwiftStepClientHandler.register();
+
+        // 世界渲染事件在 MinecraftForge.EVENT_BUS 上，不在 FML 的那条总线上。
+        // 挂错了不会报错，只会永远收不到事件 —— 光渲染器会安静地什么都不画。
+        MinecraftForge.EVENT_BUS.register(new LocatorBeamRenderer());
     }
 
     @Override
@@ -45,5 +55,32 @@ public class ClientProxy extends CommonProxy {
     public void openSwiftStepGui(ItemStack charm) {
         Minecraft.getMinecraft()
             .displayGuiScreen(new GuiSwiftStep(charm));
+    }
+
+    /**
+     * 寻物魔杖的选择界面。
+     *
+     * <p>
+     * 覆盖 {@link CommonProxy#openLocatorGui}。这个界面没有服务端容器，
+     * 所以直接 {@code displayGuiScreen} 就行 —— 选中方块、传送、取消
+     * 三个动作各自发一个包，服务端再校验。
+     */
+    @Override
+    public void openLocatorGui() {
+        Minecraft.getMinecraft()
+            .displayGuiScreen(new GuiLocatorWand());
+    }
+
+    /**
+     * 清掉追踪：本地状态 + 通知服务端。
+     *
+     * <p>
+     * 两件事都必须由客户端发起 —— 光束是客户端画的，而「取消」这个包
+     * 服务端自己发给自己没有任何意义。这也正是这个方法要放在代理里的原因。
+     */
+    @Override
+    public void clearLocatorTracking() {
+        LocatorState.clear();
+        NetworkHandler.INSTANCE.sendToServer(new PacketLocatorAction(PacketLocatorAction.CANCEL));
     }
 }

@@ -1,7 +1,9 @@
 package com.futa_gtnh;
 
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.world.World;
 import net.minecraftforge.oredict.ShapedOreRecipe;
 
@@ -11,6 +13,7 @@ import com.futa_gtnh.command.CommandSharedStorage;
 import com.futa_gtnh.common.ForgeEventHandler;
 import com.futa_gtnh.common.GuiHandler;
 import com.futa_gtnh.common.ModEventHandler;
+import com.futa_gtnh.item.ItemLocatorWand;
 import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.shared.SharedStorageManager;
@@ -35,6 +38,9 @@ public class CommonProxy {
     /** 迅步。没装 Baubles 时为 null。 */
     public static ItemSwiftStep swiftStep;
 
+    /** 寻物魔杖。 */
+    public static ItemLocatorWand locatorWand;
+
     public void preInit(FMLPreInitializationEvent event) {
         // 读取配置文件（config/futa_gtnh.cfg）
         Config.synchronizeConfiguration(event.getSuggestedConfigurationFile());
@@ -46,6 +52,7 @@ public class CommonProxy {
 
         registerBlocks();
         registerSwiftStep();
+        registerLocatorWand();
         registerRecipes();
 
         NetworkRegistry.INSTANCE.registerGuiHandler(FutaGtnhMod.instance, new GuiHandler());
@@ -108,6 +115,21 @@ public class CommonProxy {
     }
 
     /**
+     * 注册寻物魔杖。
+     *
+     * <p>
+     * 这个物品没有任何前置依赖：扫描由服务端自己做，不需要任何别的模组的 API。
+     */
+    private void registerLocatorWand() {
+        if (!Config.enableLocatorWand) return;
+
+        locatorWand = new ItemLocatorWand();
+        GameRegistry.registerItem(locatorWand, ItemLocatorWand.NAME);
+        FutaGtnhMod.locatorWand = locatorWand;
+        FutaGtnhMod.LOG.info("已注册寻物魔杖");
+    }
+
+    /**
      * 共享终端的合成配方。
      *
      * <p>
@@ -137,6 +159,20 @@ public class CommonProxy {
                     new ItemStack(swiftStep, 1),
                     new Object[] { "FGF", "GDG", "FGF", 'F', "feather", 'G', "ingotGold", 'D', "gemDiamond" }));
         }
+
+        // 寻物魔杖：金锭 + 末影之眼 + 指南针。
+        // 「眼睛」对应找，「指南针」对应指向。
+        //
+        // 这里末影之眼和指南针<b>故意用原版物品而不是矿物词典</b>：
+        // ingotGold 有 GT 保证会注册，而 endereye / craftingCompass 这两个词典名
+        // 在 1.7.10 里没人保证 —— 写成词典名的话，名字一旦不存在，
+        // 配方会安安静静地变成「永远合不出来」，比直接引用原版物品难查得多。
+        if (locatorWand != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(locatorWand, 1),
+                    new Object[] { " G ", "ECE", " G ", 'G', "ingotGold", 'E', Items.ender_eye, 'C', Items.compass }));
+        }
     }
 
     /**
@@ -150,6 +186,48 @@ public class CommonProxy {
      */
     public void openSwiftStepGui(ItemStack charm) {
         // 服务端不做任何事
+    }
+
+    /**
+     * 打开寻物魔杖的选择界面。只有 {@link ClientProxy} 覆写了它。
+     *
+     * <p>
+     * 和 {@link #openSwiftStepGui} 同一个理由：这个界面是纯客户端的
+     * （没有 {@code Container}，一切操作都走显式网络包），
+     * 所以不需要服务端配合开容器，也就不需要 {@code IGuiHandler} 那一套。
+     */
+    public void openLocatorGui() {
+        // 服务端不做任何事
+    }
+
+    /**
+     * 清掉客户端的追踪状态（光束），并让服务端把扫描任务也停掉。
+     *
+     * <p>
+     * 同样只有 {@link ClientProxy} 覆写了它。做成代理方法还有一个更硬的理由：
+     * {@link ItemLocatorWand} 是<b>公共类</b>，服务端也要加载它。如果它直接引用
+     * {@code client.LocatorState}，而那个类又引用 {@code net.minecraft.client.Minecraft}，
+     * 就等于在专用服务端上埋了一颗 {@code NoClassDefFoundError} 的雷 ——
+     * 虽然那一行在 {@code world.isRemote} 里、按现在的 JVM 惰性解析实际不会执行，
+     * 但这种「靠不会执行来保证安全」的写法不值得赌。
+     */
+    public void clearLocatorTracking() {
+        // 服务端不做任何事
+    }
+
+    /**
+     * 给玩家发一条本地化的聊天提示。
+     *
+     * <p>
+     * 用 {@link ChatComponentTranslation} 而不是先翻译成字符串再发：
+     * 翻译是<b>在客户端做的</b>，服务端只发语言键。否则服务端会按自己的
+     * 语言设置把文字烤死，装了不同语言的客户端就只能看到服务端的语言。
+     *
+     * @param langKey 语言键，例如 {@code futa_gtnh.locator.msg.no_safe_spot}
+     */
+    public void notifyPlayer(EntityPlayer player, String langKey) {
+        if (player == null) return;
+        player.addChatMessage(new ChatComponentTranslation(langKey));
     }
 
     // ==================================================================

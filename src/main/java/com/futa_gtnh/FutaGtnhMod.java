@@ -63,6 +63,9 @@ public class FutaGtnhMod {
     /** 迅步。没装 Baubles 时为 null。 */
     public static ItemSwiftStep swiftStep;
 
+    /** 寻物魔杖。 */
+    public static com.futa_gtnh.item.ItemLocatorWand locatorWand;
+
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
         LOG.info("{} preInit (version {})", NAME, Tags.VERSION);

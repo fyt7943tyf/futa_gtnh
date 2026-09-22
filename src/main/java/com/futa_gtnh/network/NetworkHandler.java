@@ -30,11 +30,13 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketStorageDelta.Handler.class, PacketStorageDelta.class, 1, Side.CLIENT);
         INSTANCE.registerMessage(PacketTerminalFluid.Handler.class, PacketTerminalFluid.class, 4, Side.CLIENT);
         INSTANCE.registerMessage(PacketAutoStoreSync.Handler.class, PacketAutoStoreSync.class, 6, Side.CLIENT);
+        INSTANCE.registerMessage(PacketLocatorResult.Handler.class, PacketLocatorResult.class, 8, Side.CLIENT);
 
         // 客户端 -> 服务端
         INSTANCE.registerMessage(PacketStorageAction.Handler.class, PacketStorageAction.class, 2, Side.SERVER);
         INSTANCE.registerMessage(PacketOpenGui.Handler.class, PacketOpenGui.class, 3, Side.SERVER);
         INSTANCE.registerMessage(PacketAutoStore.Handler.class, PacketAutoStore.class, 5, Side.SERVER);
         INSTANCE.registerMessage(PacketSetSwiftStep.Handler.class, PacketSetSwiftStep.class, 7, Side.SERVER);
+        INSTANCE.registerMessage(PacketLocatorAction.Handler.class, PacketLocatorAction.class, 9, Side.SERVER);
     }
 }

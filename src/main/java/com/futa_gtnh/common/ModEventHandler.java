@@ -4,6 +4,7 @@ import net.minecraft.entity.player.EntityPlayerMP;
 
 import com.futa_gtnh.exchange.StorageActionHandler;
 import com.futa_gtnh.item.ItemSwiftStep;
+import com.futa_gtnh.locator.LocatorManager;
 import com.futa_gtnh.shared.SharedStorageManager;
 
 import cpw.mods.fml.common.FMLCommonHandler;
@@ -36,13 +37,19 @@ public class ModEventHandler {
     public void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         SharedStorageManager.onServerTick();
+        // 推进寻物扫描。没有任务时它第一件事就是返回，开销是一次 isEmpty()
+        LocatorManager.onServerTick();
     }
 
     /** 玩家下线时清掉他那份操作频率计数，避免 UUID 表越积越大。 */
     @SubscribeEvent
     public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.player instanceof EntityPlayerMP) {
-            StorageActionHandler.forget((EntityPlayerMP) event.player);
+            EntityPlayerMP player = (EntityPlayerMP) event.player;
+            StorageActionHandler.forget(player);
+            // 寻物任务和结果也一起清掉：任务里存着 World 引用，
+            // 玩家走了还留着的话，那个 World 就没法被回收了
+            LocatorManager.forget(player.getUniqueID());
         }
     }
 

@@ -47,3 +47,29 @@ futa_gtnh.gui.store.drain=倒空容器
 futa_gtnh.gui.status.remote=远程访问 —— 放一个共享终端方块才能选输出流体
 futa_gtnh.gui.status.output=终端输出：%s
 futa_gtnh.gui.status.output.none=未设置（对着流体按中键）
+
+# ---------------------------------------------------------------- 寻物魔杖
+item.futa_gtnh.locator_wand.name=寻物魔杖
+item.futa_gtnh.locator_wand.tip.gui=右键：打开选择界面
+item.futa_gtnh.locator_wand.tip.clear=潜行 + 右键：取消当前追踪
+
+futa_gtnh.gui.locator.title=寻物魔杖 —— 选择要寻找的方块
+futa_gtnh.gui.locator.search.hint=搜索方块（空格分隔多个词，@ 按模组过滤）
+futa_gtnh.gui.locator.indexing=正在建立方块索引… %s%%
+futa_gtnh.gui.locator.empty=没有匹配的方块
+futa_gtnh.gui.locator.count=%s / %s 个方块
+futa_gtnh.gui.locator.pick=从左边选一个方块
+futa_gtnh.gui.locator.state.running=搜索中…
+futa_gtnh.gui.locator.state.found=已找到
+futa_gtnh.gui.locator.state.notfound=附近没有找到
+futa_gtnh.gui.locator.distance=距离 %s 格
+futa_gtnh.gui.locator.beam=关掉界面就能看到光束
+futa_gtnh.gui.locator.radius=可以调大搜索半径
+futa_gtnh.gui.locator.wrongdim=结果在另一个维度
+futa_gtnh.gui.locator.hint1=左键方块 = 开始追踪
+futa_gtnh.gui.locator.hint2=滚轮翻页 / 关闭界面不取消追踪
+futa_gtnh.gui.locator.teleport=传送
+futa_gtnh.gui.locator.stop=停止
+
+futa_gtnh.locator.msg.no_safe_spot=目标附近找不到能站人的地方，传送已取消
+futa_gtnh.locator.msg.no_result=没有可用的结果，请重新搜索

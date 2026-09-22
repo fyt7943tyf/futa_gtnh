@@ -79,6 +79,45 @@ public class Config {
     public static double swiftStepMaxMultiplier = 20.0D;
 
     // ------------------------------------------------------------------
+    // 寻物魔杖
+    // ------------------------------------------------------------------
+
+    /** 是否注册寻物魔杖。 */
+    public static boolean enableLocatorWand = true;
+
+    /**
+     * 寻物魔杖一次搜索的半径（方块，以玩家为中心的正方体半边长）。
+     *
+     * <p>
+     * 扫描量按半径的<b>三次方</b>增长：半径 64 是约 170 万个方块位置，
+     * 128 就是 1350 万个。默认 128 配合下面的每 tick 预算大约是几百毫秒到一两秒，
+     * 玩家能接受；再往上加会让服务器在一次搜索里卡好几秒。
+     *
+     * <p>
+     * 这个值<b>只在服务端生效</b>，客户端配置里的数字不影响判定。
+     */
+    public static int locatorSearchRadius = 128;
+
+    /**
+     * 寻物扫描每 tick 最多检查多少个方块位置。
+     *
+     * <p>
+     * 这是「搜索要多久」和「服务器卡不卡」之间唯一的旋钮：
+     * 调大 = 结果出得快但每 tick 占用更多；调小 = 平滑但可能要等好几秒。
+     * 建议值 20000 ~ 200000。上限 2000000，再高单 tick 就会明显掉刻。
+     */
+    public static int locatorBlocksPerTick = 60000;
+
+    /**
+     * 一次搜索最多允许跑多少 tick，超时就放弃。
+     *
+     * <p>
+     * 兜底用：万一有人把半径调到很大、或者世界加载卡住，没有这个上限的话
+     * 一个搜索任务会一直挂在服务端 tick 里。默认 600 tick（30 秒）。
+     */
+    public static int locatorScanTimeoutTicks = 600;
+
+    // ------------------------------------------------------------------
     // 合成
     // ------------------------------------------------------------------
 
@@ -143,6 +182,36 @@ public class Config {
             1.0F,
             100.0F,
             "迅步的速度倍率上限（原版速度的倍数）。实际上限由服务端决定；超过约 20 倍时专用服务器会因「moved too quickly」把人拉回。");
+
+        enableLocatorWand = configuration.getBoolean(
+            "enableLocatorWand",
+            Configuration.CATEGORY_GENERAL,
+            enableLocatorWand,
+            "是否注册寻物魔杖（右键选方块找最近的一个，可传送过去）。");
+
+        locatorSearchRadius = configuration.getInt(
+            "locatorSearchRadius",
+            Configuration.CATEGORY_GENERAL,
+            locatorSearchRadius,
+            16,
+            512,
+            "寻物魔杖的搜索半径（方块）。扫描量按半径三次方增长，256 以上会明显变慢。");
+
+        locatorBlocksPerTick = configuration.getInt(
+            "locatorBlocksPerTick",
+            Configuration.CATEGORY_GENERAL,
+            locatorBlocksPerTick,
+            1000,
+            2000000,
+            "寻物扫描每 tick 检查多少个方块位置。调大出结果快、调小更平滑。");
+
+        locatorScanTimeoutTicks = configuration.getInt(
+            "locatorScanTimeoutTicks",
+            Configuration.CATEGORY_GENERAL,
+            locatorScanTimeoutTicks,
+            20,
+            72000,
+            "一次寻物扫描最多跑多少 tick，超时放弃（兜底，防止任务一直挂在服务端 tick 里）。");
 
         if (configuration.hasChanged()) {
             configuration.save();
