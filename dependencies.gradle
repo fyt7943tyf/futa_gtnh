@@ -1,0 +1,50 @@
+/*
+ * 在这里添加你的模组依赖。可用的配置（GTNH 工具链）：
+ *  - api("group:name:version:classifier")          : 你的模组公开 API 里用到的类型，下游可见
+ *  - implementation("g:n:v")                        : 仅内部实现使用，运行时可见，下游编译期不可见
+ *  - compileOnly("g:n:v")                           : 只在编译期需要（可选联动模组用这个）
+ *  - compileOnlyApi("g:n:v")                        : 同 compileOnly，但下游编译期也可见
+ *  - runtimeOnlyNonPublishable("g:n:v")             : 只在自己 runClient/runServer 时加载，不作为依赖发布
+ *  - devOnlyNonPublishable("g:n:v")                 : compileOnly + runtimeOnlyNonPublishable 的组合
+ *  - runtimeOnly("g:n:v")                           : 只在运行时需要
+ *
+ * 需要反混淆的（未混淆的）jar 用 rfg.deobf(...) 包一层。
+ * GTNH 官方 Maven 上的 "-dev" classifier 产物本身已经是反混淆过的，直接用即可。
+ *
+ * 注意：GregTech (GT5-Unofficial) 体积很大（约 68MB）且带 30 多个传递依赖，
+ * 首次配置依赖时会下载较多文件，请耐心等待。
+ */
+
+dependencies {
+    // ---- GregTech（GT5-Unofficial）----
+    // GTNH 的核心模组，提供 GT 的方块/物品/机器/配方 API
+    compileOnly("com.github.GTNewHorizons:GT5-Unofficial:5.09.54.175:dev")
+
+    // ---- Not Enough Items（NEI）----
+    // GTNH 内置的配方查看器，注册 NEI 配方/隐藏物品时需要
+    compileOnly("com.github.GTNewHorizons:NotEnoughItems:2.8.144-GTNH:dev")
+
+    // ---- GTNHLib ----
+    // GTNH 公共库（工具类、注册辅助、Mixin 支持）
+    compileOnly("com.github.GTNewHorizons:GTNHLib:0.11.51:dev")
+
+    // ---- runClient / runServer 里真正要加载的模组 ----
+    //
+    // ★ 这几行是必需的，不是可选的。
+    //   共享背包用 @Mod(dependencies = "required-after:gregtech") 声明了 GT 是硬依赖
+    //   （存储键的规范化、流体显示物品、流体灌装都直接用 GTUtility）。
+    //   而上面那些 compileOnly 只在编译期可见、不会进开发环境的 mods 目录，
+    //   所以如果这里不补运行时依赖，runClient 会直接以
+    //   「Missing required mod gregtech」拒绝加载本模组，什么都测不了。
+    //
+    //   加了之后第一次 runClient 会慢不少（GT 本身体积很大），属正常现象。
+    //   如果只是临时想跑起来看看界面、不想等 GT 加载，把这三行注释掉，
+    //   同时把 FutaGtnhMod 的 dependencies 里的 required-after:gregtech 一并去掉。
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:GT5-Unofficial:5.09.54.175:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.144-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:GTNHLib:0.11.51:dev")
+
+    // ---- 本地依赖示例 ----
+    // 把 jar 放到 libs/ 目录后这样引用：
+    // compileOnly(files("libs/your-mod.jar"))
+}

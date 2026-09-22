@@ -1,0 +1,7 @@
+{
+	"package": "com.futa_gtnh.mixins",
+	"compatibilityLevel": "JAVA_8",
+	"mixins": [],
+	"client": [],
+	"server": []
+}

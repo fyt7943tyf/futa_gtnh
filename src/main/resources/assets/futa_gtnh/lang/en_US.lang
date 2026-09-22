@@ -1,0 +1,42 @@
+# FutaGTNH — 全服共享背包
+# 注意：这里的所有文本都走语言文件，代码里不硬编码中文。
+# 原因有两个：一是英文客户端不至于看到方块字，
+# 二是原版字体在没开 Unicode 字体时渲染不了 CJK，硬编码中文会变成一堆方块。
+
+tile.futa_gtnh.shared_terminal.name=Shared Terminal
+container.futa_gtnh.shared_terminal=Shared Storage
+
+key.categories.futa_gtnh=FutaGTNH
+key.futa_gtnh.shared_terminal=Open Shared Storage
+
+futa_gtnh.gui.tab.items=Items
+futa_gtnh.gui.tab.fluids=Fluids
+
+futa_gtnh.gui.armor=Armor
+futa_gtnh.gui.crafting=Craft
+
+futa_gtnh.gui.auto.on=Auto-store ON
+futa_gtnh.gui.auto.off=Auto-store OFF
+futa_gtnh.gui.auto.tip.title=Auto-store on pickup
+futa_gtnh.gui.auto.tip.on=ON: picked-up items go straight into the shared storage
+futa_gtnh.gui.auto.tip.off=OFF: picked-up items go into your own inventory as usual
+futa_gtnh.gui.auto.tip.persist=Personal setting, saved with your player data (survives death)
+
+futa_gtnh.gui.search.hint=Search ( @mod  *ore  #tooltip )
+
+futa_gtnh.gui.page=Page %s/%s
+futa_gtnh.gui.types.item=%s items
+futa_gtnh.gui.types.fluid=%s fluids
+
+futa_gtnh.gui.sort.name=Name
+futa_gtnh.gui.sort.amount=Amount
+futa_gtnh.gui.sort.mod=Mod
+
+futa_gtnh.gui.store.all=All
+futa_gtnh.gui.store.hotbar=Hotbar
+futa_gtnh.gui.store.main=Main
+futa_gtnh.gui.store.drain=Drain
+
+futa_gtnh.gui.status.remote=Remote access - place a terminal to choose a fluid output
+futa_gtnh.gui.status.output=Output: %s
+futa_gtnh.gui.status.output.none=none (middle-click a fluid)

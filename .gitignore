@@ -1,0 +1,82 @@
+# ============================================================
+#  futa_gtnh — Git 忽略规则
+# ============================================================
+
+# ---- 构建产物 / 本地环境（GTNH ExampleMod 默认项） ----
+.gradle
+.settings
+/.idea/
+/.vscode/
+/run/
+/build/
+/eclipse/
+.classpath
+.project
+/bin/
+/config/
+/crash-reports/
+/logs/
+options.txt
+/saves/
+/out/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+.factorypath
+
+# 服务端运行时会话数据（里面是玩家名 / UUID / OP 名单，不该进公开仓库；
+# 正常情况下 /run/ 已经盖住了，这里再兜一层，防止有人把服务器开在别处）
+usernamecache.json
+banned-ips.json
+banned-players.json
+eula.txt
+ops.json
+server.properties
+servers.dat
+usercache.json
+whitelist.json
+
+# GTNH 构建脚本本地覆盖
+addon.local.gradle
+addon.local.gradle.kts
+addon.late.local.gradle
+addon.late.local.gradle.kts
+layout.json
+
+# ---- 本项目补充 ----
+
+# 旧 ForgeGradle 1.2 环境的备份（见 README-开发环境.md，已废弃）。
+#
+# ★ 整个目录必须排除，不是「为了瘦身」，是版权问题：
+#   legacy-forgegradle/tools/cache-seed/ 里直接放着
+#     minecraft-1.7.10.jar          (5.0 MB)
+#     minecraft_server-1.7.10.jar   (9.2 MB)
+#   以及 fernflower、MCP 映射表。把 Mojang 的游戏本体推到 GitHub
+#   会直接收到 DMCA 下架通知，连账号一起受牵连。
+#   local-repo/ 里的 ForgeGradle 补丁 jar 同理，也不是我们的东西。
+/legacy-forgegradle/
+
+# 本地依赖 jar。dependencies.gradle 里写了
+# compileOnly(files("libs/xxx.jar")) 这种用法，那些 jar 是第三方产物，不进版本库。
+/libs/
+
+# 反编译出来的 MC / Forge / GT 源码参考。
+# 同样是第三方反编译产物，而且随时可以用 gradlew 从 Gradle 缓存重新导出，没必要存。
+/.apidocs/
+
+# 日志（构建日志、服务端日志等）
+*.log
+
+# ---- Windows 批处理 ----
+#
+# 上游 GTNH 模板是 *.bat 全排除（它假定那只是各人本地的启动脚本）。
+# 但本项目的 README-开发环境.md 就是让使用者双击 build.bat / runClient.bat /
+# setup.bat，它们是项目工作流的一部分，所以要显式放回来。
+# 根目录之外的一律仍然排除（/legacy-forgegradle/ 已整目录忽略，不受影响）。
+*.bat
+!gradlew.bat
+!/build.bat
+!/runClient.bat
+!/setup.bat
+!/gradlew8.bat

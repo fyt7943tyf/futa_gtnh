@@ -1,0 +1,39 @@
+# FutaGTNH — 全服共享背包
+
+tile.futa_gtnh.shared_terminal.name=共享终端
+container.futa_gtnh.shared_terminal=全服共享背包
+
+key.categories.futa_gtnh=FutaGTNH
+key.futa_gtnh.shared_terminal=打开共享背包
+
+futa_gtnh.gui.tab.items=物品
+futa_gtnh.gui.tab.fluids=流体
+
+futa_gtnh.gui.armor=装备
+futa_gtnh.gui.crafting=合成
+
+futa_gtnh.gui.auto.on=自动入库 开
+futa_gtnh.gui.auto.off=自动入库 关
+futa_gtnh.gui.auto.tip.title=拾取自动入库
+futa_gtnh.gui.auto.tip.on=开：捡到的东西直接进共享背包，不留在你身上
+futa_gtnh.gui.auto.tip.off=关：捡到的东西照常进你的背包
+futa_gtnh.gui.auto.tip.persist=这个开关是你个人的，会跟着存档保留（死亡也不重置）
+
+futa_gtnh.gui.search.hint=搜索（ @模组  *矿辞  #tooltip ）
+
+futa_gtnh.gui.page=第 %s/%s 页
+futa_gtnh.gui.types.item=%s 种物品
+futa_gtnh.gui.types.fluid=%s 种流体
+
+futa_gtnh.gui.sort.name=名称
+futa_gtnh.gui.sort.amount=数量
+futa_gtnh.gui.sort.mod=模组
+
+futa_gtnh.gui.store.all=全部
+futa_gtnh.gui.store.hotbar=快捷栏
+futa_gtnh.gui.store.main=主背包
+futa_gtnh.gui.store.drain=倒空容器
+
+futa_gtnh.gui.status.remote=远程访问 —— 放一个共享终端方块才能选输出流体
+futa_gtnh.gui.status.output=终端输出：%s
+futa_gtnh.gui.status.output.none=未设置（对着流体按中键）

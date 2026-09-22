@@ -1,0 +1,9 @@
+// Add any additional repositories for your dependencies here.
+
+repositories {
+    // GTNH 官方 Maven：GregTech、NEI、GTNHLib 等 GTNH 生态模组都在这里
+    maven {
+        name = "GTNH Maven"
+        url = uri("https://nexus.gtnewhorizons.com/repository/public/")
+    }
+}
