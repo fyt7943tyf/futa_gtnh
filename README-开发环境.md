@@ -10,20 +10,25 @@
 | 1（仅首次） | 双击 `setup.bat` | 下载并反编译 Minecraft 1.7.10、建立 GTNH 工作区（较慢，只需一次） |
 | 2 | 编辑 `src/main/java/com/futa_gtnh/` | 写你的模组逻辑 |
 | 3 | 双击 `build.bat` | 编译打包，产物在 `build\libs\` |
-| 4 | 双击 `runClient.bat` | 启动带模组的开发版客户端 |
+| 4 | 双击 `runClient.bat` | 启动带模组的开发版客户端（内部跑的是 `runClient17`，见下面「lwjgl3ify 与 dev 环境」） |
 
 命令行等价操作：
 
 ```
 gradlew.bat build                      # 编译打包
-gradlew.bat runClient                  # 开发版客户端
-gradlew.bat runServer                  # 开发版服务端
+gradlew.bat runClient17                # 开发版客户端（★ 不是 runClient，见下文）
+gradlew.bat runServer17                # 开发版服务端（★ 不是 runServer）
 gradlew.bat --refresh-dependencies build   # 依赖出问题时强制刷新
 gradlew.bat clean                      # 清理 build 产物
 ```
 
 > ⚠️ **不要再运行 `gradlew8.bat`**（那是旧环境留下的，已废弃）。
 > 本工具链需要 **JDK 17 或更高**，本机用的是 `C:\Program Files\Microsoft\jdk-25.0.2.10-hotspot`。
+>
+> 注意区分「Gradle 自己的 JDK」和「跑游戏的 JDK」：上面这个是 **Gradle/编译**用的；
+> 跑游戏的 Java 由 Gradle toolchain 决定 —— `runClient` 是 Azul 8，
+> `runClient17` 是 JetBrains Runtime 17，两个都是 Gradle 自动下载到
+> `C:\Users\fyt79\.gradle\jdks\` 的，不用手工装。
 
 ## 环境组成
 
@@ -148,9 +153,81 @@ manifest 里就不会再写 `MixinConfigs`，也不需要 `mixins.futa_gtnh.json
 - **代码不 import lwjgl3ify 的类**：环境探测走「按类名 `Class.forName` 查
   `TextFieldHandler`」（`client/ImeCompat.java`），老版本 lwjgl3ify 或纯 LWJGL2
   环境自动退回旧的字符注入路径。所以 `compileOnly` 那行只是文档化这个约定。
-- **`@Mod` 声明了 `required-after:lwjgl3ify`**：dev 的 runClient 也挂了 lwjgl3ify
-  （`runtimeOnlyNonPublishable`）。若 dev 环境因 coremod 加载顺序出问题，
-  临时把 `@Mod` 里的这一段去掉即可 —— 代码路径本身没有硬链接。
+- **`@Mod` 声明了 `required-after:lwjgl3ify`**：dev 环境也挂了 lwjgl3ify
+  （`runtimeOnlyNonPublishable`），所以这条依赖在 dev 里同样能满足，不用改。
+- **★ dev 必须用 `runClient17` / `runServer17`，不能用 `runClient` / `runServer`** ——
+  下面单独一节讲为什么。
+
+### lwjgl3ify 与 dev 环境：为什么必须用 `runClient17`
+
+GTNHGradle 会给每个工程生成两组运行任务：
+
+| 任务 | Java | 说明 |
+| --- | --- | --- |
+| `runClient` / `runServer` | **Java 8**（Gradle 自动下载的 Azul Zulu 8） | 传统 LWJGL2 dev 环境 |
+| `runClient17` / `runServer17` | JetBrains Runtime 17 | 现代 Java + LWJGL3（本模组要测的环境） |
+| `runClient21` / `runClient25`（同理 server） | JBR 21 / 25 | 本机没装对应 JBR，Gradle 会去下载（国内很慢），暂时别用 |
+
+**`runClient` 在挂了 lwjgl3ify 的工程里是必然起不来的**，和模组代码无关，是 lwjgl3ify
+「relauncher（重启器）」的机制决定的：
+
+1. `runClient` 用 Java 8 启动，classpath 里带着 `lwjgl3ify-…-dev.jar`。
+   lwjgl3ify 的 `Lwjgl3ifyRelauncherTweaker` 会被 RFG 当成 cascading tweaker 装上。
+2. 这个 tweaker 在 `acceptOptions()` 里判断：只要 `Launch.blackboard` 里没有
+   `lwjgl3ify:rfb-booted` 标记（= 本进程不是被 RFB 引导起来的），它就把整个游戏
+   **重启**到一个「现代 Java」进程里，然后杀掉自己。
+3. 重启用的 classpath 是 `Relauncher.createClasspath()` 组装的：**只有**
+   lwjgl3ify 自带的 `version.json` 清单里的库（forge、原版 client、LWJGL3、scala…），
+   **完全不读 `java.class.path`** —— 也就是说 Gradle 的 dev classpath（
+   `recompiled_minecraft`、MixinTweaker、CoremodTweaker、GT5/NEI/Hodgepodge… 所有模组、
+   以及本模组自己的类）**全部被丢掉**。
+   这套设计是给 Prism/MultiMC 那种「模组放 mods 文件夹」的正式整合包用的，
+   dev 环境里模组是在 classpath 上的，所以必然全丢。
+4. 结果就是启动日志里那一串：
+
+   ```
+   [FML]: Coremod GTCorePlugin: Unable to class load the plugin gregtech.asm.GTCorePlugin
+   java.lang.ClassNotFoundException: Class bytes are null for ...    ← 每个 coremod 都这样
+   ...
+   Caused by: java.lang.NoClassDefFoundError: java/util/jar/Pack200
+       at cpw.mods.fml.common.patcher.ClassPatchManager.setup
+   ```
+
+   最后那个 `Pack200` 是**果不是因**：新 JDK 删掉了 `java.util.jar.Pack200`，
+   lwjgl3ify 的 forgePatches 本来会把这个补丁换掉，但连 forgePatches 的作用范围
+   （正式版 classpath）里都没救回来，于是 FML 的 coremod 注入直接崩。
+
+**`runClient17` 为什么就好了**：它走的是 GTNHGradle 的
+`RunHotswappableMinecraftTask`，会额外加上 `ModernJavaModule.JAVA_17_ARGS`
+（一长串 `--add-opens` **加上 `-Djava.system.class.loader=com.gtnewhorizons.retrofuturabootstrap.RfbSystemClassLoader`**）
+和 `gradlestart.bouncerClient`。于是：
+
+- RFB 在**本进程**就被引导起来 → blackboard 里有 `lwjgl3ify:rfb-booted`；
+- relauncher 看到这个标记直接跳过 → dev classpath 完整保留；
+- 游戏真的跑在 Java 17 + LWJGL3 上，搜索框的中文输入法路径（lwjgl3ify 对
+  `GuiTextField` 的 mixin）也就能在 dev 里一起测。
+
+这条路是 lwjgl3ify 官方 README 推荐的：*"When testing in the deobfuscated environment,
+please use the runClient/runServer tasks that run with modern java by default."*
+
+#### 另一个坑：forgePatches 的版本必须和 lwjgl3ify 一致
+
+GTNHGradle 2.0.20 的 `ModernJavaModule` **写死**了要往 `java17PatchDependencies`
+配置里塞 `com.github.GTNewHorizons:lwjgl3ify:3.0.10:forgePatches`。这个 forgePatches
+jar 在 dev 里就是 RFB 本体 + 早期 forge 补丁，而 3.0.10 里打包的是 **RFB 1.0.14**；
+lwjgl3ify 3.0.35 的 transformer 需要 RFB 1.1.x 的
+`com.gtnewhorizons.retrofuturabootstrap.api.BytePatternMatcher`，于是启动时直接：
+
+```
+Exception in thread "RFB-Main" java.lang.RuntimeException:
+  java.lang.NoClassDefFoundError: com/gtnewhorizons/retrofuturabootstrap/api/BytePatternMatcher
+      at me.eigenraven.lwjgl3ify.rfb.transformers.LwjglRedirectTransformer.<init>
+```
+
+`dependencies.gradle` 末尾用一条解析规则把这个配置里的 lwjgl3ify 统一抬到
+`lwjgl3ifyVersion`（3.0.35），拿到的就是 GTNH Maven 上真实存在的
+`lwjgl3ify-3.0.35-forgePatches.jar`。**以后升级 lwjgl3ify 版本，只改
+`dependencies.gradle` 顶部那个变量即可**，dev jar 和 forgePatches 会一起跟着走。
 
 想加本地 jar：放进 `libs/`，然后写 `compileOnly(files("libs/xxx.jar"))`。
 
@@ -214,6 +291,14 @@ Add-MpPreference -ExclusionPath "C:\Users\fyt79\.gradle\caches"   # 需管理员
    → `gradlew.bat build --stacktrace`，或 `--info` / `--debug`。
 7. **想彻底重置**
    → 删掉项目下的 `build\`、`.gradle\`，再跑 `setup.bat`。
+8. **`runClient` 一启动就刷一屏 `Unable to class load the plugin …` /
+   `Class bytes are null for …` / `NoClassDefFoundError: java/util/jar/Pack200`**
+   → 这是**用错了任务**：挂着 lwjgl3ify 的工程不能用 `runClient`。
+   改用 `gradlew.bat runClient17`（`runClient.bat` 已经改成这个了）。
+   机制见上面「lwjgl3ify 与 dev 环境」。服务端同理，用 `runServer17`。
+9. **`runClient17` 报 `NoClassDefFoundError: …retrofuturabootstrap/api/BytePatternMatcher`**
+   → forgePatches 的版本和 lwjgl3ify 的版本不一致（GTNHGradle 默认给的是 3.0.10）。
+   检查 `dependencies.gradle` 末尾那段 `configurations.configureEach { … }` 还在不在。
 
 ## 参考
 
