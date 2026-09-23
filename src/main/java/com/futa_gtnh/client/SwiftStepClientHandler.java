@@ -91,9 +91,37 @@ public class SwiftStepClientHandler {
         /** 「处理器活着」这条只打一次。 */
         private boolean aliveReported;
 
+        /**
+         * 两个阶段都要处理，<b>而且 START 才是关键的那个</b>。
+         *
+         * <p>
+         * 客户端一 tick 的顺序是这样的（全部来自原版源码）：
+         *
+         * <pre>
+         * 1. gameMode 阶段  Minecraft.runTick → PlayerControllerMP.updateController
+         *                   → NetworkManager.processReceivedPackets()
+         *                   ← S39 包在这里到达，把 flySpeed 覆盖成服务端那份（默认 0.05）
+         * 2. level 阶段     theWorld.tick() → thePlayer.onUpdate()
+         *    a. EntityPlayer:259  onPlayerPreTick   → PlayerTickEvent(START)
+         *    b. EntityPlayer:327  super.onUpdate()  → onLivingUpdate() ★ 这里读 flySpeed 算移动 ★
+         *    c. EntityPlayer:392  onPlayerPostTick  → PlayerTickEvent(END)
+         * </pre>
+         *
+         * <p>
+         * <b>原来只在 END 阶段设置，也就是在移动算完之后才写</b> —— 在只有本模组改
+         * {@code flySpeed} 的环境里这没问题（上一 tick 写的值能活到下一 tick 的移动）。
+         * 但整合包里 Draconic Evolution 的 {@code CustomArmorHandler.onPlayerTick}
+         * 会在客户端把 {@code flySpeed} 重置回 0.05（没穿它的飞行护甲时也照做），
+         * 还会让服务端回一个 S39 包；那个包正好在上面的第 1 步到达。
+         * 于是每 tick 的移动读到的都是 0.05，<b>我们的倍率永远轮不到被使用</b>。
+         *
+         * <p>
+         * 所以 START 阶段也要设一次：它在移动之前，设完本 tick 立刻生效。
+         * END 那次留着是为了兜住「有模组在我们之后、下次移动之前又改掉」的情况。
+         */
         @SubscribeEvent
         public void onPlayerTick(TickEvent.PlayerTickEvent event) {
-            if (event.side != Side.CLIENT || event.phase != TickEvent.Phase.END) return;
+            if (event.side != Side.CLIENT) return;
 
             EntityPlayer player = event.player;
             if (!(player instanceof EntityPlayerSP)) return;
