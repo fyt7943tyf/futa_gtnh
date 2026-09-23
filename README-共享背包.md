@@ -342,7 +342,7 @@ GTNH 到中后期，仓库管理会变成主要负担：几十个箱子、抽屉
 
 本模组原来**只在 END 阶段设置** —— 也就是在移动算完之后才写。在只有自己改
 `flySpeed` 的环境里这没问题（上一 tick 写的值能活到下一 tick 的移动），所以
-`runClient` 里一切正常。
+开发环境（`runClient17`）里一切正常。
 
 但整合包里有 **Draconic Evolution**：它的 `CustomArmorHandler.onPlayerTick`
 不管你有没有穿它的护甲，都会在客户端把 `capabilities.setFlySpeed(0.05F)`
@@ -982,7 +982,7 @@ GT 那边如果截断或拒收就把差额还回存储。
 
 ```bash
 gradlew.bat build          # 产物在 build/libs/
-gradlew.bat runClient      # 开发版客户端
+gradlew.bat runClient17    # 开发版客户端（★ 不能用 runClient，原因见 README-开发环境.md）
 gradlew.bat spotlessApply  # 修正格式
 ```
 
