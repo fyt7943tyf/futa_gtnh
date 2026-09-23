@@ -15,6 +15,11 @@
  * 首次配置依赖时会下载较多文件，请耐心等待。
  */
 
+// lwjgl3ify 的目标版本。★ 三处必须一致：compileOnly 的 dev jar、
+// runtimeOnlyNonPublishable 的 dev jar、以及 dev 环境里当中「引导层」的
+// forgePatches（见文件末尾的说明）。所以只在这里写一次。
+def lwjgl3ifyVersion = '3.0.35'
+
 dependencies {
     // ---- GregTech（GT5-Unofficial）----
     // GTNH 的核心模组，提供 GT 的方块/物品/机器/配方 API
@@ -47,8 +52,27 @@ dependencies {
     //    所以 compileOnly 只是为了文档化这个约定，运行时靠探测而不是链接）；
     //  - 老版本 lwjgl3ify（GLFW 时代，无 TextFieldHandler）会被探测自动退回
     //    旧的「>255 字符注入」路径，不会坏。
-    compileOnly("com.github.GTNewHorizons:lwjgl3ify:3.0.35:dev")
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:lwjgl3ify:3.0.35:dev")
+    compileOnly("com.github.GTNewHorizons:lwjgl3ify:${lwjgl3ifyVersion}:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:lwjgl3ify:${lwjgl3ifyVersion}:dev")
+
+    // ★ dev 环境（runClient17 / runServer17 这类「现代 Java」任务）里，forgePatches
+    //   的版本必须和上面一致，否则游戏根本起不来。原因：
+    //
+    //   GTNHGradle 的 modern-java 模块会**无条件**往 java17PatchDependencies 里塞
+    //   com.github.GTNewHorizons:lwjgl3ify:3.0.10:forgePatches（GTNHGradle 2.0.20 里
+    //   写死的版本）。这个 jar 在 dev 环境里同时扮演两个角色：
+    //     1. 提供 RFB（RetroFuturaBootstrap）本体 —— 它是被 -Djava.system.class.loader
+    //        指定的系统类加载器，也就是整个 dev 客户端的引导层；
+    //     2. 提供「早期 forge 补丁」（ClassPatchManager 换掉被新 JDK 删掉的 Pack200 等）。
+    //   而 lwjgl3ify 3.0.35 的 transformer 用到 RFB 1.1.x 才有的
+    //   com.gtnewhorizons.retrofuturabootstrap.api.BytePatternMatcher。
+    //   3.0.10 的 forgePatches 里带的是 RFB 1.0.14，于是启动时直接：
+    //     NoClassDefFoundError: com/gtnewhorizons/retrofuturabootstrap/api/BytePatternMatcher
+    //       at me.eigenraven.lwjgl3ify.rfb.transformers.LwjglRedirectTransformer.<init>
+    //   修法：把该配置里 lwjgl3ify 的解析版本统一抬到 3.0.35（见文件末尾的
+    //   configurations.configureEach 块）。同模块取高版本之后，classifier 仍是
+    //   forgePatches，于是拿到的就是 lwjgl3ify-3.0.35-forgePatches.jar（GTNH Maven
+    //   上确实发布了这个带 classifier 的产物，已核对过）。
 
     // ---- NotEnoughCharacters（NEChar，可选联动）----
     // 拼音/模糊音搜索复用它的 PinIn 上下文（net.moecraft.nechar.NecharUtils），
@@ -75,4 +99,37 @@ dependencies {
     // ---- 本地依赖示例 ----
     // 把 jar 放到 libs/ 目录后这样引用：
     // compileOnly(files("libs/your-mod.jar"))
+}
+
+// ---------------------------------------------------------------------------
+//  dev 环境专用：把 java17PatchDependencies 里的 lwjgl3ify 抬到 3.0.35
+//
+//  GTNHGradle 2.0.20 的 ModernJavaModule 写死了
+//      java17PatchDependencies "com.github.GTNewHorizons:lwjgl3ify:3.0.10:forgePatches"
+//  这个配置只被 runClient17 / runServer17 / runClient21 / … 这类「现代 Java」
+//  任务用到（runClient 走 Java 8 + LWJGL2，不需要它，所以 runClient 里看不到）。
+//
+//  它必须和 java17Dependencies 里的 lwjgl3ify 同版本，否则就会像 2026-09-24 那样：
+//      Exception in thread "RFB-Main" java.lang.RuntimeException:
+//        java.lang.NoClassDefFoundError:
+//          com/gtnewhorizons/retrofuturabootstrap/api/BytePatternMatcher
+//          at me.eigenraven.lwjgl3ify.rfb.transformers.LwjglRedirectTransformer.<init>
+//  因为 3.0.10 的 forgePatches 里打包的是 RFB 1.0.14，而 3.0.35 的 transformer
+//  需要 RFB 1.1.x 的 API。
+//
+//  为什么不直接在 dependencies { } 里写 java17PatchDependencies(...)？
+//  因为那个配置是 GTNHGradle 建的「只可解析」配置，Gradle 9 不允许再用
+//  dependencies { 配置名("坐标") } 这种隐式写法往它里面加依赖（会报
+//  Could not find method java17PatchDependencies()）。改解析规则更稳，也不依赖
+//  配置的创建时机（configureEach 对后创建的配置同样生效）。
+// ---------------------------------------------------------------------------
+configurations.configureEach {
+    if (name == 'java17PatchDependencies' || name == 'java17PatchDependenciesCfg') {
+        resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == 'com.github.GTNewHorizons'
+                && details.requested.name == 'lwjgl3ify') {
+                details.useVersion(lwjgl3ifyVersion)
+            }
+        }
+    }
 }
