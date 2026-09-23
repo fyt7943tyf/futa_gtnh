@@ -314,7 +314,44 @@ GTNH 到中后期，仓库管理会变成主要负担：几十个箱子、抽屉
 客户端界面按自己配置画按钮，但发上去的值会在服务端再夹一次 ——
 所以服务器主把这个值调小之后，改过的客户端也开不出火箭来。
 
-### 飞行速度在服务器上会失效（以及为什么上限是 16）
+### 飞行速度为什么会被别的模组吃掉（真踩过的坑）
+
+**症状**：飞行速度在开发环境里好好的，装进完整整合包就完全没效果 —— 移动速度却正常。
+
+**根因是客户端一 tick 内的执行顺序。** 全部来自原版源码：
+
+```
+1. gameMode 阶段  Minecraft.runTick → PlayerControllerMP.updateController
+                  → NetworkManager.processReceivedPackets()
+                  ← S39 包在这里到达，把 flySpeed 覆盖成服务端那份（默认 0.05）
+2. level 阶段     theWorld.tick() → thePlayer.onUpdate()
+   a. EntityPlayer:259  onPlayerPreTick   → PlayerTickEvent(START)
+   b. EntityPlayer:327  super.onUpdate()  → onLivingUpdate() ★ 这里读 flySpeed 算移动 ★
+   c. EntityPlayer:392  onPlayerPostTick  → PlayerTickEvent(END)
+```
+
+本模组原来**只在 END 阶段设置** —— 也就是在移动算完之后才写。在只有自己改
+`flySpeed` 的环境里这没问题（上一 tick 写的值能活到下一 tick 的移动），所以
+`runClient` 里一切正常。
+
+但整合包里有 **Draconic Evolution**：它的 `CustomArmorHandler.onPlayerTick`
+不管你有没有穿它的护甲，都会在客户端把 `capabilities.setFlySpeed(0.05F)`
+写回去，并且会让服务端回一个 S39 包 —— 那个包正好落在上面的第 1 步。
+于是每 tick 的移动读到的都是 0.05，**我们的倍率永远轮不到被使用**。
+
+> 顺带一提，`flySpeed` 在整个原版里只有两处：读是
+> `EntityPlayer:1855`（`moveEntityWithHeading`），写是
+> `NetHandlerPlayClient:1572`（S39 包）。任何"飞行速度不生效"都可以先去
+> **F3 调试屏**看那一行 `ws: ..., fs: ..., g: ..., fl: ...` ——
+> 它就是这两个值的实时读数。
+
+**修法：START 阶段也设一次**（它在移动之前，设完本 tick 立刻生效），
+END 那次留着兜住"别的模组在我们之后又改掉"的情况。
+
+> 排查时可以搜一遍整合包里还有谁在写 `func_75092_a`（`setFlySpeed` 的 SRG 名）。
+> 本包里有三个：Draconic Evolution、HardcoreEnderExpansion、以及本模组。
+
+### 飞行速度在服务器上还会被拉回（以及为什么上限是 16）
 
 这是踩过的坑，数字全部来自原版源码：
 
