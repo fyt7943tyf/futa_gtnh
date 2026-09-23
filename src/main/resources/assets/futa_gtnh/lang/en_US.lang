@@ -10,7 +10,7 @@ item.futa_gtnh.swift_step.name=Swift Step
 item.futa_gtnh.swift_step.tooltip.flight=Flight speed: %sx
 item.futa_gtnh.swift_step.tooltip.walk=Movement speed: %sx
 item.futa_gtnh.swift_step.tooltip.air=Jump / mid-air speed follows movement speed
-item.futa_gtnh.swift_step.tooltip.gui=Right-click: adjust speed
+item.futa_gtnh.swift_step.tooltip.gui=Right-click: adjust speed and light
 item.futa_gtnh.swift_step.tooltip.equip=Sneak + right-click: equip to a free bauble slot
 
 futa_gtnh.swift_step.gui.flight=Flight speed
@@ -96,3 +96,10 @@ futa_gtnh.station.title.items= · %s items
 futa_gtnh.station.title.page= · %s/%s
 
 futa_gtnh.locator.msg.arrived_carved=Target is buried in solid blocks; carved a small standing spot for you (the target block itself is untouched)
+
+item.futa_gtnh.swift_step.tooltip.light=Light: %s
+item.futa_gtnh.swift_step.light.off=Off
+item.futa_gtnh.swift_step.light.torch=torch (%s)
+item.futa_gtnh.swift_step.light.torch_short=torch
+futa_gtnh.swift_step.gui.light=Light level (0 = off)
+futa_gtnh.swift_step.gui.light.note=lights up only; mobs still spawn

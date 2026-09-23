@@ -181,8 +181,27 @@ public class SwiftStepClientHandler {
                 clampedForServer = false;
             }
 
+            // 照明：把隐形光源挪到玩家身上。
+            //
+            // 只在 END 阶段做一次：START 那次是为了赶在移动计算之前设飞行速度，
+            // 光源的坐标放在 START 反而会晚一 tick 才跟上玩家。
+            if (event.phase == TickEvent.Phase.END) {
+                try {
+                    SwiftStepLight.tick(player);
+                } catch (Throwable t) {
+                    // 光源出问题绝不能影响速度：报一次就放弃这一步
+                    if (!lightFailed) {
+                        lightFailed = true;
+                        FutaGtnhMod.LOG.warn("迅步：照明光源放置失败，已停用照明（速度不受影响）", t);
+                    }
+                }
+            }
+
             report(player, charm, capabilities);
         }
+
+        /** 照明失败只报一次，避免每 tick 刷屏。 */
+        private boolean lightFailed;
 
         /**
          * 状态变了才打一行日志。
@@ -210,13 +229,17 @@ public class SwiftStepClientHandler {
                 line = "已装备：飞行 x" + ItemSwiftStep.getFlightMultiplier(charm)
                     + " / 移动 x"
                     + ItemSwiftStep.getWalkMultiplier(charm)
+                    + " / 照明 "
+                    + ItemSwiftStep.describeLight(ItemSwiftStep.getLightLevel(charm))
                     + "，NBT="
                     + (charm.getTagCompound() == null ? "无" : "有")
                     + "，capabilities.flySpeed="
                     + capabilities.getFlySpeed()
                     + "，isFlying="
                     + capabilities.isFlying
-                    + (clampedForServer ? "，[已按服务器上限压低]" : "");
+                    + (clampedForServer ? "，[已按服务器上限压低]" : "")
+                    + "，光源="
+                    + SwiftStepLight.describe();
             }
 
             if (!line.equals(lastReport)) {

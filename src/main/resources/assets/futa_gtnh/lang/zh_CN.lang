@@ -7,7 +7,7 @@ item.futa_gtnh.swift_step.name=迅步
 item.futa_gtnh.swift_step.tooltip.flight=飞行速度：%s 倍
 item.futa_gtnh.swift_step.tooltip.walk=移动速度：%s 倍
 item.futa_gtnh.swift_step.tooltip.air=跳跃/空中前进速度跟随移动速度
-item.futa_gtnh.swift_step.tooltip.gui=右键：调整速度
+item.futa_gtnh.swift_step.tooltip.gui=右键：调整速度与照明
 item.futa_gtnh.swift_step.tooltip.equip=潜行 + 右键：装备到空的饰品槽
 
 futa_gtnh.swift_step.gui.flight=飞行速度
@@ -92,3 +92,10 @@ futa_gtnh.station.title.items= · %s 项
 futa_gtnh.station.title.page= · %s/%s
 
 futa_gtnh.locator.msg.arrived_carved=目标整个埋在实心方块里，已就地清出两格落脚（那块方块本身没动）
+
+item.futa_gtnh.swift_step.tooltip.light=照明：%s
+item.futa_gtnh.swift_step.light.off=关
+item.futa_gtnh.swift_step.light.torch=火把（%s 级）
+item.futa_gtnh.swift_step.light.torch_short=火把
+futa_gtnh.swift_step.gui.light=照明亮度（0 = 关）
+futa_gtnh.swift_step.gui.light.note=只照亮，不挡刷怪

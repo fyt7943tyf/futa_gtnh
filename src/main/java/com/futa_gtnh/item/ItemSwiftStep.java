@@ -55,6 +55,22 @@ public class ItemSwiftStep extends Item implements IBauble {
 
     private static final String TAG_FLIGHT = "futa_gtnh.swift_step.flight";
     private static final String TAG_WALK = "futa_gtnh.swift_step.walk";
+    private static final String TAG_LIGHT = "futa_gtnh.swift_step.light";
+
+    /**
+     * 照明亮度的默认值：<b>0 = 不亮</b>。
+     *
+     * <p>
+     * 默认关着，是因为它会在客户端脚下放一个隐形的发光方块 ——
+     * 玩家没要求就别替他把世界点亮。
+     */
+    public static final int DEFAULT_LIGHT = 0;
+
+    /** 照明亮度上限 = 原版光照上限（火把是 14）。 */
+    public static final int MAX_LIGHT = 15;
+
+    /** 原版火把的亮度，界面里当参照用。 */
+    public static final int TORCH_LIGHT = 14;
 
     /** 没调过时的默认倍率（1.0 = 原版速度）。 */
     public static final float DEFAULT_MULTIPLIER = 1.0F;
@@ -223,6 +239,48 @@ public class ItemSwiftStep extends Item implements IBauble {
 
     public static void setWalkMultiplier(ItemStack stack, float value) {
         writeMultiplier(stack, TAG_WALK, value);
+    }
+
+    // ==================================================================
+    // 照明亮度（0 = 关）
+    // ==================================================================
+
+    /**
+     * @return 这个迅步的照明亮度（0 = 不亮，1~15 是光照等级）
+     */
+    public static int getLightLevel(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return DEFAULT_LIGHT;
+        NBTTagCompound tag = stack.getTagCompound();
+        if (tag == null || !tag.hasKey(TAG_LIGHT)) return DEFAULT_LIGHT;
+        return clampLight(tag.getInteger(TAG_LIGHT));
+    }
+
+    public static void setLightLevel(ItemStack stack, int value) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) {
+            stack.setTagCompound(new NBTTagCompound());
+        }
+        stack.getTagCompound()
+            .setInteger(TAG_LIGHT, clampLight(value));
+    }
+
+    /**
+     * 夹到 0~15。
+     *
+     * <p>
+     * 和倍率一样：客户端的数字一律不信，服务端收到包之后要再夹一次。
+     * 交给光照引擎一个 16 以上的值会溢出到元数据的高位，那已经不是「亮一点」了。
+     */
+    public static int clampLight(int value) {
+        if (value < 0) return DEFAULT_LIGHT;
+        return Math.min(value, MAX_LIGHT);
+    }
+
+    /** @return 给日志/提示用的一句话，例如「14（火把）」或「关」 */
+    public static String describeLight(int level) {
+        if (level <= 0) return "关";
+        if (level >= TORCH_LIGHT) return level + "（" + (level == TORCH_LIGHT ? "火把" : "最亮") + "）";
+        return Integer.toString(level);
     }
 
     private static float readMultiplier(ItemStack stack, String key) {
@@ -476,8 +534,9 @@ public class ItemSwiftStep extends Item implements IBauble {
 
     @Override
     public boolean hasEffect(ItemStack stack, int pass) {
-        // 附魔光效：一眼能看出这个迅步是「调过速度的」
-        return getFlightMultiplier(stack) > DEFAULT_MULTIPLIER || getWalkMultiplier(stack) > DEFAULT_MULTIPLIER;
+        // 附魔光效：一眼能看出这个迅步是「调过的」
+        return getFlightMultiplier(stack) > DEFAULT_MULTIPLIER || getWalkMultiplier(stack) > DEFAULT_MULTIPLIER
+            || getLightLevel(stack) > 0;
     }
 
     @Override
@@ -492,11 +551,31 @@ public class ItemSwiftStep extends Item implements IBauble {
                 "item.futa_gtnh.swift_step.tooltip.walk",
                 fixed(getWalkMultiplier(stack), 2)));
         tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector
+                .translateToLocalFormatted("item.futa_gtnh.swift_step.tooltip.light", describeLightLocalized(stack)));
+        tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.air"));
         tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.gui"));
         tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.equip"));
+    }
+
+    /**
+     * 照明那一行的取值部分（会被翻译键套进去）。
+     *
+     * <p>
+     * 和 {@link #describeLight} 的区别：这里要出<b>可翻译</b>的文字
+     * （「关」/「火把」在英文客户端上得是 Off / torch），
+     * 方法名里的 Localized 就是提醒这一点。
+     */
+    public static String describeLightLocalized(ItemStack stack) {
+        int level = getLightLevel(stack);
+        if (level <= 0) return StatCollector.translateToLocal("item.futa_gtnh.swift_step.light.off");
+        if (level == TORCH_LIGHT) {
+            return StatCollector.translateToLocalFormatted("item.futa_gtnh.swift_step.light.torch", level);
+        }
+        return Integer.toString(level);
     }
 
     private static String fixed(float value, int decimals) {
