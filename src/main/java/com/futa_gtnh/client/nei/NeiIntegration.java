@@ -58,6 +58,10 @@ public final class NeiIntegration {
 
         API.registerNEIGuiHandler(new TerminalGuiHandler());
 
+        // 共享存储面板的点击 / 滚轮 / 键盘：1.7.10 只有 NEI 这条能「消费事件」的路，
+        // 所以面板在没装 NEI 时不启用
+        codechicken.nei.guihook.GuiContainerManager.addInputHandler(new StoragePanelInput());
+
         // ★ 关掉 NEI 的「滚轮转移物品」（配置项 inventory.disableMouseScrollTransfer 那一套）。
         //
         // NEIController.mouseScrolled 的第一道判断就是 GuiInfo.hasCustomSlots(gui)：
