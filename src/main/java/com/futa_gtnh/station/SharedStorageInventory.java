@@ -63,6 +63,31 @@ public class SharedStorageInventory implements IInventory {
     /** 客户端：服务端同步过来的槽位内容。 */
     private final ItemStack[] mirror = new ItemStack[SIZE];
 
+    /**
+     * 「正在由服务端的槽位同步写入客户端镜像」。
+     *
+     * <p>
+     * 客户端那边的镜像<b>只能</b>由服务端的槽位同步来写（{@code Container.putStackInSlot}
+     * → {@code Slot.putStack} → {@code IInventory#setInventorySlotContents}）。
+     * 别的模组（MouseTweaks 的拖动、NEI 的模拟点击）在客户端也会直接写槽位，
+     * 那一写就会把显示清掉 —— 而服务端那一格的值<b>并没有变</b>（数量从 5000 变 4936，
+     * 显示值仍然是 64），所以永远不会有回包把它修回来，物品就在界面上「消失」了。
+     *
+     * <p>
+     * 所以这里只认服务端同步那一条路：{@code mixins/MixinContainer} 挂在
+     * {@code Container.putStackInSlot} / {@code putStacksInSlots} 上
+     * （这两个方法<b>只有网络层会调</b>），在调用前后把这个标记打开/关掉。
+     */
+    private static boolean serverSync;
+
+    public static void beginServerSync() {
+        serverSync = true;
+    }
+
+    public static void endServerSync() {
+        serverSync = false;
+    }
+
     public SharedStorageInventory(boolean remote) {
         this.remote = remote;
     }
@@ -162,15 +187,12 @@ public class SharedStorageInventory implements IInventory {
         if (index < 0 || index >= SIZE) return null;
 
         if (remote) {
-            // 客户端不会真的执行取物（那是服务端的事），这里只是让 NEI 之类的
-            // 客户端模拟不至于算出荒唐结果：改镜像，下个 tick 会被服务端纠正回来
+            // 客户端<b>不做任何本地改动</b>：显示只认服务端的槽位同步（见 serverSync 的说明）。
+            // 照样返回一份「取出来」的东西，免得在客户端模拟点击的模组以为这一格是空的
             ItemStack current = mirror[index];
             if (current == null) return null;
-            int taken = Math.min(amount, current.stackSize);
             ItemStack result = current.copy();
-            result.stackSize = taken;
-            current.stackSize -= taken;
-            if (current.stackSize <= 0) mirror[index] = null;
+            result.stackSize = Math.min(amount, current.stackSize);
             return result;
         }
 
@@ -187,7 +209,8 @@ public class SharedStorageInventory implements IInventory {
         if (index < 0 || index >= SIZE) return;
 
         if (remote) {
-            // 服务端的槽位同步（Container.putStackInSlot）落到这里
+            // 只接受服务端的槽位同步，理由见 serverSync
+            if (!serverSync) return;
             mirror[index] = stack == null ? null : stack.copy();
             return;
         }

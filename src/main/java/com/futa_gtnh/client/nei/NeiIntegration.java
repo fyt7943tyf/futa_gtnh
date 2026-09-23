@@ -86,41 +86,63 @@ public final class NeiIntegration {
         // 搬一个物品，落到虚拟格子上语义就乱了。登记之后滚轮空出来给「翻存储区那一页」用
         // （见 client/StoragePanel）。
         if (com.futa_gtnh.tinkers.TinkersAutoFill.isAvailable()) {
-            try {
-                GuiInfo.customSlotGuis.add(tconstruct.tools.gui.CraftingStationGui.class);
-                registerStationOverlay();
-            } catch (Throwable t) {
-                // 匠魂版本对不上：跳过，NEI 的滚轮与配方转移行为保持原样
-                com.futa_gtnh.FutaGtnhMod.LOG.debug("共享存储：注册合成站的 NEI 联动失败", t);
-            }
+            GuiInfo.customSlotGuis.add(tconstruct.tools.gui.CraftingStationGui.class);
         }
+
+        // 合成站的配方转移 handler：这里先注册一次，但真正算数的是晚一点的那次
+        // （NEI 是 LoadComplete 阶段才加载各模组插件的，见 installStationOverlay）
+        installStationOverlay();
     }
 
-    /**
-     * 合成站的配方转移：<b>替换</b>掉匠魂自带的那个 handler。
-     *
-     * <p>
-     * 匠魂的 {@code CraftingStationOverlayHandler} 只把旁边那块存储区当普通箱子 ——
-     * 材料不在当前这一页就判定「没有原料」。我们的实现走服务端直填，
-     * 材料从整个共享存储取（见 {@code client/nei/StationOverlayHandler}）。
-     *
-     * <p>
-     * NEI 的 handler 表是 {@code HashMap.put}（{@code RecipeInfo.overlayMap}），
-     * 后注册的覆盖先注册的；本模组声明了 {@code after:NotEnoughItems}，
-     * 所以我们的 postInit 一定跑在 NEI 加载插件之后，覆盖是稳定的。
-     *
-     * <p>
-     * <b>只换 handler，不换 overlay</b>：幽灵材料指引的坐标仍然是匠魂注册的
-     * {@code CraftingStationStackPositioner}，那个和取料无关。2×2 配方匠魂没注册过，
-     * 这里补一个同样偏移的 overlay（合成站的 3×3 和原版工作台在同一个位置）。
-     */
-    private static void registerStationOverlay() {
-        Class<? extends GuiContainer> station = tconstruct.tools.gui.CraftingStationGui.class;
-        StationOverlayHandler handler = new StationOverlayHandler();
+    /** 已经成功接管过一次（只用来少打一遍日志）。 */
+    private static boolean stationOverlayInstalled;
+    private static boolean stationOverlayFailed;
 
-        API.registerGuiOverlayHandler(station, handler, "crafting");
-        API.registerGuiOverlay(station, "crafting2x2", StationOverlayHandler.OFFSET_X, StationOverlayHandler.OFFSET_Y);
-        API.registerGuiOverlayHandler(station, handler, "crafting2x2");
+    /**
+     * 让合成站的 NEI 配方转移由我们接管：材料从整个共享存储取，不受「当前第几页」限制。
+     *
+     * <p>
+     * <b>为什么要单独抽一个方法、而且要很晚才调</b>：NEI 是在
+     * {@code FMLLoadCompleteEvent}（{@code NEIModContainer.loadComplete} →
+     * {@code ClientHandler.loadPluginsList}）才加载各模组的 {@code IConfigureNEI} 插件的。
+     * 也就是说匠魂注册它那个「只认当前这一页」的 handler 发生在<b>我们的 postInit 之后</b>，
+     * 会把我们先注册的覆盖掉（NEI 的 handler 表就是个 {@code HashMap.put}）。
+     * 所以这里在 {@code loadComplete} 之后再注册一次；万一那个时机还不够晚，
+     * 第一次打开「挂着共享存储的合成站」时还会再补一次
+     * （见 {@code client/StoragePanel} 的 {@code hookNeiOnce}）—— 那时候 NEI 的插件
+     * 早就加载完了，一定盖得住。
+     *
+     * <p>
+     * 幂等：重复调用只是把同一份注册再 put 一遍。
+     */
+    public static void installStationOverlay() {
+        if (!com.futa_gtnh.tinkers.TinkersAutoFill.isAvailable()) return;
+
+        try {
+            Class<? extends GuiContainer> station = tconstruct.tools.gui.CraftingStationGui.class;
+            StationOverlayHandler handler = new StationOverlayHandler();
+
+            // 只换 handler，不动匠魂注册的 CraftingStationStackPositioner（幽灵材料指引的坐标）
+            API.registerGuiOverlayHandler(station, handler, "crafting");
+            // 2×2 配方匠魂从没注册过，补一个同样偏移的 overlay（合成站的 3×3 和原版工作台同一位置）
+            API.registerGuiOverlay(
+                station,
+                "crafting2x2",
+                StationOverlayHandler.OFFSET_X,
+                StationOverlayHandler.OFFSET_Y);
+            API.registerGuiOverlayHandler(station, handler, "crafting2x2");
+
+            if (!stationOverlayInstalled) {
+                stationOverlayInstalled = true;
+                com.futa_gtnh.FutaGtnhMod.LOG.info("合成站的 NEI 配方转移已接管：材料从整个共享存储取（含 2×2 配方）");
+            }
+        } catch (Throwable t) {
+            // 匠魂版本对不上：NEI 那边保持原样（材料只能在当前这一页里找），别的功能不受影响
+            if (!stationOverlayFailed) {
+                stationOverlayFailed = true;
+                com.futa_gtnh.FutaGtnhMod.LOG.warn("共享存储：注册合成站的 NEI 配方转移失败，材料仍然只能在当前这一页里找", t);
+            }
+        }
     }
 
     /**

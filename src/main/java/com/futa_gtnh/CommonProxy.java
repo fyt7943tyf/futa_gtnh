@@ -66,6 +66,19 @@ public class CommonProxy {
         // 处理与其他模组（例如 GregTech / NEI）的联动
     }
 
+    /**
+     * 所有模组都加载完之后再补一次的联动（由 {@code FMLLoadCompleteEvent} 转发）。
+     *
+     * <p>
+     * 存在的理由：NEI 是在 {@code LoadComplete} 阶段才加载各模组插件的
+     * （{@code NEIModContainer.loadComplete} → {@code ClientHandler.loadPluginsList}），
+     * 所以「要盖过别的模组注册的 NEI handler」这种事必须等到这之后再做。
+     * 具体见 {@code client/nei/NeiIntegration#installStationOverlay}。
+     */
+    public void lateInit() {
+        // 服务端没有 NEI 联动要做
+    }
+
     public void serverStarting(FMLServerStartingEvent event) {
         event.registerServerCommand(new CommandSharedStorage());
     }

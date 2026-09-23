@@ -127,6 +127,13 @@ public class FutaGtnhMod {
     @Mod.EventHandler
     public void loadComplete(cpw.mods.fml.common.event.FMLLoadCompleteEvent event) {
         com.futa_gtnh.locator.OreVeinCatalog.isAvailable();
+        // NEI 是在这个阶段才加载各模组插件的，所以「盖过别的模组注册的 NEI handler」
+        // 这种事要等它之后再补一次（实现只在客户端，见 CommonProxy#lateInit）
+        try {
+            proxy.lateInit();
+        } catch (Throwable t) {
+            LOG.warn("模组加载完成后的联动补充失败（不影响其它功能）", t);
+        }
     }
 
     /** 服务端停止前落盘。此时各维度还没被卸载，写文件是安全的。 */
