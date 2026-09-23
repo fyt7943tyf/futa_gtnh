@@ -121,6 +121,12 @@ public class PacketLocatorAction implements IMessage {
                     // 否则「找到 → 传送 → 再传送」会变成廉价的地图跳跃
                     LocatorManager.cancel(player);
                     break;
+                case OK_CARVED:
+                    // 目标整个埋在实心方块里，落脚点是就地清出来的 —— 说一声，
+                    // 免得玩家以为传送把自己塞进了墙里
+                    LocatorManager.cancel(player);
+                    FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.arrived_carved");
+                    break;
                 case NO_SAFE_SPOT:
                     FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.no_safe_spot");
                     break;

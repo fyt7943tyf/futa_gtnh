@@ -94,3 +94,5 @@ futa_gtnh.locator.msg.no_result=No result available, please search again
 futa_gtnh.station.chest=Shared Storage
 futa_gtnh.station.title.items= · %s items
 futa_gtnh.station.title.page= · %s/%s
+
+futa_gtnh.locator.msg.arrived_carved=Target is buried in solid blocks; carved a small standing spot for you (the target block itself is untouched)
