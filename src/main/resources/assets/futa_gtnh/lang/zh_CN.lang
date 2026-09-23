@@ -90,3 +90,5 @@ futa_gtnh.locator.msg.no_result=没有可用的结果，请重新搜索
 futa_gtnh.station.chest=共享存储
 futa_gtnh.station.title.items= · %s 项
 futa_gtnh.station.title.page= · %s/%s
+
+futa_gtnh.locator.msg.arrived_carved=目标整个埋在实心方块里，已就地清出两格落脚（那块方块本身没动）

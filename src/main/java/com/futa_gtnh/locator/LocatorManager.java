@@ -125,20 +125,28 @@ public final class LocatorManager {
     /**
      * 传送到上次找到的位置。
      *
-     * @return 是否成功；失败的原因（没结果 / 找不到安全落脚点）由调用方告知玩家
+     * @return 结果；失败/开洞的原因由调用方告知玩家
      */
     public static TeleportResult teleport(EntityPlayerMP player) {
         int[] target = RESULTS.get(player.getUniqueID());
         if (target == null) return TeleportResult.NO_RESULT;
 
-        if (!TeleportHelper.teleportNear(player, target[0], target[1], target[2])) {
-            return TeleportResult.NO_SAFE_SPOT;
+        switch (TeleportHelper.teleportNear(player, target[0], target[1], target[2])) {
+            case NATURAL:
+                return TeleportResult.OK;
+            case CARVED:
+                return TeleportResult.OK_CARVED;
+            case FAILED:
+            default:
+                return TeleportResult.NO_SAFE_SPOT;
         }
-        return TeleportResult.OK;
     }
 
     public enum TeleportResult {
+        /** 落在现成的安全位置上 */
         OK,
+        /** 目标埋在实心方块里，就地清了两格 */
+        OK_CARVED,
         NO_RESULT,
         NO_SAFE_SPOT
     }
