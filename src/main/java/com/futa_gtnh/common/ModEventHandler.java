@@ -6,6 +6,7 @@ import com.futa_gtnh.exchange.StorageActionHandler;
 import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.locator.LocatorManager;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.tinkers.TinkersAutoFill;
 
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
@@ -39,6 +40,8 @@ public class ModEventHandler {
         SharedStorageManager.onServerTick();
         // 推进寻物扫描。没有任务时它第一件事就是返回，开销是一次 isEmpty()
         LocatorManager.onServerTick();
+        // 匠魂工作站的自动补料（没装匠魂、或配置关掉时，第一步就返回）
+        TinkersAutoFill.onServerTick();
     }
 
     /** 玩家下线时清掉他那份操作频率计数，避免 UUID 表越积越大。 */
