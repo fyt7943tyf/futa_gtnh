@@ -130,6 +130,11 @@ public class PacketLocatorAction implements IMessage {
                 case NO_SAFE_SPOT:
                     FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.no_safe_spot");
                     break;
+                case NO_SAFE_SPOT_PROTECTED:
+                    // 附近本来能开洞，但那两格里是矿石这类不该动的方块 ——
+                    // 说清楚是「不肯挖」而不是「找不到」，否则玩家会以为魔杖坏了
+                    FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.no_safe_spot_protected");
+                    break;
                 case NO_RESULT:
                 default:
                     FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.no_result");
