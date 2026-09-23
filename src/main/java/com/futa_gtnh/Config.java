@@ -152,6 +152,19 @@ public class Config {
     public static boolean hideNeiPanelInTerminalGui = true;
 
     // ------------------------------------------------------------------
+    // 匠魂工作站自动补料（服务端行为）
+    // ------------------------------------------------------------------
+
+    /**
+     * 开着匠魂工作站界面时，缺的部件 / 材料自动从共享存储补（见 {@code com.futa_gtnh.tinkers} 包）。
+     *
+     * <p>
+     * 判定和取料都在服务端，所以各端读的是<b>服务端</b>那份配置。只在玩家开着那个工作站的
+     * 界面时才会补，关掉就停 —— 免得变成一个无人看管的自动吞料机。
+     */
+    public static boolean tinkersAutoFill = true;
+
+    // ------------------------------------------------------------------
     // 合成
     // ------------------------------------------------------------------
 
@@ -208,6 +221,12 @@ public class Config {
 
         enableRecipe = configuration
             .getBoolean("enableRecipe", Configuration.CATEGORY_GENERAL, enableRecipe, "是否注册共享终端的合成配方。");
+
+        tinkersAutoFill = configuration.getBoolean(
+            "tinkersAutoFill",
+            Configuration.CATEGORY_GENERAL,
+            tinkersAutoFill,
+            "开着匠魂工作站界面时，自动从共享存储补上缺的部件/材料（工匠工作站、锻造台、部件加工台、合成站、冶炼炉）。" + "只在界面开着时生效；工作站里什么都没放时不猜、不补。服务端行为。");
 
         enableSwiftStep = configuration.getBoolean(
             "enableSwiftStep",

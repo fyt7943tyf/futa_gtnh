@@ -85,6 +85,13 @@ dependencies {
     compileOnly("com.github.GTNewHorizons:MouseTweaks:2.5.3-GTNH:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:MouseTweaks:2.5.3-GTNH:dev")
 
+    // ---- TinkersConstruct（匠魂，可选联动）----
+    // 只在「工作站自动补料」里用到（com.futa_gtnh.tinkers 包）：开着工匠工作站 /
+    // 部件加工台 / 合成站 / 冶炼炉的界面时，缺的部件与材料自动从共享存储补。
+    // 没装匠魂时那整包代码都不会被加载（见 TinkersAutoFill 的探测守卫）。
+    // 运行时它本来就随整合包/GT5 一起进来，所以这里只需要 compileOnly。
+    compileOnly("com.github.GTNewHorizons:TinkersConstruct:1.14.111-GTNH:dev")
+
     // ---- NotEnoughCharacters（NEChar，可选联动）----
     // 拼音/模糊音搜索复用它的 PinIn 上下文（net.moecraft.nechar.NecharUtils），
     // 装了就自动启用、没装退回自研 pinyin.txt（见 client/NecharBridge.java）。
