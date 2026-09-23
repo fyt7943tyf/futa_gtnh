@@ -15,6 +15,7 @@ item.futa_gtnh.swift_step.tooltip.equip=Sneak + right-click: equip to a free bau
 futa_gtnh.swift_step.gui.flight=Flight speed
 futa_gtnh.swift_step.gui.walk=Movement speed
 futa_gtnh.swift_step.gui.range=Multiplier range 1.00 ~ %s (server config wins)
+futa_gtnh.swift_step.gui.server_clamp=Multiplayer cap %sx applied (higher gets rubber-banded)
 futa_gtnh.swift_step.gui.hint=Only works while worn
 
 key.categories.futa_gtnh=FutaGTNH

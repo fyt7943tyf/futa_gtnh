@@ -70,13 +70,33 @@ public class Config {
      * 就算客户端还显示着 20x，实际写进物品的也会被压到上限。
      *
      * <p>
-     * 默认 20 差不多就是<b>专用服务器的物理上限</b>了：飞行终端速度约等于
-     * {@code flySpeed × 9.1} 格/tick，20 倍正好是 9.1 格/tick，而
-     * {@code NetHandlerPlayServer} 在单轴超过 10 格/tick 时会判定
-     * 「moved too quickly」并把你拉回原地。再往上就会开始被拉回
-     * （单人 / 局域网主机不受这条检查限制，所以自己开档感觉不出来）。
+     * <b>专用服务器的硬上限是 18.0，超过就是一个加速都拿不到</b> —— 不是「快一点但
+     * 有点风险」，而是每 tick 都被服务端判定 {@code moved too quickly} 并拉回原地。
+     * 推导（全部来自原版源码）：
+     *
+     * <pre>
+     *   飞行每 tick 水平加速 = flySpeed = 倍率 × 0.05
+     *   飞行水平阻力         = 0.91        （EntityLivingBase.moveEntityWithHeading）
+     *   终端速度             = flySpeed / (1 - 0.91) = 倍率 × 0.5556 格/tick
+     *   服务端判定           = 位移平方和 &gt; 100，即 位移 &gt; 10 格/tick
+     *                          （NetHandlerPlayServer.processPlayer）
+     *   ⇒ 倍率 ≤ 10 / 0.5556 = 18.0
+     * </pre>
+     *
+     * 校验：代倍率 1 进去得 0.556 格/tick = 11.1 格/秒，正好是创造模式飞行的体感。
+     *
+     * <p>
+     * <b>单人存档不受这条限制</b>：那个判定带一个
+     * {@code !isSinglePlayer() || !getServerOwner().equals(playerName)} 的豁免条件，
+     * 自己开档时整条检查会被跳过（所以「单人里好好的、一连服务器就失效」）。
+     * 想在单人里开更快就把这个值调大。
+     *
+     * <p>
+     * 默认 16 是 18 再留一点余量（斜着飞加上垂直分量时位移的平方和会更大）。
+     * 就算这里调得比 18 高，客户端在多人服务器上也会自动压到 18 并在界面上说明，
+     * 不会让玩家对着一个「按了没反应」的速度发呆。
      */
-    public static double swiftStepMaxMultiplier = 20.0D;
+    public static double swiftStepMaxMultiplier = 16.0D;
 
     // ------------------------------------------------------------------
     // 寻物魔杖
@@ -201,7 +221,7 @@ public class Config {
             (float) swiftStepMaxMultiplier,
             1.0F,
             100.0F,
-            "迅步的速度倍率上限（原版速度的倍数）。实际上限由服务端决定；超过约 20 倍时专用服务器会因「moved too quickly」把人拉回。");
+            "迅步的速度倍率上限（原版速度的倍数）。专用服务器的飞行硬上限是 18.0：超过之后每 tick 都会被服务端判定 moved too quickly 并拉回原地，等于完全没加速。单人存档不受此限制。");
 
         enableLocatorWand = configuration.getBoolean(
             "enableLocatorWand",
@@ -232,6 +252,20 @@ public class Config {
             20,
             72000,
             "一次寻物扫描最多跑多少 tick，超时放弃（兜底，防止任务一直挂在服务端 tick 里）。");
+
+        // 上限调到超过服务器安全值时提醒一句。
+        //
+        // 这个值不是"偏好"，是物理约束：超过去之后飞行速度不是"快一点但有点风险"，
+        // 而是每 tick 都被服务端拉回原地，玩家会觉得"这东西坏了"却查不出原因。
+        float safeFly = com.futa_gtnh.item.ItemSwiftStep.serverSafeFlyMultiplier();
+        if (swiftStepMaxMultiplier > safeFly) {
+            FutaGtnhMod.LOG.warn(
+                "迅步：swiftStepMaxMultiplier={} 超过了专用服务器的飞行安全上限 {}。"
+                    + "超过之后服务端会每 tick 判定 moved too quickly 并把玩家拉回原地，等于完全没加速"
+                    + "（单人存档不受此限制）。客户端在多人服务器上会自动压到安全值。",
+                swiftStepMaxMultiplier,
+                safeFly);
+        }
 
         if (configuration.hasChanged()) {
             configuration.save();

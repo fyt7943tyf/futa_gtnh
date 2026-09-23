@@ -1,5 +1,6 @@
 package com.futa_gtnh.client;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.PlayerCapabilities;
@@ -50,11 +51,25 @@ public class SwiftStepClientHandler {
     /** 记着上次是给哪个玩家对象接管的，换人（重进世界 / 重生）就作废重来。 */
     private static EntityPlayer watchedPlayer;
 
+    /**
+     * 当前生效的飞行倍率是不是被「服务器安全上限」压过。
+     *
+     * <p>
+     * 给界面用：玩家调了 20 倍却只跑出 18 倍的效果，得让他知道为什么，
+     * 否则只会觉得「这东西坏了」。
+     */
+    private static boolean clampedForServer;
+
     public static void register() {
         // FML 自己的 TickEvent 走 FMLCommonHandler 那条总线，不是 Forge 总线
         FMLCommonHandler.instance()
             .bus()
             .register(new Listener());
+    }
+
+    /** @return 当前飞行倍率是不是被服务器安全上限压住了（界面据此提示玩家） */
+    public static boolean isClampedForServer() {
+        return clampedForServer;
     }
 
     /**
@@ -87,6 +102,23 @@ public class SwiftStepClientHandler {
             float multiplier = charm == null ? ItemSwiftStep.DEFAULT_MULTIPLIER
                 : ItemSwiftStep.getFlightMultiplier(charm);
 
+            // 多人服务器上把倍率压到服务端不会拉回的值。
+            //
+            // 这不是「保守起见」，而是超过那个值之后<b>一点加速都拿不到</b>：
+            // NetHandlerPlayServer 每 tick 检查位移的平方和，超过 100（即 10 格/tick）
+            // 就把你 setPlayerLocation 回原位。而那个检查带一个
+            // 「isSinglePlayer 且你是房主」的豁免条件，所以单人存档完全不受影响。
+            //
+            // 压到安全值总比维持一个「每 tick 被拉回」的倍率强 ——
+            // 18 倍能跑，20 倍等于没装。
+            float safe = ItemSwiftStep.serverSafeFlyMultiplier();
+            clampedForServer = false;
+            if (multiplier > safe && !Minecraft.getMinecraft()
+                .isSingleplayer()) {
+                multiplier = safe;
+                clampedForServer = true;
+            }
+
             PlayerCapabilities capabilities = player.capabilities;
 
             if (multiplier > ItemSwiftStep.DEFAULT_MULTIPLIER) {
@@ -100,6 +132,7 @@ public class SwiftStepClientHandler {
             } else if (originalFlySpeed != null) {
                 capabilities.setFlySpeed(originalFlySpeed.floatValue());
                 originalFlySpeed = null;
+                clampedForServer = false;
             }
         }
     }
