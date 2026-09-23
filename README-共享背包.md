@@ -88,6 +88,13 @@ GTNH 到中后期，仓库管理会变成主要负担：几十个箱子、抽屉
 | 滚轮（鼠标在网格上） | 翻页 |
 | PageUp / PageDown | 翻页 |
 
+> **滚轮只翻页，任何时候都不会取出物品。** 整合包里的 **MouseTweaks** 默认开着「滚轮 tweak」
+> （`config/MouseTweaks.cfg` 的 `B:WheelTweak=true`），它的语义是「滚轮滚过某一格时替你在两个
+> 物品栏之间搬一个物品」——做法是**替玩家合成一次点击**打到那一格上。落到共享存储上就变成
+> 「滚一格掉出来一个物品」。本模组在终端界面上实现了 MouseTweaks 的官方接口
+> `IMTModGuiContainer` 并把滚轮 tweak 关掉，所以这个界面里滚轮不会再掏东西
+> （其它界面里 MouseTweaks 照常工作）。详见下面「为什么滚轮以前会掏出物品」。
+
 > **[全部] / [快捷栏] 会跳过你当前手持的那一格** —— 一键倒空背包太容易手滑，
 > 而「工具留在手上」是最不容易出事的默认值。真想把正拿着的东西也存进去，
 > 单独 Shift 点那一格即可。
@@ -977,6 +984,48 @@ GT 那边如果截断或拒收就把差额还回存储。
 | 原版 `GuiButton` 高度 ≠ 20px 时按钮贴图底边被裁掉，按钮看起来和背景边框「长在一起」 | 自绘按钮（`client/GuiSmallButton.java`）：上下两半分别对齐贴图区段顶部/底部采样，任意高度都有完整边框 |
 | lwjgl3ify（LWJGL3/新 Java）下 IME 字符事件 keyState 恒为真，旧的「>255 字符注入」会失效或重复 | `client/ImeCompat.java` 探测 lwjgl3ify 的 `TextFieldHandler` 在不在：在 → 走它对 GuiTextField 的自动注入；不在 → 保留旧路径（InputFix 场景） |
 | NEI 的配方转移只认玩家背包且靠模拟点击，无法从共享存储取料 | 自己的 overlay handler 把布局打包发给服务端直填合成栏（`exchange/CraftFiller.java`），不模拟点击 |
+| MouseTweaks 的「滚轮 tweak」会**替玩家合成点击**打在鼠标下的格子上，共享格「点一下 = 取一个」，于是滚轮滚一格就掉一个物品 | 终端界面实现 MouseTweaks 的 `IMTModGuiContainer` 接口并让 `isWheelTweakDisabled()` 返回 true（`client/MouseTweaksCompat.java`），见下面一节 |
+
+### 为什么滚轮以前会掏出物品（MouseTweaks 的滚轮 tweak）
+
+整合包自带 **MouseTweaks**，配置里 `B:WheelTweak=true`（默认值），注释写得很清楚：
+*"Scroll to quickly move items between inventories"* —— 滚轮滚过某一格时，它替你在两个物品栏
+之间搬一个物品。它不是「发个特殊包」，而是**合成一次真实的槽位点击**：
+
+```
+MouseTweaksForge.onRenderTick           ← 每个渲染帧跑一次
+  └ Runtime.onUpdateInGui               ← 读滚轮、看鼠标底下是哪一格
+      └ WheelHandler.handleWheelTweak
+          └ ContainerContext.clickSlot  ← 合成点击（左键拿起 / 右键放一个……）
+              └ GuiContainer.handleMouseClick 或 PlayerControllerMP.windowClick
+```
+
+对原版容器这套逻辑没问题。但共享存储的格子是**虚拟格**，在
+`ContainerSharedTerminal.slotClick` 里的语义是「左键点一下 = 取出 1 个」，
+于是「滚轮替你点了一下」= **滚一格掉出来一个物品** —— 而玩家只是想翻页。
+（这也是为什么数量恰好是 1：MouseTweaks 的搬运是按「个」合成的左键点击，
+不是中键那套「取一整叠」。）
+
+**处理办法**：MouseTweaks 提供了官方兼容接口 `yalter.mousetweaks.api.IMTModGuiContainer`，
+界面实现它就等于说「这个容器我自己管」。其中：
+
+- `isWheelTweakDisabled()` 返回 true → 它不在这个界面上做滚轮搬运（**唯一的行为改动**）；
+- 其它方法照原版语义实现（槽位表就是 `inventorySlots`，`clickModSlot` 依旧转交给
+  `handleMouseClick(slot, slotNumber, 鼠标键, shift ? 1 : 0)`），
+  所以 MouseTweaks 的拖拽 / 左键 tweak 在本界面里的手感和以前完全一样。
+
+两个实现上的注意点：
+
+1. **接口类型必须隔离在一个懒加载的类里**（`client/MouseTweaksCompat.java` 的嵌套类 `Gui`）。
+   没装 MouseTweaks 时那个接口不存在，加载会 `NoClassDefFoundError`；
+   外面用 modid + 类名双探测守卫，缺席时照旧 `new GuiSharedTerminal(...)`
+   （和 `client/NecharBridge.java` 一个套路）。打开界面统一走
+   `GuiSharedTerminal.create(...)`，别直接 `new`。
+2. MouseTweaks 会按「界面有没有实现这个接口」把容器分成「模组界面 / 原版界面」两条路
+   （`ModCompatibility.getModGuiContainerID`：实现了就是 2，普通原版 `GuiContainer` 是 1）。
+   **它在 ID 为 1 时根本不问滚轮开关**（`ContainerContext.isWheelDisabledForThisContainer`
+   里 `if (guiContainerID == 1) return false;`），所以「只加一个开关」是不够的 ——
+   必须真的把接口实现上，让它把本界面认成 2 号。
 
 ### 构建
 
@@ -990,3 +1039,5 @@ gradlew.bat spotlessApply  # 修正格式
 GT 的 API；中文输入法支持建立在 lwjgl3ify 的 GuiTextField 补丁之上）。
 NEI 是可选联动（`after:NotEnoughItems`，配方转移取料 + 界面适配），
 NotEnoughCharacters 也是可选联动（装了就复用它的拼音/模糊音匹配），不装都能跑。
+MouseTweaks 同样是可选联动：装了就把终端界面上的滚轮搬运关掉（见上文），
+不装则那段兼容代码根本不会被加载（dev 环境里也装了一份，方便直接验证）。

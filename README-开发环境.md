@@ -136,6 +136,7 @@ manifest 里就不会再写 `MixinConfigs`，也不需要 `mixins.futa_gtnh.json
 | lwjgl3ify | 3.0.35 | LWJGL3 / 新 Java 环境。搜索框的**中文输入法**支持来自它对原版 `GuiTextField` 的补丁 | **硬依赖**（`required-after:lwjgl3ify`） |
 | NotEnoughItems | 2.8.144-GTNH | NEI 配方查看器：配方转移从共享存储取料、界面适配 | 可选联动（运行时探测） |
 | NotEnoughCharacters | 1.7.10-1.5.5-GTNH | 装了就复用它的拼音/模糊音搜索（PinIn） | 可选联动（运行时探测） |
+| MouseTweaks | 2.5.3-GTNH | 整合包自带。终端界面要关掉它的「滚轮搬运」，否则滚轮会往外掏物品 | 可选联动（运行时探测，dev 也装了一份） |
 | GTNHLib | 0.11.51 | GTNH 公共库 | compileOnly |
 | Baubles-Expanded | 2.2.23-GTNH | 迅步饰品的 IBauble 接口 | 可选（运行时探测） |
 
