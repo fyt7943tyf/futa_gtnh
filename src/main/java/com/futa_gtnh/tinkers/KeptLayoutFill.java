@@ -11,6 +11,7 @@ import net.minecraft.inventory.IInventory;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
 
+import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.exchange.DeltaRecorder;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -67,6 +68,16 @@ final class KeptLayoutFill {
         final int count;
         final Memory[] memories;
 
+        /**
+         * 本次 tick 之前有没有「拿走合成产物」这个动作。
+         *
+         * <p>
+         * 这是本类<b>最可靠的那个信号</b>：只有拿产物才意味着合成栏被真的消耗了一次，
+         * 也才该回填。它来自匠魂自己的 {@code SlotCraftingStation.onPickupFromSlot}
+         * （见 {@code mixins/MixinSlotCraftingStation}），和玩家点什么键、怎么点都无关。
+         */
+        boolean crafted;
+
         Tracked(IInventory inventory, int first, int count) {
             this.inventory = inventory;
             this.first = first;
@@ -118,6 +129,19 @@ final class KeptLayoutFill {
     }
 
     /**
+     * 玩家<b>拿走了合成产物</b> —— 也就是说合成栏刚被真的消耗了一次，这一次才允许回填。
+     *
+     * <p>
+     * 由 {@code mixins/MixinSlotCraftingStation} 挂在匠魂自己的成品槽上。
+     * 有了这个信号，「回填」这件事就有了明确的前提，不再依赖「减少的数量看起来像不像合成」。
+     */
+    static void noteCraft(Container container) {
+        if (TRACKED.isEmpty() || container == null) return;
+        Tracked tracked = TRACKED.get(container);
+        if (tracked != null) tracked.crafted = true;
+    }
+
+    /**
      * 玩家<b>一次性清空</b>了整份库存（「倒空合成栏」按钮那种不经过点击的直接写入）。
      *
      * <p>
@@ -156,7 +180,10 @@ final class KeptLayoutFill {
         SharedStorage storage, DeltaRecorder recorder) {
         IInventory grid = station.craftMatrix;
         if (grid == null) return;
-        tick(player, container, grid, 0, Math.min(9, grid.getSizeInventory()), storage, recorder);
+        // requireCraft = true：合成站只在「刚拿走过产物」时才回填。
+        // 合成栏变少的原因太多了（玩家拿走、倒空、别的模组动过），
+        // 只有「拿产物」这一个动作能证明是合成吃掉的。
+        tick(player, container, grid, 0, Math.min(9, grid.getSizeInventory()), true, storage, recorder);
     }
 
     /** 冶炼炉：待熔物就在 SmelteryLogic 自己的库存里。 */
@@ -164,19 +191,28 @@ final class KeptLayoutFill {
         SharedStorage storage, DeltaRecorder recorder) {
         SmelteryLogic logic = smeltery.logic;
         if (logic == null) return;
-        tick(player, container, logic, 0, logic.getSizeInventory(), storage, recorder);
+        // requireCraft = false：冶炼炉没有「拿产物」这个动作，熔掉的过程本身就是消耗，
+        // 所以这里仍然按「少了就补」的老规则走（玩家亲手动过的格子照样跳过）
+        tick(player, container, logic, 0, logic.getSizeInventory(), false, storage, recorder);
     }
 
     private static void tick(EntityPlayerMP player, Container container, IInventory inv, int first, int count,
-        SharedStorage storage, DeltaRecorder recorder) {
+        boolean requireCraft, SharedStorage storage, DeltaRecorder recorder) {
         if (count <= 0) return;
 
         Tracked tracked = TRACKED.get(container);
         if (tracked == null || tracked.inventory != inv || tracked.count != count) {
+            boolean crafted = tracked != null && tracked.crafted;
             tracked = new Tracked(inv, first, count);
+            tracked.crafted = crafted;
             TRACKED.put(container, tracked);
         }
         Memory[] memory = tracked.memories;
+
+        // 本 tick 允许回填吗：冶炼炉永远允许；合成站要求「刚拿走过产物」。
+        // 标记读完就清掉，所以一次合成只对应一次回填
+        boolean mayRefill = !requireCraft || tracked.crafted;
+        tracked.crafted = false;
 
         for (int i = 0; i < count; i++) {
             int slot = first + i;
@@ -191,9 +227,15 @@ final class KeptLayoutFill {
             }
 
             if (currentKey == null) {
-                // 空格：只有「这里原本摆过东西」时才补 —— 这就是合成/熔炼后的自动回填
+                // 空格：只有「这里原本摆过东西」时才补 —— 这就是合成后的回填
                 if (memory[i] != null && memory[i].key != null) {
-                    refill(player, inv, slot, memory[i], storage, recorder);
+                    if (mayRefill) {
+                        refill(player, inv, slot, memory[i], storage, recorder);
+                    } else {
+                        // 没人拿走产物，那这一格就是被玩家（或别的模组）搬走的：认账，别补
+                        memory[i] = null;
+                        noteSkippedRefill(player, false);
+                    }
                 }
                 continue;
             }
@@ -202,14 +244,40 @@ final class KeptLayoutFill {
                 // 玩家自己动了这一格：以现状为准重新记
                 memory[i] = snapshot(currentKey, current);
             } else if (current.stackSize < memory[i].count) {
-                // 被合成 / 被熔掉了一部分：补回原数量
-                refill(player, inv, slot, memory[i], storage, recorder);
+                if (mayRefill) {
+                    // 刚拿走过产物：这是被合成消耗掉的部分，补回原数量
+                    refill(player, inv, slot, memory[i], storage, recorder);
+                } else {
+                    // 没拿过产物却变少了：是玩家自己拿走的，把记忆降到现状（下次合成只补到这么多）
+                    memory[i].count = current.stackSize;
+                    noteSkippedRefill(player, true);
+                }
             } else if (current.stackSize > memory[i].count) {
                 // 玩家自己加料了：抬高记忆值
                 memory[i].count = current.stackSize;
             }
         }
     }
+
+    /**
+     * 跳过回填时各报一次日志（每个进程一次），并给玩家一行聊天提示。
+     *
+     * <p>
+     * 这不是功能提示，而是「到底有没有生效」的唯一肉眼可见的凭据：
+     * 「九宫格里的东西拿不出来」这个 bug 的前提是补料在跑、而抑制没跑，
+     * 所以下次再出现时，先看有没有这一行 —— 没有就说明跑的还是没有这段逻辑的旧版本。
+     */
+    private static void noteSkippedRefill(EntityPlayerMP player, boolean partially) {
+        if (skippedRefillLogged) return;
+        skippedRefillLogged = true;
+        FutaGtnhMod.LOG.info("匠魂自动补料：识别出合成栏是玩家自己动的（{}），已跳过回填 —— 这条只报一次", partially ? "数量变少但没拿过产物" : "整格被清空但没拿过产物");
+        if (player != null) {
+            player.addChatMessage(
+                new net.minecraft.util.ChatComponentText("\u00a77[共享存储] 自动补料：这一格是你自己动的，已跳过回填（本提示每次启动只出现一次）"));
+        }
+    }
+
+    private static boolean skippedRefillLogged;
 
     private static Memory snapshot(ItemKey key, ItemStack stack) {
         if (key == null || stack == null) return null;

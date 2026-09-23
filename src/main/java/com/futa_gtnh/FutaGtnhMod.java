@@ -85,6 +85,14 @@ public class FutaGtnhMod {
     public void postInit(FMLPostInitializationEvent event) {
         LOG.info("{} postInit", NAME);
         proxy.postInit(event);
+        // 匠魂联动的探测提前做掉：混入是在类加载那一刻生效的，早一点加载
+        // 就能让「已启用」那条日志（以及 mixin 应用失败时的报错）出现在启动阶段，
+        // 而不是等到第一个 tick。匠魂缺席时它会自己安静返回
+        try {
+            com.futa_gtnh.tinkers.TinkersAutoFill.prewarm();
+        } catch (Throwable t) {
+            LOG.warn("匠魂联动预热失败（功能会按缺席处理）", t);
+        }
     }
 
     @Mod.EventHandler
