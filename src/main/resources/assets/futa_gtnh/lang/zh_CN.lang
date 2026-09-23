@@ -22,6 +22,8 @@ futa_gtnh.gui.tab.items=物品
 futa_gtnh.gui.tab.fluids=流体
 
 futa_gtnh.gui.armor=装备
+futa_gtnh.panel.search=在共享存储里搜索…
+futa_gtnh.panel.page=第 %s/%s 页 · %s 条
 futa_gtnh.gui.crafting=合成
 
 futa_gtnh.gui.auto.on=自动入库 开
