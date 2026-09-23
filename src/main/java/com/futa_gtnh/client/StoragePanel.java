@@ -8,12 +8,14 @@ import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.client.renderer.Tessellator;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.StatCollector;
 
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
 
+import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStationView;
 import com.futa_gtnh.shared.ItemKey;
@@ -122,6 +124,7 @@ public final class StoragePanel {
 
         rebuildIfNeeded();
         pushView(station);
+        applyDisplay(station);
         updateTitleSuffix(station);
 
         if (!toggled) return;
@@ -240,6 +243,63 @@ public final class StoragePanel {
         if (keys.equals(sentKeys)) return;
         sentKeys = keys;
         send(station, keys, false);
+    }
+
+    /**
+     * 客户端：把这一页直接铺进那 27 个格子的镜像。
+     *
+     * <p>
+     * <b>为什么不能只等服务端的槽位同步。</b>格子里画什么只取决于客户端镜像，
+     * 而点击是「把槽位号发给服务端」的 —— 两条路完全独立。服务端那条路
+     * （{@code detectAndSendChanges} → {@code S2FPacketSetSlot} → {@code putStackInSlot}）
+     * 一旦不成立，症状就正好是玩家报的那样：<b>东西确实在、点得动，但格子是空的</b>。
+     * 终端界面从一开始就是客户端自己铺显示（见 {@code GhostInventory}），
+     * 这里补齐同样的做法。
+     *
+     * <p>
+     * 每帧都比一遍、不一致才写（内容一样时不重建对象）：这样别的模组在客户端
+     * 模拟点击把某一格清掉之后（MouseTweaks 拖动、NEI 的模拟），下一帧自己就恢复了 ——
+     * 当初给客户端写入加 {@code serverSync} 闸门就是为了防那个「东西拿起来之后
+     * 从仓库里消失」的现象，现在多了一层自愈，闸门本身照旧留着。
+     *
+     * <p>
+     * 数量取 {@code min(真实数量, 64)}，真实数量由 {@link StationAmounts} 另外画。
+     */
+    private void applyDisplay(StationRef station) {
+        int filled = 0;
+        for (int i = 0; i < PAGE; i++) {
+            ItemStack expected = null;
+            StorageViewEntry entry = entryAt(i);
+            if (entry != null) {
+                ItemKey key = entry.getItemKey();
+                long amount = entry.getAmount();
+                if (key != null && amount > 0L) {
+                    expected = key.prototype(Math.min(amount, SharedStorageInventory.MAX_DISPLAY));
+                    filled++;
+                }
+            }
+            station.inventory.setDisplay(i, expected);
+        }
+
+        logMirrorDiagOnce(station, filled);
+    }
+
+    private static boolean mirrorDiagLogged;
+
+    /**
+     * 一次性日志：显示走的是客户端铺的那条路，那服务端的槽位同步到底有没有生效？
+     *
+     * <p>
+     * 这个数字是排查「格子是空的」类问题的分界线：为 0 说明原版那条路根本没到客户端，
+     * 而显示本来就已经不依赖它了。
+     */
+    private static void logMirrorDiagOnce(StationRef station, int filled) {
+        if (mirrorDiagLogged) return;
+        mirrorDiagLogged = true;
+        FutaGtnhMod.LOG.info(
+            "合成站存储区：这一页 {} 格有东西（显示由客户端铺），服务端槽位同步累计写入 {} 次（后者为 0 = 那条路没生效，显示不受影响）",
+            filled,
+            station.inventory.getServerWriteCount());
     }
 
     /**
