@@ -45,6 +45,7 @@ futa_gtnh.gui.store.all=全部
 futa_gtnh.gui.store.hotbar=快捷栏
 futa_gtnh.gui.store.main=主背包
 futa_gtnh.gui.store.drain=倒空容器
+futa_gtnh.msg.no_space=背包里没有空间放下它
 
 futa_gtnh.gui.status.remote=远程访问 —— 放一个共享终端方块才能选输出流体
 futa_gtnh.gui.status.output=终端输出：%s
