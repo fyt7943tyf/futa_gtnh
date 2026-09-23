@@ -9,6 +9,7 @@ item.futa_gtnh.swift_step.name=Swift Step
 
 item.futa_gtnh.swift_step.tooltip.flight=Flight speed: %sx
 item.futa_gtnh.swift_step.tooltip.walk=Movement speed: %sx
+item.futa_gtnh.swift_step.tooltip.air=Jump / mid-air speed follows movement speed
 item.futa_gtnh.swift_step.tooltip.gui=Right-click: adjust speed
 item.futa_gtnh.swift_step.tooltip.equip=Sneak + right-click: equip to a free bauble slot
 

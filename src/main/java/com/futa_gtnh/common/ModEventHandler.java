@@ -70,5 +70,11 @@ public class ModEventHandler {
     public void onPlayerTick(TickEvent.PlayerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         ItemSwiftStep.applyWalkSpeedModifier(event.player);
+        // 空中前进速度也要跟着放大，否则「走着 5 倍、一跳起来掉回原版」。
+        //
+        // 这里必须是 END 阶段：EntityPlayer.onLivingUpdate 先在第 612 行做移动、
+        // 第 620 行才把 jumpMovementFactor 从 speedInAir 重置回来，而 END 事件在那之后。
+        // 放到 START 反而会被第 620 行盖掉。
+        ItemSwiftStep.applyAirSpeedModifier(event.player);
     }
 }
