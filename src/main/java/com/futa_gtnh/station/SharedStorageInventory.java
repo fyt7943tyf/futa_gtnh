@@ -32,9 +32,11 @@ import com.futa_gtnh.shared.SharedStorageManager;
  * <li><b>服务端</b>（{@code remote = false}）：槽位里的东西是「这一页的第 i 个物品键」，
  * 数量实时问共享存储要。取出 = {@code extractItem}，放入 = {@code insertItem}，
  * 都是守恒操作，任何情况下都不可能凭空多出东西。</li>
- * <li><b>客户端</b>（{@code remote = true}）：只是一个<b>只读镜像</b>，内容来自服务端
- * 每个 tick 的 {@code Container.detectAndSendChanges} 槽位同步。客户端自己不去算
- * 「第 i 格是什么」—— 显示什么就一定是服务端认定的什么，点击才不会点错物品。</li>
+ * <li><b>客户端</b>（{@code remote = true}）：只是显示用的镜像，内容是「这一页有哪些物品」
+ * 的本地渲染 —— 服务端的槽位同步写进来（{@link #setInventorySlotContents}），
+ * 搜索面板每帧也会照着客户端缓存铺一遍（{@link #setDisplay}）。
+ * 客户端自己不去算「第 i 格背后是什么物品键」（那是服务端的事，键只由服务端持有），
+ * 所以显示和取出的东西一定是同一页。</li>
  * </ul>
  *
  * <p>
@@ -212,6 +214,7 @@ public class SharedStorageInventory implements IInventory {
             // 只接受服务端的槽位同步，理由见 serverSync
             if (!serverSync) return;
             mirror[index] = stack == null ? null : stack.copy();
+            serverWrites++;
             return;
         }
 
@@ -242,6 +245,50 @@ public class SharedStorageInventory implements IInventory {
     }
 
     private String clientSuffix = "";
+
+    /**
+     * 客户端专用：把「这一格应该显示什么」直接铺进镜像（{@code client/StoragePanel} 每帧调用）。
+     *
+     * <p>
+     * <b>为什么不能只靠服务端的槽位同步。</b>原版那条路是
+     * {@code Container.detectAndSendChanges} → {@code S2FPacketSetSlot} → 客户端
+     * {@code putStackInSlot} → {@link #setInventorySlotContents}，中间任何一环不成立，
+     * 结果都是<b>「东西明明在、点得动，格子却是空的」</b>：格子里画什么只取决于客户端镜像，
+     * 而点击是发槽位号给服务端裁决的，两边走的根本不是同一条路。
+     *
+     * <p>
+     * 终端界面从一开始就没依赖那条路（{@code GhostInventory} 由客户端自己铺），
+     * 这里补上同样的做法。数量取 {@code min(真实数量, MAX_DISPLAY)}：真数量由
+     * {@code StationAmounts} 另外画，塞进 {@code ItemStack.stackSize} 会被原版
+     * 「整叠拿到光标」当成真的一叠。
+     *
+     * @return 有没有真的改动（内容一致时不重建对象）
+     */
+    public boolean setDisplay(int index, ItemStack expected) {
+        if (!remote || index < 0 || index >= SIZE) return false;
+
+        ItemStack current = mirror[index];
+        // 比 ItemStack.areItemStacksEqual：物品、元数据、数量和 NBT 全都要一致，
+        // 否则 GT 那些把状态写在 NBT 里的东西会一直显示旧状态
+        if (ItemStack.areItemStacksEqual(current, expected)) return false;
+
+        mirror[index] = expected == null ? null : expected.copy();
+        return true;
+    }
+
+    /**
+     * 客户端：服务端的槽位同步真正写进镜像的次数。
+     *
+     * <p>
+     * 纯诊断。多人服务器上它一直是 0 的话，说明「服务端推槽位」那条路没生效 ——
+     * 显示已经不吃这条路了（见 {@link #setDisplay}），但日志里有这个数字，
+     * 排查时就不用再猜。
+     */
+    public int getServerWriteCount() {
+        return serverWrites;
+    }
+
+    private int serverWrites;
 
     @Override
     public boolean hasCustomInventoryName() {
