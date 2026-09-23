@@ -99,28 +99,32 @@ public class GuiSharedTerminal extends GuiContainer {
         searchField.setEnableBackgroundDrawing(false);
         searchField.setText(previousQuery);
         searchField.setFocused(true);
+        // 按住退格能连删。1.7.10 的 GuiTextField 不会自己开重复事件，
+        // 这里开、关界面时关（和原版 GuiEditSign 同一个套路）
+        Keyboard.enableRepeatEvents(true);
 
         buttonList.clear();
 
         int tabY = guiTop + ContainerSharedTerminal.TAB_Y;
-        buttonList.add(new GuiButton(BTN_TAB_ITEMS, guiLeft + 7, tabY, 38, 14, tr("futa_gtnh.gui.tab.items")));
-        buttonList.add(new GuiButton(BTN_TAB_FLUIDS, guiLeft + 48, tabY, 38, 14, tr("futa_gtnh.gui.tab.fluids")));
+        buttonList.add(new GuiSmallButton(BTN_TAB_ITEMS, guiLeft + 7, tabY, 38, 14, tr("futa_gtnh.gui.tab.items")));
+        buttonList.add(new GuiSmallButton(BTN_TAB_FLUIDS, guiLeft + 48, tabY, 38, 14, tr("futa_gtnh.gui.tab.fluids")));
         // 页签这一行的右边是空的，正好放「拾取自动入库」开关
-        autoStoreButton = new GuiButton(BTN_AUTO_STORE, guiLeft + 89, tabY, 80, 14, autoStoreLabel());
+        autoStoreButton = new GuiSmallButton(BTN_AUTO_STORE, guiLeft + 89, tabY, 80, 14, autoStoreLabel());
         buttonList.add(autoStoreButton);
 
         int navY = guiTop + ContainerSharedTerminal.NAV_Y;
-        buttonList.add(new GuiButton(BTN_PREV, guiLeft + 7, navY, 14, 14, "<"));
-        buttonList.add(new GuiButton(BTN_NEXT, guiLeft + 23, navY, 14, 14, ">"));
-        sortButton = new GuiButton(BTN_SORT, guiLeft + 129, navY, 40, 14, sortLabel());
+        buttonList.add(new GuiSmallButton(BTN_PREV, guiLeft + 7, navY, 14, 14, "<"));
+        buttonList.add(new GuiSmallButton(BTN_NEXT, guiLeft + 23, navY, 14, 14, ">"));
+        sortButton = new GuiSmallButton(BTN_SORT, guiLeft + 129, navY, 40, 14, sortLabel());
         buttonList.add(sortButton);
 
         int buttonY = guiTop + ContainerSharedTerminal.BUTTON_Y;
-        buttonList.add(new GuiButton(BTN_STORE_ALL, guiLeft + 7, buttonY, 40, 14, tr("futa_gtnh.gui.store.all")));
+        buttonList.add(new GuiSmallButton(BTN_STORE_ALL, guiLeft + 7, buttonY, 40, 14, tr("futa_gtnh.gui.store.all")));
         buttonList
-            .add(new GuiButton(BTN_STORE_HOTBAR, guiLeft + 50, buttonY, 36, 14, tr("futa_gtnh.gui.store.hotbar")));
-        buttonList.add(new GuiButton(BTN_STORE_MAIN, guiLeft + 89, buttonY, 34, 14, tr("futa_gtnh.gui.store.main")));
-        buttonList.add(new GuiButton(BTN_DRAIN, guiLeft + 126, buttonY, 43, 14, tr("futa_gtnh.gui.store.drain")));
+            .add(new GuiSmallButton(BTN_STORE_HOTBAR, guiLeft + 50, buttonY, 36, 14, tr("futa_gtnh.gui.store.hotbar")));
+        buttonList
+            .add(new GuiSmallButton(BTN_STORE_MAIN, guiLeft + 89, buttonY, 34, 14, tr("futa_gtnh.gui.store.main")));
+        buttonList.add(new GuiSmallButton(BTN_DRAIN, guiLeft + 126, buttonY, 43, 14, tr("futa_gtnh.gui.store.drain")));
 
         updateTabStates();
         viewDirty = true;
@@ -460,21 +464,22 @@ public class GuiSharedTerminal extends GuiContainer {
     }
 
     /**
-     * 把「只有字符、没有按键」的事件也转给 {@link #keyTyped}。
+     * 旧输入层（LWJGL2 + InputFix 一类）的兜底：把「只有字符、没有按键」的事件也转给
+     * {@link #keyTyped}。原版 {@code GuiScreen#handleKeyboardInput()} 只在
+     * {@code Keyboard.getEventKeyState()} 为真时才转发字符，而那些辅助层送来的正是
+     * keyState 为假的事件 —— 汉字就是这么没的。
      *
      * <p>
-     * 1.7.10 的 {@code GuiScreen#handleKeyboardInput()} 只在
-     * {@code Keyboard.getEventKeyState()} 为真时才把字符转给 {@code keyTyped}，
-     * keyState 为假的事件会被直接丢掉。而输入法以及各种「往输入框里塞文字」的
-     * 辅助层送来的正是这种事件 —— 汉字就是这么没的。这里补一刀：只补
-     * {@code > 255} 的字符（汉字等非 Latin-1），普通按键仍旧原样交给原版处理，
-     * 不会重复插入。
+     * <b>lwjgl3ify 环境下不需要也不走这条路</b>（见 {@link ImeCompat}）：它把输入法
+     * 提交的文字镜像成 keyState 为真、key 为 0 的事件塞进传统队列，原版路径自己就能
+     * 收到，GuiTextField 里的文字由 lwjgl3ify 的 mixin 负责注入。这种情况下这段兜底
+     * 必须闭嘴，否则同一批字符会被送进去两遍。
      */
     @Override
     public void handleKeyboardInput() {
-        if (!Keyboard.getEventKeyState()) {
+        if (!ImeCompat.hasNativeIme()) {
             char injected = Keyboard.getEventCharacter();
-            if (injected > 255) {
+            if (!Keyboard.getEventKeyState() && injected > 255) {
                 this.keyTyped(injected, 0);
             }
         }
@@ -534,6 +539,7 @@ public class GuiSharedTerminal extends GuiContainer {
     @Override
     public void onGuiClosed() {
         super.onGuiClosed();
+        Keyboard.enableRepeatEvents(false);
         container.clearPageDisplay();
     }
 

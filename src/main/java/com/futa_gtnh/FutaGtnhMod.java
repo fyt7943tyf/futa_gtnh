@@ -41,7 +41,10 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     acceptedMinecraftVersions = "[1.7.10]",
     // 存储层的键、流体显示物品、流体灌装都直接用 GT 的 API（GTUtility），
     // 所以 GT 是硬依赖；NEI 只是可选联动。
-    dependencies = "required-after:gregtech;after:NotEnoughItems")
+    // lwjgl3ify 也是硬依赖：本模组的目标运行时是「GTNH（LWJGL3 + 新 Java）」，
+    // 搜索框的中文输入法支持建立它的 GuiTextField mixin 之上（能力探测见
+    // client/ImeCompat.java，老版本会自动退回旧路径，不会崩）。
+    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:NotEnoughItems")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";
