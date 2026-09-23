@@ -88,12 +88,14 @@ GTNH 到中后期，仓库管理会变成主要负担：几十个箱子、抽屉
 | 滚轮（鼠标在网格上） | 翻页 |
 | PageUp / PageDown | 翻页 |
 
-> **滚轮只翻页，任何时候都不会取出物品。** 整合包里的 **MouseTweaks** 默认开着「滚轮 tweak」
-> （`config/MouseTweaks.cfg` 的 `B:WheelTweak=true`），它的语义是「滚轮滚过某一格时替你在两个
-> 物品栏之间搬一个物品」——做法是**替玩家合成一次点击**打到那一格上。落到共享存储上就变成
-> 「滚一格掉出来一个物品」。本模组在终端界面上实现了 MouseTweaks 的官方接口
-> `IMTModGuiContainer` 并把滚轮 tweak 关掉，所以这个界面里滚轮不会再掏东西
-> （其它界面里 MouseTweaks 照常工作）。详见下面「为什么滚轮以前会掏出物品」。
+> **滚轮只翻页，任何时候都不会取出物品。** 整合包里有**两个**模组都会做「滚轮滚过格子就把
+> 物品在两边搬一次」：**NEI** 的「滚轮转移物品」（`config/NEI/client.cfg` 的
+> `disableMouseScrollTransfer`，默认开着）和 **MouseTweaks** 的滚轮 tweak
+> （`B:WheelTweak`，装了 NEI 时它会主动让位）。它们的做法都是**替玩家合成一次槽位点击**，
+> 落到共享存储上就变成「滚一格掉出来一个物品」。本模组把两侧都关在了终端界面之外：
+> NEI 那边把界面登记进 `GuiInfo.customSlotGuis`，MouseTweaks 那边实现
+> `IMTModGuiContainer` 并让 `isWheelTweakDisabled()` 返回 true。
+> 详见下面「为什么滚轮以前会掏出物品」。
 
 > **[全部] / [快捷栏] 会跳过你当前手持的那一格** —— 一键倒空背包太容易手滑，
 > 而「工具留在手上」是最不容易出事的默认值。真想把正拿着的东西也存进去，
@@ -984,30 +986,69 @@ GT 那边如果截断或拒收就把差额还回存储。
 | 原版 `GuiButton` 高度 ≠ 20px 时按钮贴图底边被裁掉，按钮看起来和背景边框「长在一起」 | 自绘按钮（`client/GuiSmallButton.java`）：上下两半分别对齐贴图区段顶部/底部采样，任意高度都有完整边框 |
 | lwjgl3ify（LWJGL3/新 Java）下 IME 字符事件 keyState 恒为真，旧的「>255 字符注入」会失效或重复 | `client/ImeCompat.java` 探测 lwjgl3ify 的 `TextFieldHandler` 在不在：在 → 走它对 GuiTextField 的自动注入；不在 → 保留旧路径（InputFix 场景） |
 | NEI 的配方转移只认玩家背包且靠模拟点击，无法从共享存储取料 | 自己的 overlay handler 把布局打包发给服务端直填合成栏（`exchange/CraftFiller.java`），不模拟点击 |
-| MouseTweaks 的「滚轮 tweak」会**替玩家合成点击**打在鼠标下的格子上，共享格「点一下 = 取一个」，于是滚轮滚一格就掉一个物品 | 终端界面实现 MouseTweaks 的 `IMTModGuiContainer` 接口并让 `isWheelTweakDisabled()` 返回 true（`client/MouseTweaksCompat.java`），见下面一节 |
+| MouseTweaks 的「滚轮 tweak」会**替玩家合成点击**打在鼠标下的格子上，共享格「点一下 = 取一个」，于是滚轮滚一格就掉一个物品 | 终端界面实现 MouseTweaks 的 `IMTModGuiContainer` 接口并让 `isWheelTweakDisabled()` 返回 true（`client/MouseTweaksCompat.java`） |
+| **NEI 也有一个「滚轮转移物品」**（`inventory.disableMouseScrollTransfer`），而且装了 NEI 时 MouseTweaks 会让位给它 —— 所以真正在掏东西的是 NEI（`NEIController.mouseScrolled` → `FastTransferManager`） | 把终端界面登记进 NEI 的 `GuiInfo.customSlotGuis`（`NeiIntegration.register()`）：`hasCustomSlots` 是 `mouseScrolled` 的第一道判断，且全 NEI 只有这一处用到它 |
 
-### 为什么滚轮以前会掏出物品（MouseTweaks 的滚轮 tweak）
+### 为什么滚轮以前会掏出物品（NEI 与 MouseTweaks 的「滚轮搬运」）
 
-整合包自带 **MouseTweaks**，配置里 `B:WheelTweak=true`（默认值），注释写得很清楚：
-*"Scroll to quickly move items between inventories"* —— 滚轮滚过某一格时，它替你在两个物品栏
-之间搬一个物品。它不是「发个特殊包」，而是**合成一次真实的槽位点击**：
+**结论先说**：滚轮掏东西不是本模组的逻辑，而是**别的模组在替玩家点格子**。整合包里同时有
+两个「滚轮滚过格子就把物品在两边搬一次」的功能，而且它们之间还有先后关系：
+
+| 谁 | 开关 | 在本界面上做什么 |
+| --- | --- | --- |
+| **NEI** | `config/NEI/client.cfg` 的 `disableMouseScrollTransfer`（默认 false = 开着） | 滚轮滚过有东西的格子时，用 `FastTransferManager` 把物品在「容器 ↔ 玩家背包」之间搬一次 |
+| **MouseTweaks** | `config/MouseTweaks.cfg` 的 `B:WheelTweak`（默认 true） | 同样的事，但它**在有 NEI 时会让位**：`Runtime.isMouseWheelTransferActive()` = `WheelTweak && !NEI.isMouseScrollTransferEnabled()` |
+
+也就是说：**装着 NEI 时，MouseTweaks 的滚轮 tweak 是关着的，干活的是 NEI**。
+（这也是为什么先按 MouseTweaks 修了一版却没效果 —— 那一版并非白做，见文末。）
+
+NEI 那条路是这样的（`NEIController.mouseScrolled`）：
 
 ```
-MouseTweaksForge.onRenderTick           ← 每个渲染帧跑一次
-  └ Runtime.onUpdateInGui               ← 读滚轮、看鼠标底下是哪一格
-      └ WheelHandler.handleWheelTweak
-          └ ContainerContext.clickSlot  ← 合成点击（左键拿起 / 右键放一个……）
-              └ GuiContainer.handleMouseClick 或 PlayerControllerMP.windowClick
+GuiContainerManager.handleMouseWheel            ← 读 Mouse.getEventDWheel()
+  └ mouseScrolled(dir) → 逐个 IContainerInputHandler.mouseScrolled(...)
+      └ NEIController.mouseScrolled
+          if (!NEIClientConfig.isEnabled()) return false;
+          if (GuiInfo.hasCustomSlots(gui)) return false;        ★ 我们的钩子
+          if (!NEIClientConfig.isMouseScrollTransferEnabled()) return false;
+          Slot slot = gui.getSlotAtPosition(鼠标);
+          if (slot != null && slot.getHasStack()) {
+              fastTransferManager.transferItem(gui, slot.slotNumber);   // 或 retrieveItem
+              return true;
+          }
 ```
 
-对原版容器这套逻辑没问题。但共享存储的格子是**虚拟格**，在
-`ContainerSharedTerminal.slotClick` 里的语义是「左键点一下 = 取出 1 个」，
-于是「滚轮替你点了一下」= **滚一格掉出来一个物品** —— 而玩家只是想翻页。
-（这也是为什么数量恰好是 1：MouseTweaks 的搬运是按「个」合成的左键点击，
-不是中键那套「取一整叠」。）
+`transferItem` / `retrieveItem` 会去点槽位，最终走到
+`ContainerSharedTerminal.slotClick`。而共享格在那里的语义是「左键点一下 = 取 1 个」，
+于是**滚一格就掉出来一个物品**（数量恰好是 1，因为那是按「个」合成的一次左键点击）。
 
-**处理办法**：MouseTweaks 提供了官方兼容接口 `yalter.mousetweaks.api.IMTModGuiContainer`，
-界面实现它就等于说「这个容器我自己管」。其中：
+**处理办法**：NEI 的 `GuiInfo.hasCustomSlots(GuiContainer)` 就是给这种「槽位语义自己说了算」
+的界面准备的逃生门 —— 它只做一件事：`customSlotGuis.contains(gui.getClass())`。
+把这个类登记进去，上面那段的第一道判断就会 `return false`，NEI 不再插手滚轮。
+（在**整个 NEI 里 `hasCustomSlots` 只被 `mouseScrolled` 用到**，所以登记它不会影响
+配方转移、面板、书签等任何别的功能。）
+
+登记在 `client/nei/NeiIntegration.register()` 里：
+
+```java
+GuiInfo.customSlotGuis.add(GuiSharedTerminal.class);
+Class<? extends GuiContainer> mouseTweaksGui = MouseTweaksCompat.guiClass();
+if (mouseTweaksGui != null) GuiInfo.customSlotGuis.add(mouseTweaksGui);
+```
+
+第二个是因为：**它用的是 `gui.getClass()` 精确匹配**（`HashSet<Class>`），子类不会自动继承，
+而装了 MouseTweaks 时用的正好是兼容子类。
+
+> **急用/暂时不改 jar 的办法（客户端）**：把 `<整合包实例>\config\NEI\client.cfg` 里的
+> `disableMouseScrollTransfer` 改成 `true`（游戏里 NEI 设置界面里也有这一项）。
+> 这是全局开关，对所有界面生效；说明这个滚轮搬运本身就不是我们独有的问题。
+> 注意这是**纯客户端**的事：点击是客户端合成的，所以只更新客户端 jar 就能解决。
+
+### 没有 NEI 的环境：MouseTweaks 的滚轮 tweak
+
+上面那条 `isMouseWheelTransferActive()` 的前提是「装了 NEI」。**没装 NEI 时 MouseTweaks 的
+滚轮 tweak 就是唯一在干活的那个**，所以那一侧也要关掉。MouseTweaks 提供了官方兼容接口
+`yalter.mousetweaks.api.IMTModGuiContainer`，界面实现它就等于说「这个容器我自己管」：
 
 - `isWheelTweakDisabled()` 返回 true → 它不在这个界面上做滚轮搬运（**唯一的行为改动**）；
 - 其它方法照原版语义实现（槽位表就是 `inventorySlots`，`clickModSlot` 依旧转交给
@@ -1026,6 +1067,8 @@ MouseTweaksForge.onRenderTick           ← 每个渲染帧跑一次
    **它在 ID 为 1 时根本不问滚轮开关**（`ContainerContext.isWheelDisabledForThisContainer`
    里 `if (guiContainerID == 1) return false;`），所以「只加一个开关」是不够的 ——
    必须真的把接口实现上，让它把本界面认成 2 号。
+   （dev 环境里日志会打 `You have just opened a FutaGTNH 共享存储终端 container …`，
+   出现这行就说明接口被认下了。）
 
 ### 构建
 

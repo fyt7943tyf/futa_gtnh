@@ -1,5 +1,6 @@
 package com.futa_gtnh.client;
 
+import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.inventory.Container;
 import net.minecraft.inventory.Slot;
 
@@ -73,6 +74,22 @@ public final class MouseTweaksCompat {
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    /**
+     * 装了 MouseTweaks 时实际使用的界面类，没装时返回 {@code null}。
+     *
+     * <p>
+     * 给 NEI 联动用：NEI 的 {@code GuiInfo.customSlotGuis} 是
+     * {@code HashSet<Class>} + {@code gui.getClass()} 精确匹配，子类不会自动继承，
+     * 所以那边要把这个子类也登记一遍（见 {@code NeiIntegration.register()}）。
+     *
+     * <p>
+     * 没装 MouseTweaks 时直接返回 null：碰 {@link Gui} 会触发它的类加载，而它实现的
+     * 接口那时候并不存在，会 {@code NoClassDefFoundError}。
+     */
+    public static Class<? extends GuiContainer> guiClass() {
+        return isAvailable() ? Gui.class : null;
     }
 
     /**
