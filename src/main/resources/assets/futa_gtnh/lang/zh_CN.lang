@@ -6,6 +6,7 @@ item.futa_gtnh.swift_step.name=迅步
 
 item.futa_gtnh.swift_step.tooltip.flight=飞行速度：%s 倍
 item.futa_gtnh.swift_step.tooltip.walk=移动速度：%s 倍
+item.futa_gtnh.swift_step.tooltip.air=跳跃/空中前进速度跟随移动速度
 item.futa_gtnh.swift_step.tooltip.gui=右键：调整速度
 item.futa_gtnh.swift_step.tooltip.equip=潜行 + 右键：装备到空的饰品槽
 

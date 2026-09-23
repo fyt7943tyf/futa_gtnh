@@ -422,6 +422,38 @@ operation 2:  d1 *= (1 + amount)
 
 用 0 会变成加法（不按比例），用 2 则会连其它修饰符一起放大。
 
+**跳跃 / 空中的前进速度走的是另一个量，所以必须单独处理。**
+
+`EntityLivingBase.moveEntityWithHeading` 里地面和空中用的根本不是同一个值：
+
+```
+地面：f4 = getAIMoveSpeed() * 0.16277136 / (阻力³)   ← 来自移动速度属性
+空中：f4 = jumpMovementFactor                        ← EntityLivingBase 上的常量字段
+```
+
+`jumpMovementFactor` 和属性没有任何关系，默认固定 0.02 —— 于是会出现
+**「走着 5 倍，一跳起来就掉回原版速度」**。
+
+原版这两个值本来是配平的：
+
+```
+地面终端 = 0.1 * 1.0 / (1 - 0.546) ≈ 0.2203 格/tick     （0.546 = 方块滑度 0.6 × 0.91）
+空中终端 = 0.02 / (1 - 0.91)        ≈ 0.2222 格/tick
+```
+
+差 0.9%，基本相等。所以只要把 `jumpMovementFactor` 按**同一个倍率**放大，
+空中就又和地面配平了 —— 实现就是 `jumpMovementFactor = 0.02 × 移动倍率`。
+
+> 疾跑时原版会给空中加速度额外加 `speedInAir * 0.3`，而地面那侧是
+> `AttributeModifier(..., 0.3, op=2)` = ×1.3。我们整个覆写这个字段，
+> 所以自己把 ×1.3 补回去，否则「疾跑跳」会比原版还慢。
+
+时序上不需要每 tick 抢：`EntityPlayer.onLivingUpdate` 先做移动（第 612 行），
+**之后**（第 620 行）才把 `jumpMovementFactor` 从 `speedInAir` 重置回来，
+而 `PlayerTickEvent(END)` 在那之后 —— 我们写的值会保留到下一 tick 的移动被读到。
+
+摘掉饰品也不用还原：不戴时我们什么都不写，原版第 620 行每 tick 自己就重置回去了。
+
 **飞行速度没有属性可用，只能在客户端改。**
 
 它就是 `PlayerCapabilities.flySpeed` 这个私有字段，而 setter 标着

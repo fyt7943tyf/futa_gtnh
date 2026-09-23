@@ -133,6 +133,42 @@ public class ItemSwiftStep extends Item implements IBauble {
     }
 
     /**
+     * 原版空中前进的加速度（{@code EntityLivingBase.jumpMovementFactor} 的默认值）。
+     *
+     * <p>
+     * <b>为什么空中要单独处理：</b>{@code EntityLivingBase.moveEntityWithHeading}
+     * 里地面和空中用的是两个完全不同的量 ——
+     *
+     * <pre>
+     *   地面：f4 = getAIMoveSpeed() * 0.16277136 / (阻力³)
+     *   空中：f4 = jumpMovementFactor
+     * </pre>
+     *
+     * 地面的那个来自「移动速度属性」，所以 {@link #applyWalkSpeedModifier} 一放大，
+     * 走路就快了。但 {@code jumpMovementFactor} 是 {@code EntityLivingBase} 上的一个
+     * 常量字段，和属性没有任何关系 —— 于是会出现
+     * <b>「走着 5 倍，一跳起来就掉回原版速度」</b>。
+     *
+     * <p>
+     * 数值上两者本来是配平的：原版地面终端速度
+     * {@code 0.1 * 1.0 / (1 - 0.546) ≈ 0.2203} 格/tick，空中
+     * {@code 0.02 / (1 - 0.91) ≈ 0.2222}，基本相等。所以把
+     * {@code jumpMovementFactor} 按同一个倍率放大，就又配平了。
+     */
+    public static final float VANILLA_JUMP_MOVEMENT_FACTOR = 0.02F;
+
+    /**
+     * 疾跑时原版给空中加速度的额外加成。
+     *
+     * <p>
+     * 见 {@code EntityPlayer.onLivingUpdate}：
+     * {@code if (isSprinting()) jumpMovementFactor += speedInAir * 0.3F}。
+     * 我们整个覆写这个字段，所以要自己把这 30% 补回去，
+     * 否则「疾跑跳」会比原版还慢。
+     */
+    private static final float SPRINT_AIR_BONUS = 1.3F;
+
+    /**
      * 移动速度修饰符的固定 UUID。
      *
      * <p>
@@ -292,6 +328,47 @@ public class ItemSwiftStep extends Item implements IBauble {
         }
     }
 
+    /**
+     * 让空中的前进速度和地面上的移动速度保持一致。
+     *
+     * <p>
+     * 直接写 {@code EntityLivingBase.jumpMovementFactor} —— 那是个 <b>public 字段</b>，
+     * 不需要碰任何私有成员，也不涉及 {@code capabilities} 那套只在客户端存在的 API。
+     *
+     * <p>
+     * <b>时序是安全的，而且不需要每 tick 抢：</b>
+     * {@code EntityPlayer.onLivingUpdate} 里先在第 612 行做移动、第 620 行才把
+     * {@code jumpMovementFactor} 从 {@code speedInAir} 重置回来；而
+     * {@code PlayerTickEvent(END)} 在那之后。所以我们写的值会一直保留到
+     * <b>下一 tick 的移动</b>时被读到。这也正是「走路快、跳起来慢」的补法：
+     * 地面那半边由属性负责，空中这半边由这里负责。
+     *
+     * <p>
+     * <b>摘掉饰品不需要还原逻辑。</b>没有迅步时我们什么都不写，而原版第 620 行
+     * 每 tick 都会把字段重置成 {@code speedInAir}（0.02 / 疾跑 0.026），
+     * 自己就回到原样了。反过来特意去写 0.02 反而会在别的模组也调这个字段时打架。
+     *
+     * <p>
+     * 飞行时不用担心被覆盖：{@code EntityPlayer.moveEntityWithHeading} 会在飞行的
+     * 那一段临时把它换成 {@code flySpeed}，出来再换回来，我们的值不受影响。
+     */
+    public static void applyAirSpeedModifier(EntityPlayer player) {
+        if (player == null) return;
+
+        ItemStack charm = findEquipped(player);
+        float multiplier = charm == null ? DEFAULT_MULTIPLIER : getWalkMultiplier(charm);
+        // 没超速就完全不碰这个字段，让原版自己管（见上面的说明）
+        if (multiplier <= DEFAULT_MULTIPLIER + 1.0E-4F) return;
+
+        float wanted = VANILLA_JUMP_MOVEMENT_FACTOR * multiplier;
+        if (player.isSprinting()) {
+            wanted *= SPRINT_AIR_BONUS;
+        }
+        if (Math.abs(player.jumpMovementFactor - wanted) > 1.0E-5F) {
+            player.jumpMovementFactor = wanted;
+        }
+    }
+
     // ==================================================================
     // IBauble
     // ==================================================================
@@ -414,6 +491,8 @@ public class ItemSwiftStep extends Item implements IBauble {
             EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
                 "item.futa_gtnh.swift_step.tooltip.walk",
                 fixed(getWalkMultiplier(stack), 2)));
+        tooltip.add(
+            EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.air"));
         tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.gui"));
         tooltip.add(
