@@ -85,6 +85,7 @@ futa_gtnh.gui.locator.vein.tip=按主材料定位，跨石种
 futa_gtnh.locator.vein.name=%s矿脉
 
 futa_gtnh.locator.msg.no_safe_spot=目标附近找不到能站人的地方，传送已取消
+futa_gtnh.locator.msg.no_safe_spot_protected=附近能开洞的位置全被矿石（或木头、机器这类不该动的方块）占着，不肯拆它们，传送已取消
 futa_gtnh.locator.msg.no_result=没有可用的结果，请重新搜索
 
 futa_gtnh.station.chest=共享存储

@@ -136,6 +136,8 @@ public final class LocatorManager {
                 return TeleportResult.OK;
             case CARVED:
                 return TeleportResult.OK_CARVED;
+            case FAILED_PROTECTED:
+                return TeleportResult.NO_SAFE_SPOT_PROTECTED;
             case FAILED:
             default:
                 return TeleportResult.NO_SAFE_SPOT;
@@ -148,7 +150,12 @@ public final class LocatorManager {
         /** 目标埋在实心方块里，就地清了两格 */
         OK_CARVED,
         NO_RESULT,
-        NO_SAFE_SPOT
+        NO_SAFE_SPOT,
+        /**
+         * 附近唯一能开洞的位置得清掉矿石（或木头/机器这类不该动的方块），所以没开。
+         * 和「找不到」分开，是为了让提示说清楚是<b>不肯挖</b>，不是找不到。
+         */
+        NO_SAFE_SPOT_PROTECTED
     }
 
     /** 玩家下线时清掉他的任务和结果。 */

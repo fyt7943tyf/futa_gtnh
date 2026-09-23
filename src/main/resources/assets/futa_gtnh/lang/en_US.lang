@@ -89,6 +89,7 @@ futa_gtnh.gui.locator.vein.tip=Located by primary material, any stone type
 futa_gtnh.locator.vein.name=%s Vein
 
 futa_gtnh.locator.msg.no_safe_spot=No safe spot near the target; teleport cancelled
+futa_gtnh.locator.msg.no_safe_spot_protected=Every carveable spot nearby is blocked by ore (or wood/machines), which will not be destroyed; teleport cancelled
 futa_gtnh.locator.msg.no_result=No result available, please search again
 
 futa_gtnh.station.chest=Shared Storage
