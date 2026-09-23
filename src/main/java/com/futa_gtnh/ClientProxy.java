@@ -37,10 +37,6 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void init(FMLInitializationEvent event) {
         super.init(event);
-
-        // 共享存储面板：匠魂工作站界面开着时画在它下面（画用 Forge 总线，
-        // 点击/键盘走 NEI 的输入钩子，见 StoragePanelEvents 的注释）
-        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.client.StoragePanelEvents());
     }
 
     @Override

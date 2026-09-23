@@ -77,15 +77,6 @@ public class PacketStorageAction implements IMessage {
      */
     public static final byte DRAIN_CURSOR = 16;
 
-    /**
-     * 把共享存储里的条目<b>取到光标上</b>（共享存储面板里左键点一下的效果）。
-     *
-     * <p>
-     * 和 {@link #WITHDRAW_ITEM} 的区别只在「落到哪里」：那个是直接写进玩家背包，
-     * 这个放在光标上 —— 面板要的就是「像从箱子里拿出来」的手感。
-     */
-    public static final byte WITHDRAW_TO_CURSOR = 17;
-
     // ---- 终端 ----
     /** 设置方块终端往相邻管道/流体罐输出的流体。 */
     public static final byte SET_TERMINAL_FLUID = 20;
