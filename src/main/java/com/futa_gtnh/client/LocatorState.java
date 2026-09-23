@@ -28,7 +28,7 @@ public final class LocatorState {
 
     private LocatorState() {}
 
-    /** 比服务端的四个状态再多一个「什么都没选」。 */
+    /** 比服务端的状态再多一个「什么都没选」。 */
     public static final byte STATE_NONE = -1;
 
     /** 方块模式下的原始目标；矿脉模式下为 null。 */
@@ -156,6 +156,9 @@ public final class LocatorState {
             // 记下维度。包处理在主线程上跑，这里读 thePlayer 是安全的。
             Minecraft mc = Minecraft.getMinecraft();
             resultDimension = mc.thePlayer == null ? 0 : mc.thePlayer.dimension;
+        } else if (newState == PacketLocatorResult.STATE_ARRIVED) {
+            // 传送成功，坐标和距离<b>刻意不动</b>：这个包只是「按钮作废、追踪保留」的通知，
+            // 目标还是刚才那个目标。服务端也没存距离，照抄才是对的。
         } else if (newState == PacketLocatorResult.STATE_CANCELLED) {
             clear();
         }
@@ -174,7 +177,22 @@ public final class LocatorState {
 
     /** @return 有没有值得画光束的目标坐标 */
     public static boolean hasBeam() {
-        return state == PacketLocatorResult.STATE_FOUND && distance >= 0.0D;
+        // 「已传送」也要画：玩家落地之后正需要那道光告诉他往哪挖 ——
+        // 这正是以前把结果一传送就清掉时最要命的地方
+        return (state == PacketLocatorResult.STATE_FOUND || state == PacketLocatorResult.STATE_ARRIVED)
+            && distance >= 0.0D;
+    }
+
+    /**
+     * @return 这次结果是不是已经用掉传送了
+     *
+     *         <p>
+     *         界面据此把传送按钮换成「已传送」并禁用。注意<b>结果本身还在</b>：
+     *         坐标、距离、光束都照旧，玩家可以自己走过去或者接着挖，
+     *         想再传送就重新选一次目标（重新搜索会清掉这个标记）。
+     */
+    public static boolean isTeleported() {
+        return state == PacketLocatorResult.STATE_ARRIVED;
     }
 
     // ==================================================================

@@ -74,6 +74,7 @@ futa_gtnh.gui.locator.count.veins=%s / %s veins
 futa_gtnh.gui.locator.pick=Pick one on the left
 futa_gtnh.gui.locator.state.running=Searching...
 futa_gtnh.gui.locator.state.found=Found
+futa_gtnh.gui.locator.state.arrived=Teleported nearby
 futa_gtnh.gui.locator.state.notfound=Not found nearby
 futa_gtnh.gui.locator.distance=%s blocks away
 futa_gtnh.gui.locator.beam=Close this screen to see the beam
@@ -82,6 +83,8 @@ futa_gtnh.gui.locator.wrongdim=The result is in another dimension
 futa_gtnh.gui.locator.hint1=Left-click an entry to start tracking
 futa_gtnh.gui.locator.hint2=Wheel scrolls / closing keeps tracking
 futa_gtnh.gui.locator.teleport=Teleport
+futa_gtnh.gui.locator.teleported=Arrived
+futa_gtnh.gui.locator.teleported.note=Teleport already used
 futa_gtnh.gui.locator.stop=Stop
 
 futa_gtnh.gui.locator.vein.range=Generates at Y %s ~ %s
@@ -90,13 +93,15 @@ futa_gtnh.locator.vein.name=%s Vein
 
 futa_gtnh.locator.msg.no_safe_spot=No safe spot near the target; teleport cancelled
 futa_gtnh.locator.msg.no_safe_spot_protected=Every carveable spot nearby is blocked by ore (or wood/machines), which will not be destroyed; teleport cancelled
+futa_gtnh.locator.msg.arrived=Teleported near the target (tracking is kept, the beam still guides you)
+futa_gtnh.locator.msg.teleport_used=This result has already been used for one teleport: tracking is still active, pick the target again to teleport once more
 futa_gtnh.locator.msg.no_result=No result available, please search again
 
 futa_gtnh.station.chest=Shared Storage
 futa_gtnh.station.title.items= · %s items
 futa_gtnh.station.title.page= · %s/%s
 
-futa_gtnh.locator.msg.arrived_carved=Target is buried in solid blocks; carved a small standing spot for you (the target block itself is untouched)
+futa_gtnh.locator.msg.arrived_carved=Target is buried in solid blocks; carved a small standing spot for you (the target block itself is untouched, tracking is kept)
 
 item.futa_gtnh.swift_step.tooltip.light=Light: %s
 item.futa_gtnh.swift_step.light.off=Off
