@@ -87,7 +87,7 @@ public class GuiSharedTerminal extends GuiContainer {
      *
      * <p>
      * 装了 MouseTweaks 时返回它的兼容子类
-     * （{@link GuiSharedTerminalMouseTweaks}）：那里面实现 MouseTweaks 的
+     * （{@link MouseTweaksCompat.Gui}）：那里面实现 MouseTweaks 的
      * {@code IMTModGuiContainer} 接口，把「滚轮 tweak」在这个界面上关掉 ——
      * 否则滚轮每滚一格，MouseTweaks 就会替玩家点一下鼠标下的格子，
      * 而共享存储的格子是「点一下 = 取一个」，于是翻页变成往外掏东西。
