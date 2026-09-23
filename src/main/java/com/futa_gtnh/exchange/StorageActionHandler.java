@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.item.ItemStack;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
@@ -117,6 +118,34 @@ public final class StorageActionHandler {
                 }
                 case PacketStorageAction.DRAIN_CONTAINERS: {
                     InventoryExchange.drainContainers(player, storage, recorder);
+                    break;
+                }
+                case PacketStorageAction.WITHDRAW_TO_CURSOR: {
+                    // 「取到光标上」：面板里左键点一下。物品先进光标，和从箱子里拿一致。
+                    ItemKey cursorKey = packet.getItemKey();
+                    if (cursorKey != null && amount > 0L) {
+                        ItemStack cursor = player.inventory.getItemStack();
+                        int limit = 64;
+                        if (cursor != null) {
+                            // 光标上是别的东西：不动（客户端也不该发这种包）
+                            if (!cursorKey.equals(ItemKey.of(cursor))) break;
+                            limit = cursor.getMaxStackSize();
+                            if (limit <= 0) limit = 64;
+                        }
+                        int space = limit - (cursor == null ? 0 : cursor.stackSize);
+                        if (space > 0) {
+                            long got = storage.extractItem(cursorKey, Math.min(amount, (long) space));
+                            if (got > 0L) {
+                                recorder.item(cursorKey);
+                                if (cursor == null) player.inventory.setItemStack(cursorKey.prototype((int) got));
+                                else cursor.stackSize += (int) got;
+                                // 光标栈不在任何槽位里，必须显式同步：
+                                // 这就是原版 NetHandlerPlayServer 用的那条路（S2FPacketSetSlot(-1,-1,..)）
+                                player.updateHeldItem();
+                                player.inventory.markDirty();
+                            }
+                        }
+                    }
                     break;
                 }
                 case PacketStorageAction.DRAIN_CURSOR: {
