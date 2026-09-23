@@ -37,6 +37,15 @@ public final class BlockIndex {
 
     private static final List<ItemStack> ALL = new ArrayList<>();
     private static final List<String> SEARCH = new ArrayList<>();
+    /**
+     * 与 {@link #SEARCH} 一一对应的<b>原始显示名</b>。
+     *
+     * <p>
+     * SEARCH 里混着注册名和拼音后缀，不适合直接交给 NotEnoughCharacters 的
+     * 拼音匹配（它要的是纯名字）；所以单独存一份。没装 NEChar 时这份列表
+     * 不会被用到，白占一点内存换来两条路径共用一套索引。
+     */
+    private static final List<String> NAMES = new ArrayList<>();
     /** 去重用：同一个 (物品, 元数据) 只收一次。 */
     private static final Set<Long> SEEN = new HashSet<>();
 
@@ -113,6 +122,7 @@ public final class BlockIndex {
 
                 ALL.add(stack);
                 SEARCH.add(buildSearchText(stack));
+                NAMES.add(displayNameOf(stack));
                 itemsLeft--;
             }
         }
@@ -141,10 +151,20 @@ public final class BlockIndex {
                     registryName.toString()
                         .toLowerCase(Locale.ROOT));
         }
-        // 拼音（全拼 + 首字母）。1.7.10 的输入层没有输入法支持，
-        // 不挂上这个的话中文名的方块就只能靠注册名去搜了。
+        // 拼音（全拼 + 首字母）。这是自研回退路径用的；装了 NotEnoughCharacters
+        // 时名字匹配走 NEChar 的 PinIn（见 #matchesAt），后缀其实用不到，
+        // 但留着无害 —— 两条路径随时可能按装载情况切换。
         builder.append(Pinyin.searchSuffix(displayName));
         return builder.toString();
+    }
+
+    private static String displayNameOf(ItemStack stack) {
+        try {
+            String name = stack.getDisplayName();
+            return name == null ? "" : name;
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     public static boolean isReady() {
@@ -191,12 +211,11 @@ public final class BlockIndex {
             .split("\\s+");
 
         for (int i = 0; i < ALL.size(); i++) {
-            String haystack = SEARCH.get(i);
             boolean matches = true;
             for (String word : words) {
                 String needle = word.startsWith("@") ? word.substring(1) : word;
                 if (needle.isEmpty()) continue;
-                if (!haystack.contains(needle)) {
+                if (!matchesAt(i, needle)) {
                     matches = false;
                     break;
                 }
@@ -205,5 +224,21 @@ public final class BlockIndex {
                 out.add(ALL.get(i));
             }
         }
+    }
+
+    /**
+     * 第 {@code i} 个条目是否包含 {@code needle}。
+     *
+     * <p>
+     * 自研路径：预计算的搜索串（小写显示名 + 注册名 + 拼音后缀）子串匹配。
+     * 装了 NotEnoughCharacters 时再补一刀 NEChar 的拼音/模糊音匹配 ——
+     * 它要的是纯显示名，所以查 {@link #NAMES} 那一份。
+     */
+    private static boolean matchesAt(int i, String needle) {
+        if (SEARCH.get(i)
+            .contains(needle)) {
+            return true;
+        }
+        return NecharBridge.matches(NAMES.get(i), needle);
     }
 }

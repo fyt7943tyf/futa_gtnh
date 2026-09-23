@@ -142,39 +142,32 @@ GTNH 到中后期，仓库管理会变成主要负担：几十个箱子、抽屉
 > （这是 1.7.10 的 `ContainerPlayer.onContainerClosed` 的行为，开任何箱子都一样）。
 > 这个终端做得比原版好一点 —— 关界面时先把东西退回背包，放不下才丢。
 
-#### ⚠️ 这个合成栏**不能**直接从共享存储取料
+#### 合成栏可以直接从共享存储取料（NEI 联动）
 
-这是当前版本的一个明确限制，写在这里免得你找半天：
+装了 NEI 时，对着终端界面里的物品按 R/U 查配方，配方界面里会出现**「填入合成栏」**
+按钮（和原版背包界面那个一样）。区别在于：**材料不够时直接从共享存储补**，
+不需要先取到背包里。
 
-**合成栏里的材料必须是实物**，也就是说你得先把东西从仓库取到背包里、再摆进合成栏。
-它不会去共享存储里找材料。
+- 「材料够不够」的绿红提示把**背包 + 共享存储**算在一起 —— 仓库里有就算够；
+- Shift 点按钮 = 尽量多填（每格填到堆叠上限），普通点 = 只填一次的量；
+- NEI 的**自动合成**按钮也可用：服务端循环「填栏 → 取产物进背包 → 补材料」，
+  直到合成次数用完、材料用尽或背包放不下。
 
-原因很直接 —— 产物是靠原版配方系统算出来的，而它只看合成栏自己那 4 格装了什么：
+**实现要点**（为什么不像 NEI 默认那样模拟点击）：NEI 默认的转移靠
+`FastTransferManager` 模拟一串窗口点击、只认玩家背包；要让材料来自共享存储，
+就得把取料和点击排进同一个时序，网络上没有这个保证。所以本模组把布局
+（每格的候选物品 + 用量，候选就是 NEI 给出的矿辞置换组）打包发给服务端
+（`exchange/CraftFiller.java`），服务端**直接填容器自己的合成栏**：
+材料优先从背包取、不足从存储取，全程服务端权威、数量守恒，
+`detectAndSendChanges` 负责同步回客户端 —— 原子、无竞态、无本地预测。
+自动合成走的是和 Shift 点产物格**同一条**取出路径（含防产物蒸发的容量检查）。
 
-```java
-// ContainerSharedTerminal.onCraftMatrixChanged
-craftResult.setInventorySlotContents(0,
-    CraftingManager.getInstance().findMatchingRecipe(craftMatrix, player.worldObj));
-```
-
-NEI 的 shift 转移也一样：它从**玩家背包**拿材料放进合成栏，它根本不知道共享存储的存在。
-（顺带一提，NEI 的界面内转移按钮需要在 NEI 里为这个界面注册 overlay 才会出现，
-我们没注册，所以现在终端界面里没有那个按钮。）
-
-**所以现在的实际流程是**：从存储网格 Shift + 左键取一整叠到背包 → 对着 NEI 按 R →
-Shift 点配方 → 合成。能用，就是绕。
-
-**如果以后要做**，路是通的，NEI 留了扩展点：
-
-```java
-API.registerGuiOverlay(GuiSharedTerminal.class, "crafting", x, y);
-API.registerGuiOverlayHandler(GuiSharedTerminal.class, 自定义handler, "crafting");
-```
-
-`IOverlayHandler` 带 `canFillCraftingGrid` / `canCraft` / `craft` / `presenceOverlay`，
-所以 NEI 那套「材料够不够」的绿红提示和合成按钮都能接上；
-本整合包里的 **AE2 合成终端做的就是这件事**，有现成参考可以照。
-改动会集中在我们自己的容器和一个 NEI 集成类里，不需要 mixin。
+> 3×3 的工作台配方放不进 2×2 合成栏，这种配方不会出现填充按钮 ——
+> 和原版背包界面行为一致。
+>
+> 服务端视角的防刷约束：候选必须是背包/存储里**真实存在**的条目（精确键匹配），
+> 数量按实际存量封顶，倍率夹在 64 以内 —— 客户端伪造的包最多「找不到材料」，
+> 变不出任何东西。
 
 ### 流体页签
 
@@ -231,13 +224,17 @@ API.registerGuiOverlayHandler(GuiSharedTerminal.class, 自定义handler, "crafti
 
 ### 用拼音搜中文名
 
-**为什么需要这个：** 1.7.10 用的 LWJGL2 输入层**没有输入法支持** ——
-`org.lwjgl.input.Keyboard` 上压根没有 `enableIME` 这个方法。也就是说，
-不管你系统里的输入法怎么配，游戏都收不到汉字。这不是本模组的 bug，
-是 1.7.10 的输入层就缺这一块，得靠 InputFix 那一类模组去补
-（新版 GTNH 换了 LWJGL3，那是另一回事）。
+**直接打中文也可以。** GTNH 2.8+ 带的 **lwjgl3ify**（LWJGL3 / 新 Java 环境）自带输入法支持：
+它给原版 `GuiTextField` 打了补丁，搜索框一聚焦就激活系统输入法，提交的中文
+由它注入输入框。本模组的两个搜索框用的都是原版 `GuiTextField`，
+所以**在带 lwjgl3ify 的 GTNH 里中文是直接打得出来的**，什么都不用额外装。
 
-所以搜索框额外支持拼音，全拼和首字母都认：
+> 环境探测与回退：代码里按「lwjgl3ify 的 `TextFieldHandler` 类在不在」区分环境
+> （`client/ImeCompat.java`）。老版本 lwjgl3ify（GLFW 时代，没有这套机制）或纯
+> LWJGL2 环境下，自动退回旧的「>255 字符注入」路径 —— 配合 InputFix 一类模组
+> 同样能输入中文。两条路径互斥，不会重复插入。
+
+**拼音搜索依旧可用**（不想切输入法的时候更快），全拼和首字母都认：
 
 | 你想找 | 可以敲 |
 | --- | --- |
@@ -249,13 +246,17 @@ API.registerGuiOverlayHandler(GuiSharedTerminal.class, 自定义handler, "crafti
 多音字取最常用的那个读音（比如「行」按 `xing`）。中文直接粘进去也能用 ——
 `Ctrl+V` 粘贴是原版输入框自带的，剪贴板里的中文可以正常进到搜索框里。
 
-> 实现上，每个条目的搜索文本在**建立索引时**就把拼音算好挂上去，
+> 实现上，自研方案的每个条目的搜索文本在**建立索引时**就把拼音算好挂上去，
 > 敲键时只是普通的子串匹配，不会因为多挂了拼音而变慢。
 >
-> 拼音表两万六千多条，覆盖 GB2312 全部汉字加大量生僻字 —— 特意没有只收常用字，
-> 因为 GTNH 的物品名里一堆化学元素名（铱、锇、铪、钌……）恰恰不在常用字表里。
-> 第一次用到时才加载，约 10 ms，没打开过搜索界面就完全不会被碰。
+> **装了 NotEnoughCharacters（NEChar）时拼音匹配整个交给它**（`client/NecharBridge.java`）：
+> 拼音全拼/首字母、模糊音（zh→z、ang→an……）、GTNH 生僻字（钅卢这类）、
+> 电压名特搜（zpm/max/luv…）全是现成的，而且跟随玩家自己的 NEChar 配置 ——
+> 不重复造轮子。没装 NEChar 时用自研拼音表，行为和以前一致。
 >
+> 自研拼音表两万六千多条，覆盖 GB2312 全部汉字加大量生僻字 —— 特意没有只收常用字，
+> 因为 GTNH 的物品名里一堆化学元素名（铱、锇、铪、钌……）恰恰不在常用字表里。
+> 第一次用到时才加载，约 10 ms，没打开过搜索界面就完全不会被碰上。
 > 数据来自 [mozillazg/pinyin-data](https://github.com/mozillazg/pinyin-data)
 > （MIT 许可，上游是 Unicode 联盟的 Unihan 数据库）。生成脚本在
 > `tools/pinyin/GenPinyin.java`，生成的拼音表已提交到
@@ -622,6 +623,7 @@ GTNH 里方块条目有几万条（GT 的某个元数据方块自己就能贡献
 | `shiftClickWithdrawAmount` | `64` | Shift + 左键取多少个。 |
 | `fluidClickAmount` | `1000` | 点击流体条目默认操作多少毫巴。 |
 | `displayItemBecomesFluid` | `true` | 把 GT 流体显示物品存进去时自动转成流体。 |
+| `hideNeiPanelInTerminalGui` | `true` | 打开终端界面时收起 NEI 物品面板（避免叠在右侧合成栏上）。客户端行为。 |
 | `enableRecipe` | `true` | 是否注册合成配方。 |
 | `enableDebugLogging` | `false` | 更多调试日志。 |
 
@@ -690,12 +692,12 @@ GTNH 里方块条目有几万条（GT 的某个元数据方块自己就能贡献
 
 | 限制 | 说明 |
 | --- | --- |
-| **合成栏不能直接从共享存储取料** | 合成栏是普通的原版合成栏，材料必须是实物。详见上面「这个合成栏不能直接从共享存储取料」一节。 |
+| **合成联动只覆盖 2×2** | 从共享存储取料/自动合成都走终端界面右侧的 2×2 合成栏；3×3 的工作台配方不参与（和原版背包界面一致）。 |
 | **不能把共享存储当随身物品栏用** | 界面上取东西永远是「取到你的背包里」，只此一条路。这是刻意的 —— 否则它就变成了一个无限容量的随身背包，和「全服共享仓库」是两回事。 |
 | **GT 机器不能直接读共享存储** | 机器只能通过「共享终端」方块间接对接：流体可进可出（`IFluidHandler`），物品只进不出。想取特定物品请用界面里的搜索。 |
-| **没有自动合成 / 合成请求** | 不是 AE2 的自动合成网络，没有「缺什么自动做」的能力。 |
+| **没有自动合成计划** | NEI 联动的自动合成是「按这一条配方连续做」，不是 AE2 那种「缺什么自动规划原材料」的合成树。 |
 | **没有权限控制** | 所有人自由存取，这是设计选择。需要限制的话得靠领地插件把共享终端方块围起来。 |
-| **界面比较宽（232px）** | 因为右侧有装备栏和合成栏。GUI scale 4 时空间会比较紧，可以把 NEI 面板设成自动隐藏。 |
+| **界面比较宽（232px）** | 因为右侧有装备栏和合成栏。打开界面时 NEI 的物品面板会自动收起（`hideNeiPanelInTerminalGui` 可关），底部搜索条保留。 |
 
 ## 给开发者的说明
 
@@ -704,10 +706,11 @@ GTNH 里方块条目有几万条（GT 的某个元数据方块自己就能贡献
 ```
 src/main/java/com/futa_gtnh/
 ├── shared/      存储核心：ItemKey/FluidKey/SharedStorage/持久化/服务端管理器
-├── exchange/    与玩家背包的双向交换、流体容器适配、操作分发
+├── exchange/    与玩家背包的双向交换、流体容器适配、操作分发、NEI 取料填栏（CraftFiller）
 ├── network/     网络包（全量分块同步 / 增量 / 客户端操作）
 ├── inventory/   Container / 虚拟槽位 / 显示用假背包
 ├── client/      客户端缓存、搜索、排序、GUI、按键、拼音
+│   └── nei/     NEI 联动：配方转移 overlay、界面适配（NEI 缺席时整个不加载）
 ├── block/       共享终端方块与方块实体
 ├── common/      GUI handler、服务端事件挂钩
 ├── locator/     寻物魔杖：增量扫描、安全落点、GT 矿石/矿脉适配
@@ -831,6 +834,9 @@ GT 那边如果截断或拒收就把差额还回存储。
 | `ItemStack.getMaxStackSize()` 返回异常值 | 退回 64，避免 0/负数导致死循环 |
 | 容器槽位下标 ≠ `mainInventory` 下标（槽位 45 对应 `mainInventory[9]`） | 一律用 `Slot.getSlotIndex()` 换算，并校验 `slot.inventory` |
 | 模组被卸载导致物品 / 流体读不出来 | 原样留在内存的「隔离区」，写盘时写回去，装回模组东西还在 |
+| 原版 `GuiButton` 高度 ≠ 20px 时按钮贴图底边被裁掉，按钮看起来和背景边框「长在一起」 | 自绘按钮（`client/GuiSmallButton.java`）：上下两半分别对齐贴图区段顶部/底部采样，任意高度都有完整边框 |
+| lwjgl3ify（LWJGL3/新 Java）下 IME 字符事件 keyState 恒为真，旧的「>255 字符注入」会失效或重复 | `client/ImeCompat.java` 探测 lwjgl3ify 的 `TextFieldHandler` 在不在：在 → 走它对 GuiTextField 的自动注入；不在 → 保留旧路径（InputFix 场景） |
+| NEI 的配方转移只认玩家背包且靠模拟点击，无法从共享存储取料 | 自己的 overlay handler 把布局打包发给服务端直填合成栏（`exchange/CraftFiller.java`），不模拟点击 |
 
 ### 构建
 
@@ -840,5 +846,7 @@ gradlew.bat runClient      # 开发版客户端
 gradlew.bat spotlessApply  # 修正格式
 ```
 
-需要 **GT5-Unofficial**（硬依赖，存储键和流体显示物品都直接用 GT 的 API）。
-NEI 是可选联动（`after:NotEnoughItems`），不装也能跑。
+需要 **GT5-Unofficial** 和 **lwjgl3ify**（均为硬依赖：存储键和流体显示物品直接用
+GT 的 API；中文输入法支持建立在 lwjgl3ify 的 GuiTextField 补丁之上）。
+NEI 是可选联动（`after:NotEnoughItems`，配方转移取料 + 界面适配），
+NotEnoughCharacters 也是可选联动（装了就复用它的拼音/模糊音匹配），不装都能跑。

@@ -123,17 +123,34 @@ manifest 里就不会再写 `MixinConfigs`，也不需要 `mixins.futa_gtnh.json
 
 ## 已配置的依赖
 
-`dependencies.gradle` 里已经加好 GTNH 三件套（都是 `compileOnly`，不进产物 jar）：
+`dependencies.gradle` 里的依赖（`compileOnly` 的不进产物 jar）：
 
-| 依赖 | 版本 | 用途 |
-| --- | --- | --- |
-| GT5-Unofficial | 5.09.54.175 | GregTech 本体，GT 的机器/配方 API |
-| NotEnoughItems | 2.8.144-GTNH | NEI 配方查看器 |
-| GTNHLib | 0.11.51 | GTNH 公共库 |
+| 依赖 | 版本 | 用途 | 性质 |
+| --- | --- | --- | --- |
+| GT5-Unofficial | 5.09.54.175 | GregTech 本体，GT 的机器/配方 API | **硬依赖**（`required-after:gregtech`） |
+| lwjgl3ify | 3.0.35 | LWJGL3 / 新 Java 环境。搜索框的**中文输入法**支持来自它对原版 `GuiTextField` 的补丁 | **硬依赖**（`required-after:lwjgl3ify`） |
+| NotEnoughItems | 2.8.144-GTNH | NEI 配方查看器：配方转移从共享存储取料、界面适配 | 可选联动（运行时探测） |
+| NotEnoughCharacters | 1.7.10-1.5.5-GTNH | 装了就复用它的拼音/模糊音搜索（PinIn） | 可选联动（运行时探测） |
+| GTNHLib | 0.11.51 | GTNH 公共库 | compileOnly |
+| Baubles-Expanded | 2.2.23-GTNH | 迅步饰品的 IBauble 接口 | 可选（运行时探测） |
 
 > 这些用的是 GTNH Maven 上的 **`-dev` classifier** 产物，本身已经是反混淆过的，
 > **不需要**再套 `rfg.deobf(...)`。
 > 注意 GregTech 很大（约 68MB）且带 30 多个传递依赖，首次配置依赖时要下载不少东西。
+
+### 关于 lwjgl3ify（重要）
+
+本模组的**目标运行时**是「GTNH 2.8+（lwjgl3ify，LWJGL3 + 新 Java）」：
+
+- **中文输入**：lwjgl3ify 给原版 `GuiTextField` 打了 mixin —— 聚焦时激活系统输入法
+  （`SDL_StartTextInput`），提交的中文自动注入输入框。本模组的搜索框用的就是
+  原版 `GuiTextField`，所以**不需要为 IME 写任何注入代码**。
+- **代码不 import lwjgl3ify 的类**：环境探测走「按类名 `Class.forName` 查
+  `TextFieldHandler`」（`client/ImeCompat.java`），老版本 lwjgl3ify 或纯 LWJGL2
+  环境自动退回旧的字符注入路径。所以 `compileOnly` 那行只是文档化这个约定。
+- **`@Mod` 声明了 `required-after:lwjgl3ify`**：dev 的 runClient 也挂了 lwjgl3ify
+  （`runtimeOnlyNonPublishable`）。若 dev 环境因 coremod 加载顺序出问题，
+  临时把 `@Mod` 里的这一段去掉即可 —— 代码路径本身没有硬链接。
 
 想加本地 jar：放进 `libs/`，然后写 `compileOnly(files("libs/xxx.jar"))`。
 

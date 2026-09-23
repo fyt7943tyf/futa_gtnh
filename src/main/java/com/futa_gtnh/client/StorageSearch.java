@@ -74,6 +74,15 @@ public final class StorageSearch {
                     return entry.getTooltipText()
                         .contains(text);
                 default:
+                    // 名字分支：装了 NotEnoughCharacters 时交给它 —— 拼音、模糊音、
+                    // 生僻字、电压名搜索全是现成的且跟随玩家自己的 NEChar 配置；
+                    // 没装时走自研的「小写名 + 预计算拼音后缀」子串匹配。
+                    // 注册名两条路径都查（@模组 前缀之外直接敲注册名也应能搜到）。
+                    if (NecharBridge.isAvailable()) {
+                        return NecharBridge.matches(entry.getDisplayName(), text) || entry.getRegistryName()
+                            .toLowerCase(Locale.ROOT)
+                            .contains(text);
+                    }
                     return entry.getSearchName()
                         .contains(text)
                         || entry.getRegistryName()

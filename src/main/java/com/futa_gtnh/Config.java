@@ -118,6 +118,20 @@ public class Config {
     public static int locatorScanTimeoutTicks = 600;
 
     // ------------------------------------------------------------------
+    // 界面（客户端行为）
+    // ------------------------------------------------------------------
+
+    /**
+     * 打开共享终端界面时是否暂时收起 NEI 的物品面板。
+     *
+     * <p>
+     * 终端界面比原版容器宽（232px），NEI 的物品面板会和右侧的合成栏叠在一起。
+     * 这是<b>客户端表现</b>：服务器改这一项不影响玩家自己客户端的表现，
+     * 各端读自己配置文件里的值。
+     */
+    public static boolean hideNeiPanelInTerminalGui = true;
+
+    // ------------------------------------------------------------------
     // 合成
     // ------------------------------------------------------------------
 
@@ -165,6 +179,12 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             displayItemBecomesFluid,
             "把 GT 的流体显示物品存进共享存储时，自动把它转成流体。");
+
+        hideNeiPanelInTerminalGui = configuration.getBoolean(
+            "hideNeiPanelInTerminalGui",
+            Configuration.CATEGORY_GENERAL,
+            hideNeiPanelInTerminalGui,
+            "打开共享终端界面时暂时收起 NEI 的物品面板（终端界面较宽，面板会叠在合成栏上）。客户端行为，各端读各自的配置。");
 
         enableRecipe = configuration
             .getBoolean("enableRecipe", Configuration.CATEGORY_GENERAL, enableRecipe, "是否注册共享终端的合成配方。");
