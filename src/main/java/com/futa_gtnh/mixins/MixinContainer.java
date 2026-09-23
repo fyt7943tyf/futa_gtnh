@@ -7,8 +7,10 @@ import net.minecraft.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import com.futa_gtnh.station.SharedStorageInventory;
 import com.futa_gtnh.tinkers.TinkersAutoFill;
 
 /**
@@ -51,5 +53,43 @@ public class MixinContainer {
     private void futa$notePlayerClick(int slotId, int clickedButton, int mode, EntityPlayer player,
         CallbackInfoReturnable<ItemStack> cir) {
         TinkersAutoFill.notePlayerClick((Container) (Object) this, slotId, mode);
+    }
+
+    // ==================================================================
+    // 客户端镜像的写入来源
+    // ==================================================================
+
+    /**
+     * 标记「接下来这次写槽位来自服务端同步」。
+     *
+     * <p>
+     * {@code putStackInSlot} / {@code putStacksInSlots} 在整个原版里<b>只有网络层会调</b>
+     * （客户端 {@code NetHandlerPlayClient.handleSetSlot / handleWindowItems}，
+     * 服务端 {@code NetHandlerPlayServer}），所以它们可以当「这是服务端权威值」的凭据：
+     * 合成站旁边那块存储区的客户端镜像只认这两个方法写进来的值。
+     *
+     * <p>
+     * 少了这个凭据会出一个很难查的 bug：别的模组在客户端模拟点击（MouseTweaks 的拖动、
+     * NEI 的模拟）会直接写槽位，把显示清掉 —— 而服务端那一格的值并没有变，
+     * 于是永远不会有回包把它修回来，玩家看到的就是「东西拿起来之后从仓库里消失了」。
+     */
+    @Inject(method = "putStackInSlot", at = @At("HEAD"))
+    private void futa$beginServerSlotSync(int slotIndex, ItemStack stack, CallbackInfo ci) {
+        SharedStorageInventory.beginServerSync();
+    }
+
+    @Inject(method = "putStackInSlot", at = @At("RETURN"))
+    private void futa$endServerSlotSync(int slotIndex, ItemStack stack, CallbackInfo ci) {
+        SharedStorageInventory.endServerSync();
+    }
+
+    @Inject(method = "putStacksInSlots", at = @At("HEAD"))
+    private void futa$beginServerSlotsSync(ItemStack[] stacks, CallbackInfo ci) {
+        SharedStorageInventory.beginServerSync();
+    }
+
+    @Inject(method = "putStacksInSlots", at = @At("RETURN"))
+    private void futa$endServerSlotsSync(ItemStack[] stacks, CallbackInfo ci) {
+        SharedStorageInventory.endServerSync();
     }
 }

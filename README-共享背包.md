@@ -295,6 +295,14 @@ GUI 左边那排工具类型按钮只影响图标和说明，**根本不发给�
 - 旁边放的是**真箱子**（没挂共享存储）时，整套原样交回匠魂的 handler ——
   那是玩家自己的箱子，我们的服务端直填够不着它。
 
+> **注册时机有个坑**：NEI 直到 `FMLLoadCompleteEvent`（`NEIModContainer.loadComplete`
+> → `ClientHandler.loadPluginsList`）才加载各模组的 `IConfigureNEI` 插件 ——
+> 也就是说匠魂注册它那个 handler 发生在我们 `postInit` **之后**，会把我们先注册的
+> 覆盖掉（NEI 的 handler 表就是个 `HashMap.put`）。所以注册要等到 `LoadComplete`
+> 之后再补一次（`ClientProxy.lateInit`），第一次打开合成站时还会再补一次兜底
+> （`StoragePanel.hookNeiOnce`）。客户端日志里出现
+> 「合成站的 NEI 配方转移已接管」才算真的生效。
+
 **几个刻意的设计决定**
 
 - **排序和分页在客户端算，再把这一页推给服务端**。排序键是「本地化名字 + 拼音」
@@ -1188,7 +1196,9 @@ GT 那边如果截断或拒收就把差额还回存储。
 | `@Shadow` 一个**继承自原版**的字段（如 `Container.inventorySlots`）时，注解处理器不会把它写进 refmap | 正式包里名字对不上，mixin 静默失效。改成让 mixin 类 `extends Container`，用普通继承调用取（`this.getSlot(i)`），根本不进混淆表 |
 | 匠魂缺席时混入目标类不存在，默认会让整个 mixin 配置加载失败 | `FutaGtnhMixinPlugin` 在应用前先查「匠魂在不在」（模组列表 + 类加载器两条路），不在就跳过；配置里再写 `required: false`，版本对不上也只是记一条错，不崩游戏 |
 | `mergeItemStack` 系的方法**直接改 `slot.getStack()` 返回的对象**，虚拟格子每次返回新对象 | 来源清零、存储没涨 —— 物品凭空消失。所以在容器里接管这三个方法（见「几个关键设计决定」第 0 条） |
-| 槽位里返回超过 64 的 `ItemStack` | 原版「整叠拿到光标」会把整个数量搬到光标上，等于刷物品。虚拟格子一律 `min(数量, 64)` |
+| 槽位里返回超过 64 的 `ItemStack` | 原版「整叠拿到光标」会把整个数量搬到光标上，等于刷物品。虚拟格子一律 `min(数量, 64)`；真实数量自己画（`client/StationAmounts`） |
+| 别的模组（MouseTweaks 的拖动、NEI 的模拟点击）会在**客户端**直接写槽位 | 虚拟格子的客户端镜像会因此被清掉，而服务端那一格的值没变、永远不会有回包修回来 —— 玩家看到「东西拿起来之后从仓库里消失了」。所以客户端镜像只认服务端的槽位同步：`mixins/MixinContainer` 挂在 `Container.putStackInSlot` / `putStacksInSlots`（全原版只有网络层会调这两个方法）上打标记，`SharedStorageInventory` 只接受带标记的写入；客户端侧的 `decrStackSize` 也不再改动本地显示 |
+| NEI 的插件（含匠魂注册的配方转移 handler）是在 **`FMLLoadCompleteEvent`** 才加载的，晚于所有模组的 `postInit` | 在 `postInit` 注册的 handler 会被匠魂的覆盖掉 —— 而且完全静默。所以本模组在 `LoadComplete` 之后再注册一次，并在第一次打开合成站时兜底再注册一次 |
 | 自动补料分不清「合成吃掉了」和「玩家自己拿走了」（库存层面两种都是数量变小） | 回填的前提改成匠魂自己的成品槽事件 `SlotCraftingStation.onPickupFromSlot`（`mixins/MixinSlotCraftingStation`）：只有「刚拿走产物」这一次才回填；另外用 `mixins/MixinContainer` 记「玩家点过哪一格」，被点过的格子以现状为准。否则从九宫格里拿材料会被立刻补回去 |
 | mixin 的 `@Inject` 处理器签名不被接受时，注入会**静默失效**（配置里 `required = false`，只记一条错），编译期完全看不出来 | 处理器一律用最普通的形式（需要时带上 `CallbackInfo`/`CallbackInfoReturnable` 参数），并且每一个 mixin 都在开发服务端里确认过日志里有 `Mixing …` 那一行 |
 | 「倒空合成栏」按钮直接写库存、不经过任何点击 | 同一个信号也手动喂一次（`dumpCraftingGrid` 的 `@Inject`），否则倒空后下一 tick 就被补回来，按钮看起来没反应 |

@@ -107,6 +107,7 @@ public final class StoragePanel {
             lastScreen = screen;
             sentKeys = null;
             syncRequested = false;
+            hookNeiOnce();
         }
 
         if (!ClientStorageCache.isReady()) {
@@ -267,6 +268,35 @@ public final class StoragePanel {
     }
 
     private String lastSuffix = "";
+
+    /**
+     * 打开一个「挂着共享存储的合成站」时，最后再补一次 NEI 的注册。
+     *
+     * <p>
+     * NEI 直到 {@code FMLLoadCompleteEvent} 才加载各模组的插件，也就是说匠魂那个
+     * 「只认当前这一页」的配方转移 handler 是在<b>我们 postInit 之后</b>注册的，
+     * 会把我们先注册的覆盖掉。{@code ClientProxy.lateInit()} 已经在 LoadComplete
+     * 之后补过一次；这里再补一次是为了彻底不看 FML 的派发顺序 —— 界面都打开了，
+     * NEI 的插件一定早加载完了。
+     *
+     * <p>
+     * 没装 NEI 时这个方法立刻返回（{@code Loader.isModLoaded} 放在前面，
+     * JVM 也就不会去解析 {@code NeiIntegration} 这个纯客户端 NEI 类的符号引用）。
+     */
+    private static void hookNeiOnce() {
+        if (neiHookDone) return;
+        neiHookDone = true;
+
+        if (!cpw.mods.fml.common.Loader.isModLoaded("NotEnoughItems")) return;
+        try {
+            com.futa_gtnh.client.nei.NeiIntegration.installStationOverlay();
+        } catch (Throwable t) {
+            // NEI / 匠魂版本对不上：没有它也照样能用（只是配方转移只能认当前页）
+            com.futa_gtnh.FutaGtnhMod.LOG.debug("共享存储：补注册合成站的 NEI 配方转移失败", t);
+        }
+    }
+
+    private static boolean neiHookDone;
 
     private static void send(StationRef station, List<ItemKey> keys, boolean requestSync) {
         NetworkHandler.INSTANCE
