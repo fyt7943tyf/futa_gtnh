@@ -50,13 +50,12 @@ public class GuiSwiftStep extends GuiScreen {
      * 预设倍率。
      *
      * <p>
-     * 上限放到 20 是因为玩家反馈「5 倍不够快」。但要知道 20 倍差不多就是
-     * <b>专用服务器的物理上限</b>了：飞行终端速度约等于
-     * {@code flySpeed × 9.1} 格/tick，20 倍正好卡在 9.1 格/tick，
-     * 而 {@code NetHandlerPlayServer} 在单轴超过 10 格/tick 时会判定
-     * 「moved too quickly」并把你拉回原地。再往上就得自己承担被拉回的风险。
+     * 最高档取 16 而不是 20：<b>专用服务器的飞行硬上限是 18</b>
+     * （推导见 {@link ItemSwiftStep#serverSafeFlyMultiplier()}），
+     * 超过之后每 tick 都会被服务端拉回原地，等于完全没加速。
+     * 摆一个按下去就废掉的 20x 档位只会误导人。
      */
-    private static final float[] PRESETS = { 1.0F, 2.0F, 3.0F, 5.0F, 10.0F, 20.0F };
+    private static final float[] PRESETS = { 1.0F, 2.0F, 3.0F, 5.0F, 10.0F, 16.0F };
 
     private final ItemStack charm;
 
@@ -164,12 +163,26 @@ public class GuiSwiftStep extends GuiScreen {
         int left2 = left + 8;
         drawRect(left2, top + 96, left + GUI_WIDTH - 8, top + 97, 0xFF808080);
 
+        // 被服务器安全上限压住时说清楚：玩家调了 20 倍却只跑出 18 倍，
+        // 不解释的话他只会觉得这东西坏了
+        int rangeY = top + GUI_HEIGHT - 4;
+        if (SwiftStepClientHandler.isClampedForServer()) {
+            drawCenteredString(
+                fontRendererObj,
+                EnumChatFormatting.RED + StatCollector.translateToLocalFormatted(
+                    "futa_gtnh.swift_step.gui.server_clamp",
+                    fixed(ItemSwiftStep.serverSafeFlyMultiplier(), 0)),
+                width / 2,
+                rangeY - 12,
+                0xFFFFFF);
+        }
+
         drawCenteredString(
             fontRendererObj,
             EnumChatFormatting.DARK_GRAY + StatCollector
                 .translateToLocalFormatted("futa_gtnh.swift_step.gui.range", fixed(ItemSwiftStep.maxMultiplier(), 2)),
             width / 2,
-            top + GUI_HEIGHT - 4,
+            rangeY,
             0xFFFFFF);
     }
 

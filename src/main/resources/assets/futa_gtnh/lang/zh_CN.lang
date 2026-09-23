@@ -12,6 +12,7 @@ item.futa_gtnh.swift_step.tooltip.equip=潜行 + 右键：装备到空的饰品�
 futa_gtnh.swift_step.gui.flight=飞行速度
 futa_gtnh.swift_step.gui.walk=移动速度
 futa_gtnh.swift_step.gui.range=倍率可调范围 1.00 ~ %s（以服务端配置为准）
+futa_gtnh.swift_step.gui.server_clamp=多人服务器上限 %sx，已自动压低（超了会被服务端拉回）
 
 key.categories.futa_gtnh=FutaGTNH
 key.futa_gtnh.shared_terminal=打开共享背包

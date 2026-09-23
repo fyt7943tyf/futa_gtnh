@@ -69,6 +69,70 @@ public class ItemSwiftStep extends Item implements IBauble {
     public static final float VANILLA_WALK_SPEED = 0.1F;
 
     /**
+     * 飞行时每 tick 的水平阻力。
+     *
+     * <p>
+     * 取自 {@code EntityLivingBase.moveEntityWithHeading}：玩家在飞行时那两个分支
+     * （水中、岩浆）都会被 {@code !capabilities.isFlying} 挡掉，走的是最后那条
+     * {@code f2 = 0.91F} 的路，末尾 {@code motionX *= 0.91; motionZ *= 0.91}。
+     */
+    private static final double FLY_HORIZONTAL_DRAG = 0.91D;
+
+    /**
+     * 飞行终端速度相对 {@code flySpeed} 的倍数 = {@code 1 / (1 - 0.91) ≈ 11.11}。
+     *
+     * <p>
+     * 水平速度是个等比级数：每 tick 先加速 {@code flySpeed}，再乘 0.91，
+     * 收敛到 {@code flySpeed / 0.09}。所以
+     * <b>每 tick 位移 = 倍率 × 0.05 × 11.11 = 倍率 × 0.5556 格</b>。
+     *
+     * <p>
+     * 原版 1 倍代进去是 0.556 格/tick = 11.1 格/秒 —— 正好对上创造模式飞行的体感，
+     * 可以用来校验这个系数没算错。
+     */
+    public static final double FLY_TERMINAL_FACTOR = 1.0D / (1.0D - FLY_HORIZONTAL_DRAG);
+
+    /**
+     * 服务端允许的每 tick 位移上限（格）。
+     *
+     * <p>
+     * 来自 {@code NetHandlerPlayServer.processPlayer}：
+     *
+     * <pre>
+     * double d10 = d7*d7 + d8*d8 + d9*d9;   // 每轴取 max(|位移|, |motion|)
+     * if (d10 &gt; 100.0D &amp;&amp; (!serverController.isSinglePlayer()
+     *                      || !serverController.getServerOwner().equals(playerName))) {
+     *     logger.warn("... moved too quickly! ...");
+     *     this.setPlayerLocation(lastPosX, lastPosY, lastPosZ, ...);   // 拉回原地
+     *     return;
+     * }
+     * </pre>
+     *
+     * {@code d10} 就是位移的平方和，所以 {@code > 100} 等价于
+     * <b>每 tick 移动超过 10 格</b>（不分方向，斜着飞也一样）。
+     *
+     * <p>
+     * <b>注意那个 {@code isSinglePlayer} 条件：单人存档里只要你就是房主，
+     * 整条检查会被跳过。</b>这就是「自己开档感觉不出来、一连服务器就失效」的原因。
+     */
+    private static final double SERVER_MAX_BLOCKS_PER_TICK = 10.0D;
+
+    /**
+     * 专用服务器上不会被拉回的最大飞行倍率。
+     *
+     * <p>
+     * 解 {@code 倍率 × 0.05 × 11.11 ≤ 10} 得 {@code 倍率 ≤ 18.0}。
+     * 这是<b>物理上限，不是偏好</b>：超过它的飞行速度不是「快一点但有点风险」，
+     * 而是<b>每 tick 都被服务端拉回原地，等于完全没加速</b>。
+     *
+     * <p>
+     * 所以默认上限取的是比它低一点的 16（留出垂直分量的余量）。
+     */
+    public static float serverSafeFlyMultiplier() {
+        return (float) (SERVER_MAX_BLOCKS_PER_TICK / (VANILLA_FLY_SPEED * FLY_TERMINAL_FACTOR));
+    }
+
+    /**
      * 移动速度修饰符的固定 UUID。
      *
      * <p>
@@ -160,7 +224,7 @@ public class ItemSwiftStep extends Item implements IBauble {
     /** @return 配置里的倍率上限。配置读失败时退回一个保守值，免得算出 NaN。 */
     public static float maxMultiplier() {
         float configured = (float) Config.swiftStepMaxMultiplier;
-        if (Float.isNaN(configured) || configured < MIN_MULTIPLIER) return 20.0F;
+        if (Float.isNaN(configured) || configured < MIN_MULTIPLIER) return 16.0F;
         return configured;
     }
 
