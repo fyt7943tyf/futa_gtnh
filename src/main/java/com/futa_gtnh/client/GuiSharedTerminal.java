@@ -62,6 +62,9 @@ public class GuiSharedTerminal extends GuiContainer {
     /** 当前过滤 + 排序后的结果，是这一页内容的来源 */
     private final List<StorageViewEntry> filtered = new ArrayList<>();
     private final List<ItemStack> pageStacks = new ArrayList<>();
+    /** 和 {@link #pageStacks} 一一对应的原始键，见 pushPage 里的说明 */
+    private final List<com.futa_gtnh.shared.ItemKey> pageItemKeys = new ArrayList<>();
+    private final List<com.futa_gtnh.shared.FluidKey> pageFluidKeys = new ArrayList<>();
 
     private int tab = TAB_ITEMS;
     private int page;
@@ -203,14 +206,25 @@ public class GuiSharedTerminal extends GuiContainer {
 
     private void pushPage() {
         pageStacks.clear();
+        pageItemKeys.clear();
+        pageFluidKeys.clear();
+
         int start = page * ContainerSharedTerminal.SHARED_SLOTS;
         for (int i = 0; i < ContainerSharedTerminal.SHARED_SLOTS; i++) {
             int index = start + i;
-            pageStacks.add(
-                index < filtered.size() ? filtered.get(index)
-                    .getDisplay() : null);
+            StorageViewEntry entry = index < filtered.size() ? filtered.get(index) : null;
+
+            pageStacks.add(entry == null ? null : entry.getDisplay());
+            // 键跟着显示物品一起送进容器。
+            //
+            // 不能等点击时再从显示物品反推：有些模组的 getter 会改写物品栈
+            // （GT 的 MetaGeneratedTool.getToolStats 就会重写 ench），
+            // 界面一画出来显示栈就已经和存档里的不一样了，反推出来的键查不到东西。
+            pageItemKeys.add(entry == null ? null : entry.getItemKey());
+            pageFluidKeys.add(entry == null ? null : entry.getFluidKey());
         }
-        container.setPageDisplay(pageStacks);
+
+        container.setPageDisplay(pageStacks, pageItemKeys, pageFluidKeys);
     }
 
     private void changePage(int delta) {
