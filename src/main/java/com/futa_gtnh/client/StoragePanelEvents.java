@@ -13,7 +13,8 @@ import cpw.mods.fml.common.eventhandler.SubscribeEvent;
  *
  * <ul>
  * <li>{@link #onDrawScreen}：注册在 {@code MinecraftForge.EVENT_BUS} 上，画在任意界面之后 ——
- * 匠魂工作站界面开着时，把面板画在它下面；</li>
+ * 匠魂工作站界面开着时，把搜索栏画在它下面，并把存储区的真实数量补画上去
+ * （{@link StationAmounts}）；</li>
  * <li>{@link StoragePanelInput}（NEI 的 {@code IContainerInputHandler}）：1.7.10 的 Forge
  * 没有可取消的鼠标/键盘事件，点击与键入必须走 NEI 这条能「消费事件」的路，
  * 否则点面板等于点在界面上（点在界面外会把手上的东西丢地上）。
@@ -26,7 +27,10 @@ public class StoragePanelEvents {
     public void onDrawScreen(GuiScreenEvent.DrawScreenEvent.Post event) {
         GuiScreen screen = event.gui;
         if (!(screen instanceof GuiContainer)) return;
+
         StoragePanel.get()
             .draw(screen, event.mouseX, event.mouseY);
+        // 存储区的物品栈只能显示到 64（超过会被原版整叠搬走），真数量这里补画
+        StationAmounts.draw(screen, event.mouseX, event.mouseY);
     }
 }

@@ -88,11 +88,39 @@ public final class NeiIntegration {
         if (com.futa_gtnh.tinkers.TinkersAutoFill.isAvailable()) {
             try {
                 GuiInfo.customSlotGuis.add(tconstruct.tools.gui.CraftingStationGui.class);
+                registerStationOverlay();
             } catch (Throwable t) {
-                // 匠魂版本对不上：跳过，NEI 的滚轮行为保持原样
-                com.futa_gtnh.FutaGtnhMod.LOG.debug("共享存储：登记合成站界面以关闭 NEI 滚轮搬运失败", t);
+                // 匠魂版本对不上：跳过，NEI 的滚轮与配方转移行为保持原样
+                com.futa_gtnh.FutaGtnhMod.LOG.debug("共享存储：注册合成站的 NEI 联动失败", t);
             }
         }
+    }
+
+    /**
+     * 合成站的配方转移：<b>替换</b>掉匠魂自带的那个 handler。
+     *
+     * <p>
+     * 匠魂的 {@code CraftingStationOverlayHandler} 只把旁边那块存储区当普通箱子 ——
+     * 材料不在当前这一页就判定「没有原料」。我们的实现走服务端直填，
+     * 材料从整个共享存储取（见 {@code client/nei/StationOverlayHandler}）。
+     *
+     * <p>
+     * NEI 的 handler 表是 {@code HashMap.put}（{@code RecipeInfo.overlayMap}），
+     * 后注册的覆盖先注册的；本模组声明了 {@code after:NotEnoughItems}，
+     * 所以我们的 postInit 一定跑在 NEI 加载插件之后，覆盖是稳定的。
+     *
+     * <p>
+     * <b>只换 handler，不换 overlay</b>：幽灵材料指引的坐标仍然是匠魂注册的
+     * {@code CraftingStationStackPositioner}，那个和取料无关。2×2 配方匠魂没注册过，
+     * 这里补一个同样偏移的 overlay（合成站的 3×3 和原版工作台在同一个位置）。
+     */
+    private static void registerStationOverlay() {
+        Class<? extends GuiContainer> station = tconstruct.tools.gui.CraftingStationGui.class;
+        StationOverlayHandler handler = new StationOverlayHandler();
+
+        API.registerGuiOverlayHandler(station, handler, "crafting");
+        API.registerGuiOverlay(station, "crafting2x2", StationOverlayHandler.OFFSET_X, StationOverlayHandler.OFFSET_Y);
+        API.registerGuiOverlayHandler(station, handler, "crafting2x2");
     }
 
     /**
