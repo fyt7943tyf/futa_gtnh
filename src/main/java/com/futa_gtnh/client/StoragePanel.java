@@ -41,6 +41,9 @@ public final class StoragePanel {
     private static final int MAX_ROWS = 4;
     private static final int SEARCH_H = 14;
 
+    /** 切出/收起浮层的按键。原生槽位不够用时用它调搜索。 */
+    private static final int TOGGLE_KEY = org.lwjgl.input.Keyboard.KEY_P;
+
     private static final StoragePanel INSTANCE = new StoragePanel();
 
     public static StoragePanel get() {
@@ -56,6 +59,9 @@ public final class StoragePanel {
     private String lastQuery = "\u0000";
 
     /** 这一帧算出来的几何信息，点击判定用 */
+    /** 浮层是不是被玩家切出来了（默认关：原生槽位是主力，浮层只负责搜索）。 */
+    private boolean toggled;
+
     private boolean visible;
     private GuiScreen lastScreen;
     private int x;
@@ -75,6 +81,7 @@ public final class StoragePanel {
         visible = false;
         if (!(screen instanceof GuiContainer)) return;
         if (!TinkersScreens.isWorkstation(screen)) return;
+        if (!toggled) return; // 默认关着：原生槽位是主力，这个浮层只负责搜索
         if (!ClientStorageCache.isReady()) return;
 
         GuiContainer gui = (GuiContainer) screen;
@@ -247,6 +254,12 @@ public final class StoragePanel {
 
     /** @return true 表示这个按键被搜索框吃掉了 */
     public boolean keyTyped(GuiScreen screen, char typed, int keyCode) {
+        // 开关按键最先处理：浮层没显示时也要能按出来
+        if (keyCode == TOGGLE_KEY) {
+            toggled = !toggled;
+            focused = false;
+            return true;
+        }
         if (!visible || !focused || search == null) return false;
 
         if (keyCode == 1) { // Esc：先退出输入状态，不关界面
