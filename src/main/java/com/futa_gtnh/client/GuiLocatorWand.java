@@ -294,6 +294,15 @@ public class GuiLocatorWand extends GuiScreen {
 
         teleportButton.enabled = LocatorState.getState() == PacketLocatorResult.STATE_FOUND
             && LocatorState.getResultDimension() == mc.thePlayer.dimension;
+
+        // 传送过一次之后按钮换成「已传送」。光把按钮灰掉不说明原因，
+        // 玩家只会以为魔杖坏了或者找不到目标了
+        String label = tr(
+            LocatorState.isTeleported() ? "futa_gtnh.gui.locator.teleported" : "futa_gtnh.gui.locator.teleport");
+        if (!label.equals(teleportButton.displayString)) {
+            teleportButton.displayString = label;
+        }
+
         stopButton.enabled = LocatorState.getState() != LocatorState.STATE_NONE;
     }
 
@@ -514,10 +523,17 @@ public class GuiLocatorWand extends GuiScreen {
             return;
         }
 
-        if (state != PacketLocatorResult.STATE_FOUND) return;
+        if (state != PacketLocatorResult.STATE_FOUND && state != PacketLocatorResult.STATE_ARRIVED) return;
 
-        fontRendererObj
-            .drawStringWithShadow(EnumChatFormatting.GREEN + tr("futa_gtnh.gui.locator.state.found"), x, y, 0xFFFFFF);
+        // 「已传送」和「已找到」共用下面这一整块：坐标、距离、光束提示全都要照画 ——
+        // 传送之后玩家最需要的就是这些信息
+        boolean arrived = state == PacketLocatorResult.STATE_ARRIVED;
+        fontRendererObj.drawStringWithShadow(
+            EnumChatFormatting.GREEN
+                + tr(arrived ? "futa_gtnh.gui.locator.state.arrived" : "futa_gtnh.gui.locator.state.found"),
+            x,
+            y,
+            0xFFFFFF);
 
         // 出结果之后玩家可能已经走了传送门，那时候坐标指的是另一个世界的同一个数字
         if (LocatorState.getResultDimension() != mc.thePlayer.dimension) {
@@ -544,6 +560,16 @@ public class GuiLocatorWand extends GuiScreen {
             .drawStringWithShadow(EnumChatFormatting.GRAY + "Z " + LocatorState.getPosZ(), x, y + 44, 0xFFFFFF);
         fontRendererObj
             .drawStringWithShadow(EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.locator.beam"), x, y + 58, 0xFFFFFF);
+
+        if (arrived) {
+            // 说清楚为什么传送按钮点不动了：结果还在、还能看光束，只是这一个结果
+            // 已经用过一次传送
+            fontRendererObj.drawStringWithShadow(
+                EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.locator.teleported.note"),
+                x,
+                y + 70,
+                0xFFFFFF);
+        }
     }
 
     private void drawHintLines(int x, int y) {

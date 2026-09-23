@@ -117,15 +117,18 @@ public class PacketLocatorAction implements IMessage {
             LocatorManager.TeleportResult result = LocatorManager.teleport(player);
             switch (result) {
                 case OK:
-                    // 成功后清掉结果：同一次扫描只允许传送一次，
-                    // 否则「找到 → 传送 → 再传送」会变成廉价的地图跳跃
-                    LocatorManager.cancel(player);
+                    // 传送成功。<b>刻意不取消追踪</b>：玩家落地之后正需要那道光告诉他
+                    // 目标在哪一边（LocatorManager.teleport 里已经发过「已传送」状态包了，
+                    // 界面会把传送按钮作废，但结果和坐标都留着）
+                    FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.arrived");
                     break;
                 case OK_CARVED:
                     // 目标整个埋在实心方块里，落脚点是就地清出来的 —— 说一声，
                     // 免得玩家以为传送把自己塞进了墙里
-                    LocatorManager.cancel(player);
                     FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.arrived_carved");
+                    break;
+                case ALREADY_USED:
+                    FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.teleport_used");
                     break;
                 case NO_SAFE_SPOT:
                     FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.no_safe_spot");

@@ -1,8 +1,10 @@
 package com.futa_gtnh.locator;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import net.minecraft.entity.player.EntityPlayerMP;
@@ -42,6 +44,16 @@ public final class LocatorManager {
 
     private static final Map<UUID, Job> JOBS = new HashMap<>();
     private static final Map<UUID, int[]> RESULTS = new HashMap<>();
+    /**
+     * 哪些玩家的<b>当前这个结果</b>已经用掉过一次传送。
+     *
+     * <p>
+     * 和 {@link #RESULTS} 分开：传送成功后结果要留着（客户端靠它画追踪和光束），
+     * 但传送本身只允许一次 —— 不分开的话，「传送过」就只能靠「把结果删掉」来表达，
+     * 而那正好会让玩家落地之后失去唯一的指路手段。
+     * 重新搜索、取消追踪、下线都会把这个标记清掉。
+     */
+    private static final Set<UUID> TELEPORTED = new HashSet<>();
 
     /** 进度包最快多少 tick 发一次。 */
     private static final int PROGRESS_INTERVAL = 5;
@@ -59,6 +71,7 @@ public final class LocatorManager {
         UUID id = player.getUniqueID();
         JOBS.remove(id);
         RESULTS.remove(id);
+        TELEPORTED.remove(id);
 
         submit(
             player,
@@ -83,6 +96,7 @@ public final class LocatorManager {
         UUID id = player.getUniqueID();
         JOBS.remove(id);
         RESULTS.remove(id);
+        TELEPORTED.remove(id);
 
         OreVeinCatalog.Entry vein = OreVeinCatalog.byKey(veinKey);
         if (vein == null) {
@@ -119,29 +133,46 @@ public final class LocatorManager {
         UUID id = player.getUniqueID();
         JOBS.remove(id);
         RESULTS.remove(id);
+        TELEPORTED.remove(id);
         send(player, PacketLocatorResult.cancelled());
     }
 
     /**
      * 传送到上次找到的位置。
      *
+     * <p>
+     * <b>成功后不再清掉结果</b>：玩家落地的第一件事就是想知道「矿在哪边」，
+     * 那正是追踪和光束的用处（以前这里顺手 cancel 掉，玩家一到就什么都看不见了）。
+     * 「同一个结果只允许传送一次」这条规矩改成用 {@link #TELEPORTED} 表达 ——
+     * 挡的是「再传送」，不是「继续指路」。
+     *
      * @return 结果；失败/开洞的原因由调用方告知玩家
      */
     public static TeleportResult teleport(EntityPlayerMP player) {
-        int[] target = RESULTS.get(player.getUniqueID());
+        UUID id = player.getUniqueID();
+        int[] target = RESULTS.get(id);
         if (target == null) return TeleportResult.NO_RESULT;
+        if (TELEPORTED.contains(id)) return TeleportResult.ALREADY_USED;
 
+        TeleportResult result;
         switch (TeleportHelper.teleportNear(player, target[0], target[1], target[2])) {
             case NATURAL:
-                return TeleportResult.OK;
+                result = TeleportResult.OK;
+                break;
             case CARVED:
-                return TeleportResult.OK_CARVED;
+                result = TeleportResult.OK_CARVED;
+                break;
             case FAILED_PROTECTED:
                 return TeleportResult.NO_SAFE_SPOT_PROTECTED;
             case FAILED:
             default:
                 return TeleportResult.NO_SAFE_SPOT;
         }
+
+        // 真送到了才算用掉：失败时结果当然要留着让玩家再试（换个角度、或者自己走过去）
+        TELEPORTED.add(id);
+        send(player, PacketLocatorResult.arrived());
+        return result;
     }
 
     public enum TeleportResult {
@@ -155,13 +186,16 @@ public final class LocatorManager {
          * 附近唯一能开洞的位置得清掉矿石（或木头/机器这类不该动的方块），所以没开。
          * 和「找不到」分开，是为了让提示说清楚是<b>不肯挖</b>，不是找不到。
          */
-        NO_SAFE_SPOT_PROTECTED
+        NO_SAFE_SPOT_PROTECTED,
+        /** 这个结果已经传送过一次了（追踪还在，想再传送得重新选目标） */
+        ALREADY_USED
     }
 
     /** 玩家下线时清掉他的任务和结果。 */
     public static void forget(UUID id) {
         JOBS.remove(id);
         RESULTS.remove(id);
+        TELEPORTED.remove(id);
     }
 
     // ==================================================================
