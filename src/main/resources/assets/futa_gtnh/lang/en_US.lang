@@ -90,3 +90,7 @@ futa_gtnh.locator.vein.name=%s Vein
 
 futa_gtnh.locator.msg.no_safe_spot=No safe spot near the target; teleport cancelled
 futa_gtnh.locator.msg.no_result=No result available, please search again
+
+futa_gtnh.station.chest=Shared Storage
+futa_gtnh.station.title.items= · %s items
+futa_gtnh.station.title.page= · %s/%s

@@ -8,7 +8,7 @@ import com.futa_gtnh.client.TinkersScreens;
 import codechicken.nei.guihook.IContainerInputHandler;
 
 /**
- * 把共享存储面板的点击 / 滚轮 / 键盘接到 NEI 的输入钩子上。
+ * 把共享存储搜索栏的点击 / 滚轮 / 键盘接到 NEI 的输入钩子上。
  *
  * <p>
  * 1.7.10 的 Forge 只有 {@code GuiScreenEvent.DrawScreenEvent}（能画不能拦），
@@ -16,8 +16,9 @@ import codechicken.nei.guihook.IContainerInputHandler;
  * 这也是 NEI 自己那些覆盖层能正常收点击的原因。
  *
  * <p>
- * <b>注意只处理匠魂工作站界面</b>：面板只在那些界面上画出来，别的界面里这三个方法
- * 立刻返回 false，不干扰任何东西。
+ * <b>注意只处理匠魂工作站界面</b>：搜索栏与滚轮翻页只在那些界面上有意义，
+ * 别的界面里这三个方法立刻返回 false，不干扰任何东西。滚轮还额外要求
+ * 「鼠标压在那块存储区上」，所以 NEI 物品面板上的滚轮照旧是翻 NEI 的页。
  */
 public class StoragePanelInput implements IContainerInputHandler {
 

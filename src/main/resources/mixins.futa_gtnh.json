@@ -1,7 +1,12 @@
 {
 	"package": "com.futa_gtnh.mixins",
 	"compatibilityLevel": "JAVA_8",
-	"mixins": [],
+	"plugin": "com.futa_gtnh.mixins.FutaGtnhMixinPlugin",
+	"required": false,
+	"mixins": [
+		"MixinCraftingStationContainer",
+		"MixinCraftingStationLogic"
+	],
 	"client": [],
 	"server": []
 }
