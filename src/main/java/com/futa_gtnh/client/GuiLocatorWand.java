@@ -134,7 +134,9 @@ public class GuiLocatorWand extends GuiScreen {
         searchField.setMaxStringLength(64);
         searchField.setEnableBackgroundDrawing(false);
         searchField.setText(previous);
-        searchField.setFocused(true);
+        // 默认不给焦点，点一下才进输入状态 —— 和共享背包那边保持一致
+        // （以前是强制常驻焦点，玩家点别处也退不出来）
+        searchField.setFocused(false);
         Keyboard.enableRepeatEvents(true);
 
         buttonList.clear();
@@ -334,6 +336,11 @@ public class GuiLocatorWand extends GuiScreen {
             guiTop + SEARCH_Y + 16,
             0xFF000000);
         drawBorder(guiLeft + GRID_X, guiTop + SEARCH_Y, GUI_WIDTH - 2 * GRID_X, 16);
+
+        // 聚焦时描一圈亮边：现在默认不是焦点了，得能一眼看出在不在输入状态
+        if (searchField != null && searchField.isFocused()) {
+            drawBorder(guiLeft + GRID_X - 1, guiTop + SEARCH_Y - 1, GUI_WIDTH - 2 * GRID_X + 2, 18, 0xFF55FF55);
+        }
 
         if (searchField != null && searchField.getText()
             .isEmpty()) {
@@ -633,21 +640,23 @@ public class GuiLocatorWand extends GuiScreen {
             && mouseX < searchField.xPosition + searchField.width
             && mouseY >= searchField.yPosition
             && mouseY < searchField.yPosition + 12) {
+            // GuiTextField.mouseClicked 自己会按「点在不在框内」决定聚焦/失焦
             searchField.mouseClicked(mouseX, mouseY, mouseButton);
-            // 搜索框始终保有焦点：否则点到空白处之后再敲字母会触发快捷键直接关掉界面
-            searchField.setFocused(true);
             return;
         }
 
         int index = indexAt(mouseX, mouseY);
         if (index >= 0 && index < resultCount()) {
+            if (searchField != null) searchField.setFocused(false);
             select(index);
             return;
         }
 
         super.mouseClicked(mouseX, mouseY, mouseButton);
+        // 点到别处 = 退出输入状态。不用怕「敲字母会关掉界面」：
+        // 这个界面没有快捷键，而 GuiContainer 只对「打开背包」那个键关界面。
         if (searchField != null) {
-            searchField.setFocused(true);
+            searchField.setFocused(false);
         }
     }
 
