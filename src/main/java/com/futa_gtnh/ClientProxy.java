@@ -42,6 +42,16 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void postInit(FMLPostInitializationEvent event) {
         super.postInit(event);
+
+        // NEChar 的拼音检索桥在所有模组就位之后探测一次，结果缓存住。
+        com.futa_gtnh.client.NecharBridge.init();
+
+        // NEI 联动（配方转移从共享存储取料 + 界面适配）。NEI 是可选联动：
+        // NeiIntegration 里全是 NEI 的类型，必须先确认它在场再碰那个类，
+        // 否则没装 NEI 的环境会在类加载时直接 NoClassDefFoundError。
+        if (cpw.mods.fml.common.Loader.isModLoaded("NotEnoughItems")) {
+            com.futa_gtnh.client.nei.NeiIntegration.register();
+        }
     }
 
     /**

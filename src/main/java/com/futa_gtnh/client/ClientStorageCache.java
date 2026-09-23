@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 
@@ -59,6 +60,30 @@ public final class ClientStorageCache {
 
     public static List<StorageViewEntry> fluids() {
         return FLUIDS;
+    }
+
+    /**
+     * 共享存储里这种物品有多少（客户端视角）。
+     *
+     * <p>
+     * NEI 的配方转移联动（「材料够不够」的绿红提示）用：判定时把背包和共享存储
+     * 加在一起算。数量是增量同步来的绝对值，最多短暂滞后一个包。
+     */
+    public static long getItemAmount(ItemStack stack) {
+        if (stack == null || !ready) return 0L;
+        ItemKey key = ItemKey.of(stack);
+        if (key == null) return 0L;
+        StorageViewEntry entry = ITEM_INDEX.get(key);
+        return entry == null ? 0L : entry.getAmount();
+    }
+
+    /** 共享存储里这种流体有多少毫巴（客户端视角）。 */
+    public static long getFluidAmount(net.minecraftforge.fluids.FluidStack fluid) {
+        if (fluid == null || !ready) return 0L;
+        FluidKey key = FluidKey.of(fluid);
+        if (key == null) return 0L;
+        StorageViewEntry entry = FLUID_INDEX.get(key);
+        return entry == null ? 0L : entry.getAmount();
     }
 
     // ==================================================================

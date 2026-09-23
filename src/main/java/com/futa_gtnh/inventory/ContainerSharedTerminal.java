@@ -424,9 +424,14 @@ public class ContainerSharedTerminal extends Container {
      * 而 {@code SlotCrafting} 正是在那一步消耗合成材料。顺序反了就会出现
      * 「材料扣了但产物没拿到」或者「产物拿到但材料没扣」。
      *
-     * @return 被挪走的产物；一点都没挪动时返回 null（原版靠这个决定要不要继续重试）
+     * <p>
+     * 可见性是 public：服务端的自动合成（{@code CraftFiller}，NEI 联动）在
+     * 填好合成栏之后也走这一个方法把产物收进背包 —— 和玩家 Shift 点击产物格
+     * 走的是同一条路径，包括 {@link #canAcceptAll} 那个防蒸发的判断。
+     *
+     * @return 被挪走的产物；一点都没挪动时返回 null（自动合成循环靠这个决定停不停）
      */
-    private ItemStack transferCraftResult(EntityPlayer player) {
+    public ItemStack transferCraftResult(EntityPlayer player) {
         Slot slot = getSlot(RESULT_SLOT);
         if (slot == null || !slot.getHasStack()) return null;
 

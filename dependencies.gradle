@@ -38,6 +38,24 @@ dependencies {
     compileOnly("com.github.GTNewHorizons:Baubles-Expanded:2.2.23-GTNH:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:Baubles-Expanded:2.2.23-GTNH:dev")
 
+    // ---- lwjgl3ify ----
+    // 把 1.7.10 升级到 LWJGL3 / 新 Java 的核心模组（GTNH 2.8+ 标配）。
+    // 本模组的运行目标是「带 lwjgl3ify 的 GTNH」：
+    //  - @Mod 声明 required-after:lwjgl3ify（硬依赖，见 FutaGtnhMod）；
+    //  - 搜索框的中文输入法支持来自 lwjgl3ify 对原版 GuiTextField 的 mixin
+    //   （IME 探测见 client/ImeCompat.java，代码本身不直接 import 它的类，
+    //    所以 compileOnly 只是为了文档化这个约定，运行时靠探测而不是链接）；
+    //  - 老版本 lwjgl3ify（GLFW 时代，无 TextFieldHandler）会被探测自动退回
+    //    旧的「>255 字符注入」路径，不会坏。
+    compileOnly("com.github.GTNewHorizons:lwjgl3ify:3.0.35:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:lwjgl3ify:3.0.35:dev")
+
+    // ---- NotEnoughCharacters（NEChar，可选联动）----
+    // 拼音/模糊音搜索复用它的 PinIn 上下文（net.moecraft.nechar.NecharUtils），
+    // 装了就自动启用、没装退回自研 pinyin.txt（见 client/NecharBridge.java）。
+    // 所有 NEChar 类型引用隔离在 NecharBridge.Hook 一个类里，缺席时不会加载。
+    compileOnly("com.github.GTNewHorizons:NotEnoughCharacters:1.7.10-1.5.5-GTNH:dev")
+
     // ---- runClient / runServer 里真正要加载的模组 ----
     //
     // ★ 这几行是必需的，不是可选的。
@@ -48,8 +66,8 @@ dependencies {
     //   「Missing required mod gregtech」拒绝加载本模组，什么都测不了。
     //
     //   加了之后第一次 runClient 会慢不少（GT 本身体积很大），属正常现象。
-    //   如果只是临时想跑起来看看界面、不想等 GT 加载，把这三行注释掉，
-    //   同时把 FutaGtnhMod 的 dependencies 里的 required-after:gregtech 一并去掉。
+    //   如果只是临时想跑起来看看界面、不想等 GT 加载，把这几行注释掉，
+    //   同时把 FutaGtnhMod 的 dependencies 里的 required-after 一并去掉。
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:GT5-Unofficial:5.09.54.175:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.144-GTNH:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:GTNHLib:0.11.51:dev")

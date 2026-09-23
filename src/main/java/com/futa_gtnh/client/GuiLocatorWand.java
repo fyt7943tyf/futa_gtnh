@@ -135,18 +135,19 @@ public class GuiLocatorWand extends GuiScreen {
         searchField.setEnableBackgroundDrawing(false);
         searchField.setText(previous);
         searchField.setFocused(true);
+        Keyboard.enableRepeatEvents(true);
 
         buttonList.clear();
 
         // 页签按钮放在标题那一行的右端
-        blocksTab = new GuiButton(
+        blocksTab = new GuiSmallButton(
             BTN_TAB_BLOCKS,
             guiLeft + GUI_WIDTH - 6 - 100,
             guiTop + TITLE_Y,
             48,
             16,
             tr("futa_gtnh.gui.locator.tab.blocks"));
-        veinsTab = new GuiButton(
+        veinsTab = new GuiSmallButton(
             BTN_TAB_VEINS,
             guiLeft + GUI_WIDTH - 6 - 50,
             guiTop + TITLE_Y,
@@ -159,14 +160,14 @@ public class GuiLocatorWand extends GuiScreen {
         veinsTab.enabled = OreVeinCatalog.isAvailable();
         if (!veinsTab.enabled) tab = TAB_BLOCKS;
 
-        teleportButton = new GuiButton(
+        teleportButton = new GuiSmallButton(
             BTN_TELEPORT,
             guiLeft + PANEL_X,
             guiTop + BUTTON_Y,
             42,
             18,
             tr("futa_gtnh.gui.locator.teleport"));
-        stopButton = new GuiButton(
+        stopButton = new GuiSmallButton(
             BTN_STOP,
             guiLeft + PANEL_X + 46,
             guiTop + BUTTON_Y,
@@ -197,7 +198,8 @@ public class GuiLocatorWand extends GuiScreen {
         List<OreVeinCatalog.Entry> candidates = OreVeinCatalog.forWorld(mc == null ? null : mc.theWorld);
         for (OreVeinCatalog.Entry entry : candidates) {
             allVeins.add(entry);
-            // 搜索文本里带上拼音：矿脉名也是中文，而 1.7.10 打不出中文
+            // 搜索文本里带上拼音（自研回退路径用；lwjgl3ify 下可以直接打中文，
+            // 装了 NEChar 时拼音匹配也交给它 —— 见 filterVeins / NecharBridge）
             veinSearch.add(
                 (entry.getTitle() + ' ' + entry.getMaterials()).toLowerCase(Locale.ROOT)
                     + Pinyin.searchSuffix(entry.getTitle()));
@@ -266,7 +268,10 @@ public class GuiLocatorWand extends GuiScreen {
             for (String word : words) {
                 String needle = word.startsWith("@") ? word.substring(1) : word;
                 if (needle.isEmpty()) continue;
-                if (!haystack.contains(needle)) {
+                if (!haystack.contains(needle) && !NecharBridge.matches(
+                    allVeins.get(i)
+                        .getTitle(),
+                    needle)) {
                     matches = false;
                     break;
                 }
@@ -682,31 +687,30 @@ public class GuiLocatorWand extends GuiScreen {
     }
 
     /**
-     * 把「只有字符、没有按键」的事件也转给 {@link #keyTyped}。
+     * 旧输入层（LWJGL2 + InputFix 一类）的兜底：把「只有字符、没有按键」的事件也转给
+     * {@link #keyTyped}。原版 {@code GuiScreen#handleKeyboardInput()} 只在
+     * {@code Keyboard.getEventKeyState()} 为真时才转发字符，keyState 为假的事件
+     * 会被直接丢掉，而那些辅助层送来的恰恰就是这种事件。
      *
      * <p>
-     * 1.7.10 的 {@code GuiScreen#handleKeyboardInput()} 长这样：
-     *
-     * <pre>
-     * if (Keyboard.getEventKeyState()) {
-     *     this.keyTyped(Keyboard.getEventCharacter(), Keyboard.getEventKey());
-     * }
-     * </pre>
-     *
-     * 也就是说 <b>keyState 为假的事件会被直接丢掉</b>。而输入法以及各种
-     * 「往输入框里塞文字」的辅助层送来的恰恰就是这种事件 —— 汉字就是这么消失的。
-     * 这里补一刀：只补 {@code > 255} 的字符（汉字等非 Latin-1），
-     * 普通按键仍旧原样交给原版处理，不会重复插入。
+     * lwjgl3ify 环境下不走这条路（见 {@link ImeCompat}）：输入法文字会被镜像成
+     * keyState 为真的事件、由原版路径自己转发，这里再补一刀就会重复插入。
      */
     @Override
     public void handleKeyboardInput() {
-        if (!Keyboard.getEventKeyState()) {
+        if (!ImeCompat.hasNativeIme()) {
             char injected = Keyboard.getEventCharacter();
-            if (injected > 255) {
+            if (!Keyboard.getEventKeyState() && injected > 255) {
                 this.keyTyped(injected, 0);
             }
         }
         super.handleKeyboardInput();
+    }
+
+    @Override
+    public void onGuiClosed() {
+        super.onGuiClosed();
+        Keyboard.enableRepeatEvents(false);
     }
 
     @Override

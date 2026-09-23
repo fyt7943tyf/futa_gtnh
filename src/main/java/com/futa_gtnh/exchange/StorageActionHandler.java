@@ -127,6 +127,15 @@ public final class StorageActionHandler {
                     handleSetTerminalFluid(player, container, packet.getFluidKey());
                     return;
                 }
+                case PacketStorageAction.FILL_CRAFT_MATRIX:
+                case PacketStorageAction.AUTOCRAFT: {
+                    // NEI 合成联动：布局在 keyTag 里，倍率在 amount 里。
+                    // CraftFiller 内部会自己 detectAndSendChanges ——
+                    // 就算存储一点没动（材料全来自背包），合成栏也是要同步的，
+                    // 不能依赖尾部那段「delta 非空才同步」的逻辑。
+                    CraftFiller.handle(player, container, packet, storage, recorder);
+                    return;
+                }
                 default:
                     FutaGtnhMod.LOG
                         .warn("共享存储：收到未知操作 {}（玩家 {}），已忽略", packet.getAction(), player.getCommandSenderName());

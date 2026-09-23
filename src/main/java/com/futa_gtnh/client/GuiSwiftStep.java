@@ -72,14 +72,14 @@ public class GuiSwiftStep extends GuiScreen {
         int top = (height - GUI_HEIGHT) / 2;
 
         addPresetRow(left, top + 52, FLIGHT_PRESET_BASE);
-        buttonList.add(new GuiButton(BTN_FLIGHT_DOWN, left + 8, top + 74, 90, 18, "-0.25"));
-        buttonList.add(new GuiButton(BTN_FLIGHT_UP, left + 102, top + 74, 90, 18, "+0.25"));
+        buttonList.add(new GuiSmallButton(BTN_FLIGHT_DOWN, left + 8, top + 74, 90, 18, "-0.25"));
+        buttonList.add(new GuiSmallButton(BTN_FLIGHT_UP, left + 102, top + 74, 90, 18, "+0.25"));
 
         addPresetRow(left, top + 130, WALK_PRESET_BASE);
-        buttonList.add(new GuiButton(BTN_WALK_DOWN, left + 8, top + 152, 90, 18, "-0.25"));
-        buttonList.add(new GuiButton(BTN_WALK_UP, left + 102, top + 152, 90, 18, "+0.25"));
+        buttonList.add(new GuiSmallButton(BTN_WALK_DOWN, left + 8, top + 152, 90, 18, "-0.25"));
+        buttonList.add(new GuiSmallButton(BTN_WALK_UP, left + 102, top + 152, 90, 18, "+0.25"));
 
-        buttonList.add(new GuiButton(BTN_DONE, left + 52, top + 176, 96, 20, tr("gui.done")));
+        buttonList.add(new GuiSmallButton(BTN_DONE, left + 52, top + 176, 96, 20, tr("gui.done")));
 
         updatePresetStates();
     }
@@ -92,7 +92,7 @@ public class GuiSwiftStep extends GuiScreen {
         int startX = left + (GUI_WIDTH - total) / 2;
         for (int i = 0; i < PRESETS.length; i++) {
             buttonList.add(
-                new GuiButton(
+                new GuiSmallButton(
                     baseId + i,
                     startX + i * (presetWidth + gap),
                     y,

@@ -81,6 +81,20 @@ public class PacketStorageAction implements IMessage {
     /** 设置方块终端往相邻管道/流体罐输出的流体。 */
     public static final byte SET_TERMINAL_FLUID = 20;
 
+    // ---- NEI 合成联动 ----
+    /**
+     * 按客户端发来的布局填充 2×2 合成栏：材料优先从玩家背包取，不够的从共享存储取。
+     * 布局（候选 + 每格数量）放在 {@link #keyTag} 里，见 {@link #fillCraft}。
+     * {@link #amount} 是倍率：{@code <= 0} 表示「尽量填满」（每格填到堆叠上限）。
+     */
+    public static final byte FILL_CRAFT_MATRIX = 30;
+    /**
+     * 自动合成：先按布局填满合成栏，然后反复「取产物进背包 → 补材料」，
+     * 直到合成 {@link #amount} 次（{@code <= 0} 表示材料用尽或背包放不下为止）。
+     * 全程服务端权威，不走任何模拟点击。
+     */
+    public static final byte AUTOCRAFT = 31;
+
     public static final byte KIND_ITEM = 0;
     public static final byte KIND_FLUID = 1;
 
@@ -130,6 +144,27 @@ public class PacketStorageAction implements IMessage {
         return this;
     }
 
+    /**
+     * NEI 合成联动用的构造：布局 NBT 直接放进 {@link #keyTag}，倍率放 {@link #amount}。
+     *
+     * <p>
+     * 布局格式（由 {@code SharedTerminalOverlayHandler} 生成、
+     * {@code CraftFiller} 解析）：
+     * 
+     * <pre>
+     * root: {
+     *   "slots": [ { "idx": 0..3, "count": 每次合成需要几个,
+     *                "cands": [ ItemKey 的 NBT, ... 按优先级排序的候选 ] }, ... ]
+     * }
+     * </pre>
+     */
+    public static PacketStorageAction craft(byte action, NBTTagCompound layout, long multiplier) {
+        PacketStorageAction packet = new PacketStorageAction(action);
+        packet.keyTag = layout;
+        packet.amount = multiplier;
+        return packet;
+    }
+
     public byte getAction() {
         return action;
     }
@@ -144,6 +179,11 @@ public class PacketStorageAction implements IMessage {
 
     public long getAmount() {
         return amount;
+    }
+
+    /** 合成联动动作携带的布局 NBT（见 {@link #craft}）；别的动作返回 null。 */
+    public NBTTagCompound getLayoutTag() {
+        return keyTag;
     }
 
     public com.futa_gtnh.shared.ItemKey getItemKey() {
