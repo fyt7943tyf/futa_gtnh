@@ -193,8 +193,12 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
      * 3×3（工作台）和 2×2（原版背包那种，会落在左上角 2×2 ——
      * 原版 {@code ShapedRecipes.matches} 本来就会在整个 3×3 里平移匹配，所以位置合法）
      * 都能填；行列超过三档的（某些 GT 多方块配方）直接放弃，免得摆出个错的形状。
+     *
+     * <p>
+     * 可见性是 protected：合成站那边的 {@code StationOverlayHandler} 直接复用这一套
+     * （合成站也是 3×3，归一化规则一模一样），见那个类的说明。
      */
-    private NBTTagCompound buildLayout(IRecipeHandler recipe, int recipeIndex) {
+    protected NBTTagCompound buildLayout(IRecipeHandler recipe, int recipeIndex) {
         List<PositionedStack> ingredients = recipe.getIngredientStacks(recipeIndex);
         if (ingredients == null || ingredients.isEmpty()) return null;
 

@@ -85,7 +85,23 @@ public final class StationViews {
     }
 
     /**
-     * 客户端推来「我这一页显示哪些东西」。
+     * 这个容器是不是「挂着共享存储的合成站」。
+     *
+     * <p>
+     * NEI 的「填入合成栏 / 自动合成」请求走它：只有真的开着这样的界面，
+     * 才允许通过那条通道动共享存储（和终端界面同一个信任边界）。
+     */
+    public static boolean canCraftFromSharedStorage(Container container) {
+        if (!(container instanceof CraftingStationContainer)) return false;
+        try {
+            return existing(((CraftingStationContainer) container).logic) != null;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 玩家推来「我这一页显示哪些东西」。
      *
      * <p>
      * <b>这里是信任边界</b>：只接受「玩家自己正开着的那个合成站」的视图，

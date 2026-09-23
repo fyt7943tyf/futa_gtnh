@@ -278,6 +278,25 @@ public final class StoragePanel {
         return visible && gui == lastScreen;
     }
 
+    /**
+     * 原生存储区第 {@code slot} 格（0..26，行优先）这一帧对应的共享存储条目。
+     *
+     * <p>
+     * 给「格子里画出真实数量」用（见 {@link StationAmounts}）：原生槽位里的物品栈
+     * 只能显示到 64（超过会被原版整叠搬走，见 {@code SharedStorageInventory} 的说明），
+     * 所以真正的数字得我们自己画。这里的顺序就是推给服务端的顺序，
+     * 和服务端第 46+i 格一一对应。
+     *
+     * @return 条目；这一帧没有数据（快照没到 / 不是合成站 / 翻页还没生效）时返回 null
+     */
+    public StorageViewEntry entryAt(int slot) {
+        if (slot < 0 || slot >= PAGE) return null;
+        if (!ClientStorageCache.isReady()) return null;
+        int index = page * PAGE + slot;
+        if (index < 0 || index >= filtered.size()) return null;
+        return filtered.get(index);
+    }
+
     // ==================================================================
     // 输入（都由 NEI 的 IContainerInputHandler 转发过来）
     // ==================================================================
