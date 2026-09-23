@@ -39,7 +39,7 @@ import gregtech.api.util.GTUtility;
  *   0 .. 44   共享存储网格（虚拟槽位）
  *   45 .. 80  玩家主背包 + 快捷栏
  *   81 .. 84  护甲（39=头盔, 38=胸甲, 37=护腿, 36=靴子）
- *   85 .. 88  合成栏 2×2
+ *   85 .. 93  合成栏 3×3
  *   89        合成产物
  * </pre>
  *
@@ -82,7 +82,10 @@ public class ContainerSharedTerminal extends Container {
     public static final int ARMOR_START = MAIN_END;
     public static final int ARMOR_END = ARMOR_START + InventoryExchange.ARMOR_SIZE;
     public static final int CRAFT_START = ARMOR_END;
-    public static final int CRAFT_END = CRAFT_START + 4;
+    /** 合成栏是 3×3。 */
+    public static final int CRAFT_SIZE = 3;
+    public static final int CRAFT_SLOTS = CRAFT_SIZE * CRAFT_SIZE;
+    public static final int CRAFT_END = CRAFT_START + CRAFT_SLOTS;
     public static final int RESULT_SLOT = CRAFT_END;
     public static final int TOTAL_SLOTS = RESULT_SLOT + 1;
 
@@ -102,9 +105,13 @@ public class ContainerSharedTerminal extends Container {
     // y= 26 「装备」标题
     // y= 38..110 护甲 4 格
     // y=118 「合成」标题
-    // y=132..168 合成栏 2×2
-    // y=172..184 箭头（画在贴图里）
-    // y=186..204 产物格
+    // y=132..186 合成栏 3×3
+    // y=188..196 箭头（画在贴图里）
+    // y=204..222 产物格
+    //
+    // 3×3 的横向：侧栏内沿是 x=178..230（x=176 是分隔线、177 是高光、231 是右边框），
+    // 只有 53px，装不下 3×18=54 的格子，所以合成栏从 x=177 起 —— 正好覆盖掉那条
+    // 1px 高光，格子的浅色边框顶上去，看上去就是贴着侧栏的一整块（贴图已按这个位置重画）。
     //
     // 只加宽不加高：GUI scale 4 时竖向只有 270 像素可用，再高就有玩家看不到底部了。
     public static final int GUI_WIDTH = 232;
@@ -128,10 +135,10 @@ public class ContainerSharedTerminal extends Container {
     public static final int ARMOR_X = 191;
     public static final int ARMOR_Y = 38;
     public static final int CRAFT_LABEL_Y = 118;
-    public static final int CRAFT_X = 182;
+    public static final int CRAFT_X = 177;
     public static final int CRAFT_Y = 132;
     public static final int RESULT_X = 191;
-    public static final int RESULT_Y = 186;
+    public static final int RESULT_Y = 204;
 
     private final EntityPlayer player;
     /** 由方块终端打开时指向那个方块；按键远程打开时为 null。 */
@@ -169,11 +176,11 @@ public class ContainerSharedTerminal extends Container {
     private boolean fluidTabActive;
 
     /**
-     * 2×2 合成栏。<b>它属于容器，不属于玩家</b> —— 这一点和很多人的直觉相反。
+     * 3×3 合成栏。<b>它属于容器，不属于玩家</b> —— 这一点和很多人的直觉相反。
      * 原版 {@code ContainerPlayer} 也是这么做的，所以关掉原版背包界面时
      * 里面的东西会被丢到地上。
      */
-    private final InventoryCrafting craftMatrix = new InventoryCrafting(this, 2, 2);
+    private final InventoryCrafting craftMatrix = new InventoryCrafting(this, CRAFT_SIZE, CRAFT_SIZE);
     private final IInventory craftResult = new InventoryCraftResult();
 
     public ContainerSharedTerminal(InventoryPlayer playerInventory, TileEntitySharedTerminal terminal) {
@@ -265,10 +272,10 @@ public class ContainerSharedTerminal extends Container {
         addSlotToContainer(
             new SlotCrafting(playerInventory.player, craftMatrix, craftResult, 0, RESULT_X + 1, RESULT_Y + 1));
 
-        for (int row = 0; row < 2; row++) {
-            for (int col = 0; col < 2; col++) {
+        for (int row = 0; row < CRAFT_SIZE; row++) {
+            for (int col = 0; col < CRAFT_SIZE; col++) {
                 addSlotToContainer(
-                    new Slot(craftMatrix, col + row * 2, CRAFT_X + 1 + col * 18, CRAFT_Y + 1 + row * 18));
+                    new Slot(craftMatrix, col + row * CRAFT_SIZE, CRAFT_X + 1 + col * 18, CRAFT_Y + 1 + row * 18));
             }
         }
     }

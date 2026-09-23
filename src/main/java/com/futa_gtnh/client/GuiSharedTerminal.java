@@ -430,7 +430,9 @@ public class GuiSharedTerminal extends GuiContainer {
         String crafting = tr("futa_gtnh.gui.crafting");
         fontRendererObj.drawString(
             crafting,
-            ContainerSharedTerminal.ARMOR_X + 9 - fontRendererObj.getStringWidth(crafting) / 2,
+            // 合成栏是 3×3，居中按它自己的宽度算（侧栏比格子窄，不能用 ARMOR_X）
+            ContainerSharedTerminal.CRAFT_X + ContainerSharedTerminal.CRAFT_SLOTS * 9
+                - fontRendererObj.getStringWidth(crafting) / 2,
             ContainerSharedTerminal.CRAFT_LABEL_Y,
             0x404040);
     }
