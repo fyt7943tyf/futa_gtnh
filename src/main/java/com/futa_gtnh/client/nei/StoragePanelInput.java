@@ -3,6 +3,7 @@ package com.futa_gtnh.client.nei;
 import net.minecraft.client.gui.inventory.GuiContainer;
 
 import com.futa_gtnh.client.StoragePanel;
+import com.futa_gtnh.client.TinkersScreens;
 
 import codechicken.nei.guihook.IContainerInputHandler;
 
@@ -22,24 +23,21 @@ public class StoragePanelInput implements IContainerInputHandler {
 
     @Override
     public boolean mouseClicked(GuiContainer gui, int mouseX, int mouseY, int button) {
-        if (!StoragePanel.get()
-            .isShownIn(gui)) return false;
+        if (!TinkersScreens.isWorkstation(gui)) return false;
         return StoragePanel.get()
             .mouseClicked(gui, mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseScrolled(GuiContainer gui, int mouseX, int mouseY, int scrollDir) {
-        if (!StoragePanel.get()
-            .isShownIn(gui)) return false;
+        if (!TinkersScreens.isWorkstation(gui)) return false;
         return StoragePanel.get()
             .mouseScrolled(gui, scrollDir);
     }
 
     @Override
     public boolean keyTyped(GuiContainer gui, char typedChar, int keyCode) {
-        if (!StoragePanel.get()
-            .isShownIn(gui)) return false;
+        if (!TinkersScreens.isWorkstation(gui)) return false;
         return StoragePanel.get()
             .keyTyped(gui, typedChar, keyCode);
     }
