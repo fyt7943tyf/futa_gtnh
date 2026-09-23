@@ -14,6 +14,8 @@ import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageDelta;
 import com.futa_gtnh.network.PacketStorageSync;
+import com.futa_gtnh.station.StationViews;
+import com.futa_gtnh.tinkers.TinkersAutoFill;
 
 /**
  * 共享存储的服务端生命周期与广播中枢。
@@ -180,17 +182,29 @@ public final class SharedStorageManager {
     }
 
     /**
-     * @return 当前打开了共享存储界面的所有玩家
+     * @return 当前「正在看着共享存储」的所有玩家
+     *
+     *         <p>
+     *         除了开着终端界面的玩家，还包括开着<b>匠魂合成站</b>的玩家 ——
+     *         合成站旁边那块存储区显示的就是共享存储本身，别人往里放东西，
+     *         开着合成站的玩家也该立刻看到（否则界面上的数量会一直停在打开界面那一刻）。
      */
     public static List<EntityPlayerMP> viewers() {
         List<EntityPlayerMP> result = new ArrayList<>();
         MinecraftServer server = MinecraftServer.getServer();
         if (server == null || server.getConfigurationManager() == null) return result;
 
+        // 匠魂是可选的：先探测再引用 StationViews（那里全是 tconstruct 的类型）
+        boolean tinkers = TinkersAutoFill.isAvailable();
+
         for (Object object : server.getConfigurationManager().playerEntityList) {
             if (!(object instanceof EntityPlayerMP)) continue;
             EntityPlayerMP player = (EntityPlayerMP) object;
             if (player.openContainer instanceof ContainerSharedTerminal) {
+                result.add(player);
+                continue;
+            }
+            if (tinkers && StationViews.isStationViewer(player)) {
                 result.add(player);
             }
         }

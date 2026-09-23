@@ -80,6 +80,19 @@ public final class NeiIntegration {
         if (mouseTweaksGui != null) {
             GuiInfo.customSlotGuis.add(mouseTweaksGui);
         }
+
+        // ★ 匠魂合成站同理，而且这里还有第二个理由：合成站旁边那块存储区是虚拟格子
+        // （见 mixins/MixinCraftingStationLogic），NEI 的滚轮搬运会在「容器 ↔ 背包」之间
+        // 搬一个物品，落到虚拟格子上语义就乱了。登记之后滚轮空出来给「翻存储区那一页」用
+        // （见 client/StoragePanel）。
+        if (com.futa_gtnh.tinkers.TinkersAutoFill.isAvailable()) {
+            try {
+                GuiInfo.customSlotGuis.add(tconstruct.tools.gui.CraftingStationGui.class);
+            } catch (Throwable t) {
+                // 匠魂版本对不上：跳过，NEI 的滚轮行为保持原样
+                com.futa_gtnh.FutaGtnhMod.LOG.debug("共享存储：登记合成站界面以关闭 NEI 滚轮搬运失败", t);
+            }
+        }
     }
 
     /**

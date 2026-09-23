@@ -86,3 +86,7 @@ futa_gtnh.locator.vein.name=%s矿脉
 
 futa_gtnh.locator.msg.no_safe_spot=目标附近找不到能站人的地方，传送已取消
 futa_gtnh.locator.msg.no_result=没有可用的结果，请重新搜索
+
+futa_gtnh.station.chest=共享存储
+futa_gtnh.station.title.items= · %s 项
+futa_gtnh.station.title.page= · %s/%s
