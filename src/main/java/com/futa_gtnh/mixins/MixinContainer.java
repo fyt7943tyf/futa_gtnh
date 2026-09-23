@@ -2,10 +2,12 @@ package com.futa_gtnh.mixins;
 
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.inventory.Container;
+import net.minecraft.item.ItemStack;
 
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import com.futa_gtnh.tinkers.TinkersAutoFill;
 
@@ -39,8 +41,15 @@ import com.futa_gtnh.tinkers.TinkersAutoFill;
 @Mixin(Container.class)
 public class MixinContainer {
 
+    /**
+     * 注意这里<b>带着</b> {@code CallbackInfoReturnable} 参数（虽然用不到）：
+     * 之前试过省掉它，编译器不报错、也就没在运行时验证过 —— 而 mixin 的处理器签名
+     * 一旦不被接受，注入会静默失效（配置里 required = false，只记一条错），
+     * 表现就是「这段代码好像根本没跑」。保持最普通的写法最稳。
+     */
     @Inject(method = "slotClick", at = @At("HEAD"))
-    private void futa$notePlayerClick(int slotId, int clickedButton, int mode, EntityPlayer player) {
+    private void futa$notePlayerClick(int slotId, int clickedButton, int mode, EntityPlayer player,
+        CallbackInfoReturnable<ItemStack> cir) {
         TinkersAutoFill.notePlayerClick((Container) (Object) this, slotId, mode);
     }
 }

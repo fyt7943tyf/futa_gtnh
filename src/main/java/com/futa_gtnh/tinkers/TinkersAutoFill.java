@@ -42,7 +42,10 @@ public final class TinkersAutoFill {
             probed = true;
             try {
                 available = Loader.isModLoaded("TConstruct") && probeClass("tconstruct.tools.logic.ToolStationLogic")
-                    && probeClass("tconstruct.tools.logic.PartBuilderLogic");
+                    && probeClass("tconstruct.tools.logic.PartBuilderLogic")
+                    // 合成站自动补料靠 SlotCraftingStation 认「玩家拿走了产物」这个动作
+                    // （见 mixins/MixinSlotCraftingStation），它必须真的存在
+                    && probeClass("tconstruct.tools.inventory.SlotCraftingStation");
             } catch (Throwable t) {
                 available = false;
             }
@@ -60,6 +63,29 @@ public final class TinkersAutoFill {
     }
 
     /**
+     * 启动时（postInit）调一次：探测匠魂并把「已启用」那行日志写掉。
+     *
+     * <p>
+     * 为什么不等到第一个 tick：探测会把匠魂那几个类<b>真正加载进来</b>
+     * （混入是在类加载那一刻生效的），早一点做，日志里就能立刻看到
+     * 「匠魂工作站自动补料已启用」和各个 mixin 的应用结果 ——
+     * 排查「功能好像没生效」时，这两条是最省事的线索。
+     */
+    public static void prewarm() {
+        if (!Config.tinkersAutoFill) return;
+        if (!isAvailable()) return;
+        announceOnce();
+    }
+
+    private static void announceOnce() {
+        if (announced) return;
+        // 只报一次：这条日志是「功能到底有没有起来」的唯一线索，
+        // 免得玩家看到界面上没反应却不知道是探测失败还是规则没命中
+        announced = true;
+        com.futa_gtnh.FutaGtnhMod.LOG.info("匠魂工作站自动补料已启用（开着工作站界面时才会补料）");
+    }
+
+    /**
      * 服务端每 tick 调一次（由 {@code ModEventHandler} 转发）。
      *
      * <p>
@@ -68,12 +94,7 @@ public final class TinkersAutoFill {
     public static void onServerTick() {
         if (!Config.tinkersAutoFill) return;
         if (!isAvailable()) return;
-        if (!announced) {
-            // 只报一次：这条日志是「功能到底有没有起来」的唯一线索，
-            // 免得玩家看到界面上没反应却不知道是探测失败还是规则没命中
-            announced = true;
-            com.futa_gtnh.FutaGtnhMod.LOG.info("匠魂工作站自动补料已启用（开着工作站界面时才会补料）");
-        }
+        announceOnce();
         try {
             WorkstationAutoFill.tick();
         } catch (Throwable t) {
@@ -110,6 +131,21 @@ public final class TinkersAutoFill {
         if (!Config.tinkersAutoFill || !isAvailable()) return;
         try {
             KeptLayoutFill.noteTouchedAll(container);
+        } catch (Throwable t) {
+            WorkstationAutoFill.reportFailure(t);
+        }
+    }
+
+    /**
+     * 玩家拿走了合成产物（由 {@code mixins/MixinSlotCraftingStation} 转发）。
+     *
+     * <p>
+     * 这是合成站「回填」唯一认可的前提：只有真拿走过产物，才说明合成栏是被合成消耗掉的。
+     */
+    public static void noteCraftResultTaken(net.minecraft.inventory.Container container) {
+        if (!Config.tinkersAutoFill || !isAvailable()) return;
+        try {
+            KeptLayoutFill.noteCraft(container);
         } catch (Throwable t) {
             WorkstationAutoFill.reportFailure(t);
         }

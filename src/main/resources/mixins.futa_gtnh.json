@@ -6,7 +6,8 @@
 	"mixins": [
 		"MixinContainer",
 		"MixinCraftingStationContainer",
-		"MixinCraftingStationLogic"
+		"MixinCraftingStationLogic",
+		"MixinSlotCraftingStation"
 	],
 	"client": [],
 	"server": []
