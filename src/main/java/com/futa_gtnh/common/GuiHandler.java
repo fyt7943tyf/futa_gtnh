@@ -59,7 +59,10 @@ public class GuiHandler implements IGuiHandler {
         if (id != GUI_SHARED_TERMINAL) return null;
         // 这里引用了只在客户端存在的 GuiSharedTerminal。方法体在服务端永远不会执行，
         // JVM 又是惰性解析符号引用的，所以服务端加载这个类不会出问题。
-        return new GuiSharedTerminal(new ContainerSharedTerminal(player.inventory, resolve(world, x, y, z)));
+        //
+        // 走 create() 而不是 new：装了 MouseTweaks 时要换成它的兼容子类
+        // （关掉那个界面上的滚轮搬运），见 client/MouseTweaksCompat.java。
+        return GuiSharedTerminal.create(new ContainerSharedTerminal(player.inventory, resolve(world, x, y, z)));
     }
 
     /**

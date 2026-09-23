@@ -82,6 +82,31 @@ public class GuiSharedTerminal extends GuiContainer {
         this.ySize = ContainerSharedTerminal.GUI_HEIGHT;
     }
 
+    /**
+     * 建界面。<b>所有打开终端的地方都要走这里，不要直接 new。</b>
+     *
+     * <p>
+     * 装了 MouseTweaks 时返回它的兼容子类
+     * （{@link GuiSharedTerminalMouseTweaks}）：那里面实现 MouseTweaks 的
+     * {@code IMTModGuiContainer} 接口，把「滚轮 tweak」在这个界面上关掉 ——
+     * 否则滚轮每滚一格，MouseTweaks 就会替玩家点一下鼠标下的格子，
+     * 而共享存储的格子是「点一下 = 取一个」，于是翻页变成往外掏东西。
+     *
+     * <p>
+     * 子类只在装了 MouseTweaks 时才被加载（{@code instanceof} 检查要求接口真的存在，
+     * 没装时加载它会 NoClassDefFoundError），所以用 modid 守卫 + try/catch 兜底。
+     */
+    public static GuiSharedTerminal create(ContainerSharedTerminal container) {
+        if (MouseTweaksCompat.isAvailable()) {
+            try {
+                return new MouseTweaksCompat.Gui(container);
+            } catch (Throwable t) {
+                FutaGtnhMod.LOG.warn("MouseTweaks 兼容子类创建失败，退回普通界面", t);
+            }
+        }
+        return new GuiSharedTerminal(container);
+    }
+
     // ==================================================================
     // 初始化
     // ==================================================================
