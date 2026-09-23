@@ -8,6 +8,7 @@ import net.minecraft.world.World;
 import net.minecraftforge.oredict.ShapedOreRecipe;
 
 import com.futa_gtnh.block.BlockSharedTerminal;
+import com.futa_gtnh.block.BlockSwiftLight;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
 import com.futa_gtnh.command.CommandSharedStorage;
 import com.futa_gtnh.common.ForgeEventHandler;
@@ -40,6 +41,16 @@ public class CommonProxy {
 
     /** 寻物魔杖。 */
     public static ItemLocatorWand locatorWand;
+
+    /**
+     * 迅步照明用的隐形光源方块。
+     *
+     * <p>
+     * 它只会被<b>客户端</b>放进世界里（见 {@code client/SwiftStepLight}），
+     * 但注册必须在两端都做：方块要有稳定的 id，客户端 {@code setBlock} 才能把它
+     * 写进区块的方块数据里（没注册的方块 id 是 0，等于写了空气，光照不会变）。
+     */
+    public static BlockSwiftLight swiftLight;
 
     public void preInit(FMLPreInitializationEvent event) {
         // 读取配置文件（config/futa_gtnh.cfg）
@@ -93,6 +104,12 @@ public class CommonProxy {
         GameRegistry
             .registerTileEntity(TileEntitySharedTerminal.class, FutaGtnhMod.MODID + ":" + BlockSharedTerminal.NAME);
         FutaGtnhMod.blockSharedTerminal = blockSharedTerminal;
+
+        // 迅步的隐形光源：注册但<b>不给 ItemBlock</b>（itemclass 传 null），
+        // 这样它不会出现在创造模式物品栏 / NEI 物品列表里 —— 玩家拿不到它，
+        // 它只是客户端自己放的一个「发光标记」
+        swiftLight = new BlockSwiftLight();
+        GameRegistry.registerBlock(swiftLight, null, BlockSwiftLight.NAME);
     }
 
     /**
