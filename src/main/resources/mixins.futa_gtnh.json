@@ -4,6 +4,7 @@
 	"plugin": "com.futa_gtnh.mixins.FutaGtnhMixinPlugin",
 	"required": false,
 	"mixins": [
+		"MixinContainer",
 		"MixinCraftingStationContainer",
 		"MixinCraftingStationLogic"
 	],

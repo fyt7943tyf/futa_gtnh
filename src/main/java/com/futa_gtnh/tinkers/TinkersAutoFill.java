@@ -81,4 +81,37 @@ public final class TinkersAutoFill {
             WorkstationAutoFill.reportFailure(t);
         }
     }
+
+    /**
+     * 玩家点了容器里的一格（由 {@code mixins/MixinContainer} 在
+     * {@code Container.slotClick} 入口转发过来）。
+     *
+     * <p>
+     * 自动补料只从「这一格少了几个」判断不出是<b>合成吃掉的</b>还是<b>玩家拿走的</b>，
+     * 于是会把玩家刚拿回来的材料又补回去（九宫格里的东西「拿不出来」）。
+     * 这里把「谁动的」这一唯一可靠的信号传给它。
+     *
+     * <p>
+     * 这是每次点击都会走到的路径，所以先做两个 boolean 判断（没开自动补料 / 没装匠魂 /
+     * 没有工作站界面开着时立刻返回），不产生任何分配。
+     */
+    public static void notePlayerClick(net.minecraft.inventory.Container container, int slotId, int mode) {
+        if (!Config.tinkersAutoFill || !isAvailable()) return;
+        try {
+            KeptLayoutFill.notePlayerClick(container, slotId, mode);
+        } catch (Throwable t) {
+            // 同理：这只是个提示信号，出错也不能影响玩家正常的点击
+            WorkstationAutoFill.reportFailure(t);
+        }
+    }
+
+    /** 玩家一次性清空了整份库存（「倒空合成栏」按钮）：整份都算玩家动过。 */
+    public static void notePlayerTouchedAll(net.minecraft.inventory.Container container) {
+        if (!Config.tinkersAutoFill || !isAvailable()) return;
+        try {
+            KeptLayoutFill.noteTouchedAll(container);
+        } catch (Throwable t) {
+            WorkstationAutoFill.reportFailure(t);
+        }
+    }
 }
