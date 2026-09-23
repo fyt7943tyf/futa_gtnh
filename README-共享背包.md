@@ -873,6 +873,40 @@ NEI 的配方转移会遍历容器找目标槽位，它要是挑中了虚拟格�
 玩家点击这些格子走的是 `slotClick` 里那条独立的拦截分支，**根本不查 `isItemValid`**，
 所以取用完全不受影响。
 
+**4b. 条目的「键」不能从显示物品反推**
+
+这一点是踩出来的。原来点击某一格时是这么拿键的：
+
+```java
+ItemStack display = ghost.getDisplay(i);
+ItemKey key = ItemKey.of(display);      // ← 从显示物品反推
+```
+
+当时的理由是「显示物品就是 `key.prototype()` 造出来的，反推无损」。
+**这个前提在别的模组会改写物品栈时不成立。**
+
+GT 的 `MetaGeneratedTool.getToolStats()` 就是一个<b>有副作用的 getter</b>：
+它内部调 `isItemStackUsable(stack)`，而那里面会
+`ItemStackNBT.removeTag(stack, "ench")`，还会用
+`EnchantmentHelper.setEnchantments(附魔表, stack)` 把附魔表<b>重写</b>回去。
+而 `getToolStats` 在物品渲染和 tooltip 里都会被调到 —— 于是
+**光是把界面画出来，显示栈的 NBT 就已经和存档里的不一样了**。
+
+结果就是：键反推出来对不上，服务端查不到条目，**点击完全没反应**，
+而且客户端和服务端都一个字都不说。实测症状（服务端日志）：
+
+```
+共享存储：玩家 fyt 请求取出一个存里没有的条目 ItemKey[gregtech:gt.metatool.01@18+nbt]（数量 1），已忽略
+```
+
+存档里明明有 `meta=18` 那一条 —— 差别只在 `ench` 上。
+
+所以现在**键跟着显示物品一起送进容器**（`setPageDisplay(page, itemKeys, fluidKeys)`），
+点击时直接用带过来的键；从显示物品反推只保留为兜底。
+
+> 教训：只要一个 `ItemStack` 会被别的模组拿到（而渲染、tooltip 都会），
+> 就不能把它的 NBT 当作稳定身份。**身份要在源头记下来，而不是事后反推。**
+
 **5. 合成栏和产物格走原版，不进那条「单一改动路径」**
 
 这是上面第 3 条的唯一例外，而且是刻意的：合成栏（`InventoryCrafting`）和产物格

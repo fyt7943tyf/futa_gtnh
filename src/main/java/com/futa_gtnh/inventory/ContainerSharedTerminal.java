@@ -1,5 +1,6 @@
 package com.futa_gtnh.inventory;
 
+import java.util.Arrays;
 import java.util.List;
 
 import net.minecraft.entity.player.EntityPlayer;
@@ -136,6 +137,26 @@ public class ContainerSharedTerminal extends Container {
     /** 由方块终端打开时指向那个方块；按键远程打开时为 null。 */
     private final TileEntitySharedTerminal terminal;
     private final GhostInventory ghost;
+
+    /**
+     * 当前页每一格对应的<b>原始的键</b>，和 {@link #ghost} 一一对应。
+     *
+     * <p>
+     * <b>为什么不能从显示物品反推：</b>原来点击时用的是
+     * {@code ItemKey.of(ghost.getDisplay(i))}，前提是「显示物品就是
+     * {@code key.prototype()} 造出来的，反推无损」。这个前提<b>在别的模组会改写
+     * 物品栈时不成立</b> —— GT 的 {@code MetaGeneratedTool.getToolStats()} 就是个
+     * 有副作用的 getter：它内部调 {@code isItemStackUsable}，那个方法会
+     * {@code removeTag("ench")} 并用 {@code EnchantmentHelper.setEnchantments}
+     * 重写附魔表。而 {@code getToolStats} 在渲染和 tooltip 里都会被调到，
+     * 于是<b>光是把界面画出来，显示栈的 NBT 就已经和存档里的不一样了</b>，
+     * 反推出的键自然查不到东西，表现就是「点了没反应」。
+     *
+     * <p>
+     * 所以键必须<b>自己带着走</b>，而不是事后从可能已经被改过的物品栈上反推。
+     */
+    private final ItemKey[] pageItemKeys = new ItemKey[SHARED_SLOTS];
+    private final FluidKey[] pageFluidKeys = new FluidKey[SHARED_SLOTS];
 
     /**
      * 当前是不是在流体页签。
@@ -328,16 +349,23 @@ public class ContainerSharedTerminal extends Container {
      * 反推 {@link ItemKey} / {@link FluidKey} 是无损的，不需要另维护一张下标映射表，
      * 也就不存在「表和显示不同步」这类 bug。
      */
-    public void setPageDisplay(List<ItemStack> page) {
+    public void setPageDisplay(List<ItemStack> page, List<ItemKey> itemKeys, List<FluidKey> fluidKeys) {
         ghost.clearDisplay();
+        Arrays.fill(pageItemKeys, null);
+        Arrays.fill(pageFluidKeys, null);
+
         int limit = Math.min(page.size(), SHARED_SLOTS);
         for (int i = 0; i < limit; i++) {
             ghost.setDisplay(i, page.get(i));
+            if (itemKeys != null && i < itemKeys.size()) pageItemKeys[i] = itemKeys.get(i);
+            if (fluidKeys != null && i < fluidKeys.size()) pageFluidKeys[i] = fluidKeys.get(i);
         }
     }
 
     public void clearPageDisplay() {
         ghost.clearDisplay();
+        Arrays.fill(pageItemKeys, null);
+        Arrays.fill(pageFluidKeys, null);
     }
 
     // ==================================================================
@@ -562,9 +590,13 @@ public class ContainerSharedTerminal extends Container {
         if (display == null) return;
 
         // ---- 流体条目（GT 的流体显示物品） ----
+        // 键优先用带过来的那份，反推只作为兜底 —— 见 pageItemKeys 的说明
+        FluidKey fluidKey = viewIndex < pageFluidKeys.length ? pageFluidKeys[viewIndex] : null;
         FluidStack shown = GTUtility.getFluidFromDisplayStack(display);
-        if (shown != null && shown.getFluid() != null && shown.amount > 0) {
-            FluidKey fluidKey = FluidKey.of(shown);
+        if (fluidKey == null && shown != null && shown.getFluid() != null && shown.amount > 0) {
+            fluidKey = FluidKey.of(shown);
+        }
+        if (fluidKey != null) {
             long amount = shift ? -1L : Config.fluidClickAmount;
 
             if (mouseButton == 2) {
@@ -588,7 +620,11 @@ public class ContainerSharedTerminal extends Container {
         }
 
         // ---- 普通物品 ----
-        ItemKey itemKey = ItemKey.of(display);
+        // 同上：用带过来的键，而不是从显示栈反推。
+        // 反推在「模组的 getter 会改写物品栈」时会失灵（GT 工具就是），
+        // 那种情况下的症状是点了完全没反应。
+        ItemKey itemKey = viewIndex < pageItemKeys.length ? pageItemKeys[viewIndex] : null;
+        if (itemKey == null) itemKey = ItemKey.of(display);
         if (itemKey == null) return;
 
         long amount;
@@ -631,14 +667,15 @@ public class ContainerSharedTerminal extends Container {
 
         long requested = Math.max(amount, 0L);
 
-        FluidStack shown = GTUtility.getFluidFromDisplayStack(display);
-        if (shown != null && shown.getFluid() != null && shown.amount > 0) {
-            NetworkHandler.INSTANCE.sendToServer(
-                PacketStorageAction.fluid(PacketStorageAction.FILL_CONTAINER, FluidKey.of(shown), requested));
+        FluidKey fluidKey = viewIndex < pageFluidKeys.length ? pageFluidKeys[viewIndex] : null;
+        if (fluidKey != null) {
+            NetworkHandler.INSTANCE
+                .sendToServer(PacketStorageAction.fluid(PacketStorageAction.FILL_CONTAINER, fluidKey, requested));
             return;
         }
 
-        ItemKey key = ItemKey.of(display);
+        ItemKey key = viewIndex < pageItemKeys.length ? pageItemKeys[viewIndex] : null;
+        if (key == null) key = ItemKey.of(display);
         if (key == null) return;
         NetworkHandler.INSTANCE
             .sendToServer(PacketStorageAction.item(PacketStorageAction.WITHDRAW_ITEM, key, requested));
