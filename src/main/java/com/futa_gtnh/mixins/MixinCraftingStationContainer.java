@@ -11,10 +11,12 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import com.futa_gtnh.station.SharedStorageInventory;
 import com.futa_gtnh.station.StationViews;
+import com.futa_gtnh.tinkers.TinkersAutoFill;
 
 import tconstruct.tools.inventory.CraftingStationContainer;
 import tconstruct.tools.logic.CraftingStationLogic;
@@ -185,6 +187,21 @@ public abstract class MixinCraftingStationContainer extends Container {
             }
         }
         cir.setReturnValue(null);
+    }
+
+    // ==================================================================
+    // 4) 「倒空合成栏」按钮
+    // ==================================================================
+
+    /**
+     * 匠魂的「倒空」按钮走的是 {@code dumpCraftingGrid}，它<b>直接</b>往合成栏里写
+     * （不经过 {@code slotClick}）。不在这里打一声招呼的话，东西刚被倒进共享存储，
+     * 自动补料下一 tick 就把它们原样搬回九宫格 —— 按钮看起来完全没反应。
+     */
+    @Inject(method = "dumpCraftingGrid", at = @At("HEAD"), remap = false)
+    private void futa$noteGridDumped(CallbackInfo ci) {
+        if (this.logic == null || this.logic.slotCount == 0) return;
+        TinkersAutoFill.notePlayerTouchedAll(this);
     }
 
     // ==================================================================
