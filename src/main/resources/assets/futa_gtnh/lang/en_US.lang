@@ -49,6 +49,7 @@ futa_gtnh.gui.store.all=All
 futa_gtnh.gui.store.hotbar=Hotbar
 futa_gtnh.gui.store.main=Main
 futa_gtnh.gui.store.drain=Drain
+futa_gtnh.msg.no_space=No room in your inventory for that
 
 futa_gtnh.gui.status.remote=Remote access - place a terminal to choose a fluid output
 futa_gtnh.gui.status.output=Output: %s
