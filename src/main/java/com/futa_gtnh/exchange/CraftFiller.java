@@ -16,7 +16,7 @@ import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 
 /**
- * NEI 合成联动的服务端半边：按客户端发来的布局填充终端界面的 2×2 合成栏，
+ * NEI 合成联动的服务端半边：按客户端发来的布局填充终端界面的 3×3 合成栏，
  * 材料优先从玩家背包取、不够的从共享存储取；自动合成则在此基础上反复
  * 「取产物进背包 → 补材料」。
  *
@@ -46,8 +46,8 @@ public final class CraftFiller {
 
     private CraftFiller() {}
 
-    /** 2×2 合成栏格数。 */
-    private static final int CRAFT_SLOTS = 4;
+    /** 合成栏格数。和容器共用同一组常量，改尺寸时不会漏。 */
+    private static final int CRAFT_SLOTS = ContainerSharedTerminal.CRAFT_SLOTS;
 
     /** 倍率上限（也是自动合成次数上限）。一次填料最多到 64 个/格，足够堆满。 */
     private static final int MAX_MULTIPLIER = 64;

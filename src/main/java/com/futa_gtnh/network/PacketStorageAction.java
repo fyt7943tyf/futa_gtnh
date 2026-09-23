@@ -58,7 +58,7 @@ public class PacketStorageAction implements IMessage {
      *
      * <p>
      * 需要单独一个动作，是因为合成栏<b>不在玩家背包里</b>：
-     * 1.7.10 的 2×2 合成栏是 {@code ContainerPlayer} 私有的 {@code InventoryCrafting}，
+     * 1.7.10 原版背包的 2×2 合成栏是 {@code ContainerPlayer} 私有的 {@code InventoryCrafting}，
      * 我们自己的容器同理。所以它没法用 {@code DEPOSIT_INV_SLOT} 那套
      * 「玩家背包索引 0..39」的编号表达，服务端得去操作自己容器里的那个合成栏。
      */
@@ -83,7 +83,7 @@ public class PacketStorageAction implements IMessage {
 
     // ---- NEI 合成联动 ----
     /**
-     * 按客户端发来的布局填充 2×2 合成栏：材料优先从玩家背包取，不够的从共享存储取。
+     * 按客户端发来的布局填充终端界面的 3×3 合成栏：材料优先从玩家背包取，不够的从共享存储取。
      * 布局（候选 + 每格数量）放在 {@link #keyTag} 里，见 {@link #fillCraft}。
      * {@link #amount} 是倍率：{@code <= 0} 表示「尽量填满」（每格填到堆叠上限）。
      */

@@ -73,7 +73,7 @@ public final class InventoryExchange {
      * <p>
      * 泛化到 {@link IInventory} 是为了同时覆盖三种来源：玩家主背包、护甲槽
      * （两者都走 {@link InventoryPlayer}，索引 0..39），以及终端界面里那个
-     * <b>属于容器而不属于玩家</b>的 2×2 合成栏（{@code InventoryCrafting}）。
+     * <b>属于容器而不属于玩家</b>的 3×3 合成栏（{@code InventoryCrafting}）。
      *
      * @param requested 想存的数量；{@code <= 0} 表示整叠存入
      * @return 实际存入的数量

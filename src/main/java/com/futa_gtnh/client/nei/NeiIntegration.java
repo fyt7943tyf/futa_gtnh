@@ -36,12 +36,19 @@ public final class NeiIntegration {
     public static void register() {
         SharedTerminalOverlayHandler handler = new SharedTerminalOverlayHandler();
 
-        // "crafting"：NEI 配方界面的「填入合成栏」按钮（对上 ShapedRecipeHandler
-        // 的 overlayIdentifier）。只注册 handler 就够出现按钮。
+        // "crafting"：3×3 配方（工作台那一类）的「填入合成栏」按钮 + 幽灵材料指引。
+        // 终端合成栏就是 3×3，所以这一类配方现在也能直接填。
+        API.registerGuiOverlay(
+            GuiSharedTerminal.class,
+            "crafting",
+            SharedTerminalOverlayHandler.OVERLAY_OFFSET_X,
+            SharedTerminalOverlayHandler.OVERLAY_OFFSET_Y);
         API.registerGuiOverlayHandler(GuiSharedTerminal.class, handler, "crafting");
 
-        // "crafting2x2"：2×2 配方专属。注册 overlay（带坐标）之后 NEI 还会给
-        // 终端界面画「幽灵材料指引」，坐标换算见 SharedTerminalOverlayHandler。
+        // "crafting2x2"：2×2 配方（原版背包能做的那类）。它们会被摆在合成栏左上角
+        // 2×2 —— 原版 ShapedRecipes.matches 本来就会在整个 3×3 里平移匹配，位置合法。
+        // 注册 overlay（带坐标）之后 NEI 还会给终端界面画「幽灵材料指引」，
+        // 坐标换算见 SharedTerminalOverlayHandler。
         API.registerGuiOverlay(
             GuiSharedTerminal.class,
             "crafting2x2",
