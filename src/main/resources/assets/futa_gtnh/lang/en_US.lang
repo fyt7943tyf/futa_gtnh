@@ -26,6 +26,8 @@ futa_gtnh.gui.tab.items=Items
 futa_gtnh.gui.tab.fluids=Fluids
 
 futa_gtnh.gui.armor=Armor
+futa_gtnh.panel.search=Search shared storage...
+futa_gtnh.panel.page=Page %s/%s | %s entries
 futa_gtnh.gui.crafting=Craft
 
 futa_gtnh.gui.auto.on=Auto-store ON
