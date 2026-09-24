@@ -37,6 +37,10 @@ public class ClientProxy extends CommonProxy {
         // 俯瞰模式的客户端 tick（相机推进/守卫）。TickEvent 在 FML 总线上，
         // 和 KeyHandler 的 Listener 同一条，见 RtsClientTickHandler 的类注释
         com.futa_gtnh.rts.client.RtsClientTickHandler.register();
+
+        // 俯瞰模式下隐藏第一人称手臂（GTNH Forge 反向移植的 RenderHandEvent，
+        // Forge 总线事件，注册器内部自己挂对了总线）
+        com.futa_gtnh.rts.client.RtsHandHider.register();
     }
 
     @Override

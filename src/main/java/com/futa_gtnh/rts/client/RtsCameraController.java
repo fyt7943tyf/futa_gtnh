@@ -231,9 +231,18 @@ public final class RtsCameraController {
         pendingPanDy += dyPixels;
     }
 
-    /** 滚轮输入（原始 dWheel，一格 = ±120，内部换算成「格数」）。 */
+    /**
+     * 滚轮输入（内部换算成「格数」）。
+     *
+     * <p>
+     * 两套语义双兼容：lwjgl3ify（GTNH 必装）的 {@code getEventDWheel()}
+     * 一格返回 ±1（GLFW 风格，不是 LWJGL2 的 ±120）—— 上机反馈「滚轮推拉
+     * 失效」的根因之一就是拿 ±1 去除以 120 得到 0.008。规则：绝对值 ≥ 120
+     * 视为 LWJGL2 风格除以 120，否则按原值当格数用。
+     */
     public static void addWheel(int dWheel) {
-        pendingWheel += clamp(dWheel / 120.0D, -3.0D, 3.0D);
+        double notches = Math.abs(dWheel) >= 120 ? dWheel / 120.0D : dWheel;
+        pendingWheel += clamp(notches, -3.0D, 3.0D);
     }
 
     /** 把当前与上一 tick 的姿态写进相机实体，渲染器从这里读。 */

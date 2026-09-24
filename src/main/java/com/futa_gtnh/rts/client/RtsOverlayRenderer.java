@@ -66,10 +66,26 @@ public class RtsOverlayRenderer {
     private void renderGhostPreview() {
         if (!RtsBuildPlanner.hasFirstPoint()) return;
 
-        boolean destroy = RtsBuildPlanner.getAction() == RtsBuildPlanner.ACTION_DESTROY;
-        float r = destroy ? 1.0F : 0.35F;
-        float g = destroy ? 0.35F : 0.8F;
-        float b = destroy ? 0.3F : 1.0F;
+        // 预览色按模式：建造=蓝、破坏=红、互动=灰（互动模式下形状只是选着玩，
+        // 回车提交会提示切模式）
+        float r, g, b;
+        switch (RtsBuildPlanner.getMode()) {
+            case DESTROY:
+                r = 1.0F;
+                g = 0.35F;
+                b = 0.3F;
+                break;
+            case BUILD:
+                r = 0.35F;
+                g = 0.8F;
+                b = 1.0F;
+                break;
+            default:
+                r = 0.6F;
+                g = 0.65F;
+                b = 0.7F;
+                break;
+        }
 
         GL11.glPushMatrix();
         GL11.glTranslated(-RenderManager.renderPosX, -RenderManager.renderPosY, -RenderManager.renderPosZ);
@@ -177,7 +193,11 @@ public class RtsOverlayRenderer {
         tessellator.addVertex(dx, dy, dz);
     }
 
-    /** 悬停目标的黄色选中框（区别于原版准星的黑色框）。 */
+    /**
+     * 悬停目标的选中框，颜色按模式区分（1.3.0 恒黄色，「模式切换不明显」
+     * 的反馈之一）：互动=黄、建造=蓝、破坏=红；目标超出操作半径时一律
+     * 亮红（服务端会拒绝，提前说清楚）。
+     */
     private void renderHoverHighlight() {
         RtsPickResult pick = RtsCursorPicker.getLastPick();
         if (pick == null || pick.type == RtsPickResult.Type.MISS) return;
@@ -202,6 +222,31 @@ public class RtsOverlayRenderer {
             return;
         }
 
+        float r, g, b;
+        if (RtsCursorPicker.isBeyondPlayerRange(pick)) {
+            r = 1.0F;
+            g = 0.2F;
+            b = 0.2F;
+        } else {
+            switch (RtsBuildPlanner.getMode()) {
+                case BUILD:
+                    r = 0.35F;
+                    g = 0.8F;
+                    b = 1.0F;
+                    break;
+                case DESTROY:
+                    r = 1.0F;
+                    g = 0.35F;
+                    b = 0.3F;
+                    break;
+                default:
+                    r = 1.0F;
+                    g = 0.9F;
+                    b = 0.2F;
+                    break;
+            }
+        }
+
         GL11.glPushMatrix();
         GL11.glTranslated(-RenderManager.renderPosX, -RenderManager.renderPosY, -RenderManager.renderPosZ);
         GL11.glPushAttrib(GL11.GL_ALL_ATTRIB_BITS);
@@ -213,7 +258,7 @@ public class RtsOverlayRenderer {
         // 关深度测试：隔着方块也能看见选中框（俯瞰时前面常有树/建筑遮挡）
         GL11.glDisable(GL11.GL_DEPTH_TEST);
         GL11.glLineWidth(2.0F);
-        GL11.glColor4f(1.0F, 0.9F, 0.2F, 0.9F);
+        GL11.glColor4f(r, g, b, 0.9F);
 
         Tessellator tessellator = Tessellator.instance;
         tessellator.startDrawing(GL11.GL_LINES);

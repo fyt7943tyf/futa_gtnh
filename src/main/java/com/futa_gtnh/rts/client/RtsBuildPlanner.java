@@ -13,34 +13,87 @@ import com.futa_gtnh.rts.shape.ShapeGenerator;
 import com.futa_gtnh.rts.shape.ShapeType;
 
 /**
- * 批量建造的客户端规划器：形状/填充/建造-破坏模式的选择、A/B 角点、
- * 幽灵预览坐标（缓存）。
+ * 批量建造的客户端规划器：模式/形状/填充的选择、A/B 角点、幽灵预览坐标。
  *
  * <p>
- * 操作流：B/Tab 换形状、F 换填充、V 换建造/破坏、Ctrl+左键选两个角点
+ * 1.3.1 起模式（{@link RtsMode}）<b>真实路由鼠标行为</b>（见该枚举的注释），
+ * 不再只是 HUD 文字；回车提交的含义由模式决定。
+ *
+ * <p>
+ * 操作流：V 或顶栏按钮切模式、B/Tab 换形状、F 换填充、Ctrl+左键选两个角点
  * （A→B→再点就从头来）、回车提交、C 清空。预览坐标用
  * {@link ShapeGenerator} 生成并缓存（只有参数变了才重算），服务端提交后用
  * 同一份生成器再生成一遍 —— 预览即所得。
+ *
+ * <p>
+ * <b>会话重置</b>：角点/模式是跨会话的静态量，1.3.0 里上次退出时的模式会带进
+ * 下一次会话（上机反馈「切换有 BUG」的另一半原因）。进入俯瞰时由
+ * {@link RtsClientState#enter} 调 {@link #resetForSession()} 重置模式与角点；
+ * 形状/填充保留（个人偏好，连续盖房顺手）。
  */
 public final class RtsBuildPlanner {
 
     private RtsBuildPlanner() {}
 
-    /** 批量动作（建造 / 破坏），包里用 RtsBatchEngine 的常量序号。 */
+    /** 批量动作（提交给服务端的语义），由当前模式映射。 */
     public static final byte ACTION_BUILD = 0;
     public static final byte ACTION_DESTROY = 1;
 
+    private static RtsMode mode = RtsMode.INTERACT;
     private static ShapeType shape = ShapeType.BOX;
     private static ShapeFill fill = ShapeFill.HOLLOW;
-    private static byte action = ACTION_BUILD;
 
     private static boolean hasA, hasB;
     private static int ax, ay, az;
     private static int bx, by, bz;
 
+    /** 模式切换时间戳（顶栏大字提示用，0 = 无提示）。 */
+    private static long modeChangedAt;
+
     /** 预览缓存：参数变化时置脏，取用时重算。 */
     private static List<int[]> cachedPreview = Collections.emptyList();
     private static boolean dirty;
+
+    // ------------------------------------------------------------------
+    // 模式
+    // ------------------------------------------------------------------
+
+    public static RtsMode getMode() {
+        return mode;
+    }
+
+    /** 设置模式（V 键 / 顶栏按钮）。同模式重复设置不刷新提示。 */
+    public static void setMode(RtsMode newMode) {
+        if (newMode == null || newMode == mode) return;
+        mode = newMode;
+        modeChangedAt = System.currentTimeMillis();
+    }
+
+    public static void cycleMode() {
+        RtsMode[] values = RtsMode.values();
+        setMode(values[(mode.ordinal() + 1) % values.length]);
+    }
+
+    /** 最近一次模式切换的时间戳（{@link #hasRecentModeToast} 用）。 */
+    public static long getModeChangedAt() {
+        return modeChangedAt;
+    }
+
+    /** 模式提示是否还在展示期内（2 秒）。 */
+    public static boolean hasRecentModeToast() {
+        return modeChangedAt > 0 && System.currentTimeMillis() - modeChangedAt < 2000L;
+    }
+
+    /** 进入俯瞰会话时重置：模式回互动、角点清空（形状/填充保留）。 */
+    public static void resetForSession() {
+        mode = RtsMode.INTERACT;
+        modeChangedAt = 0L;
+        clearPoints();
+    }
+
+    // ------------------------------------------------------------------
+    // 形状 / 填充 / 角点
+    // ------------------------------------------------------------------
 
     public static void cycleShape() {
         ShapeType[] values = ShapeType.values();
@@ -52,10 +105,6 @@ public final class RtsBuildPlanner {
         ShapeFill[] values = ShapeFill.values();
         fill = values[(fill.ordinal() + 1) % values.length];
         dirty = true;
-    }
-
-    public static void toggleAction() {
-        action = (action == ACTION_BUILD) ? ACTION_DESTROY : ACTION_BUILD;
     }
 
     public static void clearPoints() {
@@ -89,10 +138,6 @@ public final class RtsBuildPlanner {
         return fill;
     }
 
-    public static byte getAction() {
-        return action;
-    }
-
     public static boolean isReady() {
         return hasA && hasB;
     }
@@ -101,7 +146,11 @@ public final class RtsBuildPlanner {
         return hasA;
     }
 
-    /** 预览坐标（缓存；≤ 预览上限格才真的生成，超限给空表让渲染画包围框）。 */
+    // ------------------------------------------------------------------
+    // 预览
+    // ------------------------------------------------------------------
+
+    /** 预览坐标（缓存；超预览上限时给空表，让渲染只画角点包围框）。 */
     public static List<int[]> getPreview() {
         if (!isReady()) return Collections.emptyList();
         if (dirty) {
@@ -138,12 +187,13 @@ public final class RtsBuildPlanner {
     }
 
     /**
-     * 建造模式还要求当前手持是 ItemBlock（服务端也会查，这里先拦一道
-     * 提升手感）。
+     * 当前模式下能否提交形状任务。互动模式不能（这是 1.3.0「模式没作用」
+     * 观感的反面：现在回车的行为跟着模式走）。
      */
     public static boolean canSubmit() {
         if (!isReady() || !isWithinLocalLimits()) return false;
-        if (action == ACTION_BUILD) {
+        if (mode == RtsMode.INTERACT) return false;
+        if (mode == RtsMode.BUILD) {
             Minecraft mc = Minecraft.getMinecraft();
             if (mc.thePlayer == null) return false;
             ItemStack held = mc.thePlayer.getCurrentEquippedItem();
@@ -152,7 +202,12 @@ public final class RtsBuildPlanner {
         return true;
     }
 
-    /** HUD 用的角点坐标文案素材。 */
+    /** 当前模式对应的提交动作（仅 BUILD/DESTROY 有意义）。 */
+    public static byte getSubmitAction() {
+        return mode == RtsMode.DESTROY ? ACTION_DESTROY : ACTION_BUILD;
+    }
+
+    /** HUD 用的角点坐标。 */
     public static int[] getPointA() {
         return new int[] { ax, ay, az };
     }

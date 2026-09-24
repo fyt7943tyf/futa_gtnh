@@ -100,6 +100,7 @@ public class PacketRtsQuickBuild implements IMessage {
             // 角点都在操作范围内（形状被角点包围盒夹住）
             if (!RtsActionGuard.isWithinRange(player, message.ax + 0.5D, message.ay + 0.5D, message.az + 0.5D)
                 || !RtsActionGuard.isWithinRange(player, message.bx + 0.5D, message.by + 0.5D, message.bz + 0.5D)) {
+                RtsActionGuard.notifyRejected(player, "futa_gtnh.rts.msg.out_of_range");
                 return null;
             }
 

@@ -53,6 +53,10 @@ public final class RtsClientState {
             return;
         }
 
+        // 模式/角点是跨会话静态量：上一次退出时的「破坏模式 + 旧世界的 A/B 点」
+        // 不能带进新会话（1.3.0 上机反馈「切换有 BUG」的另一半原因）
+        RtsBuildPlanner.resetForSession();
+
         // 强制第一人称：相机实体是「我们自己的眼睛」，第三人称会把镜头绕到
         // 相机实体背后再拉远，没有意义。原值存起来，退出时还回去。
         savedThirdPersonView = mc.gameSettings.thirdPersonView;
@@ -78,6 +82,10 @@ public final class RtsClientState {
         RtsCameraController.exit();
         if (mc.renderViewEntity instanceof RtsCameraEntity && mc.thePlayer != null) {
             mc.renderViewEntity = mc.thePlayer;
+        } else if (mc.renderViewEntity instanceof RtsCameraEntity) {
+            // 登出/换世界的空窗期没有 thePlayer 可还：置 null，
+            // 原版 EntityRenderer 在 renderViewEntity 为 null 时会自愈回 thePlayer
+            mc.renderViewEntity = null;
         }
         mc.gameSettings.thirdPersonView = savedThirdPersonView;
         mc.gameSettings.hideGUI = savedHideGui;

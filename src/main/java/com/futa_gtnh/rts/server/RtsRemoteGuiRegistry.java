@@ -52,15 +52,17 @@ public final class RtsRemoteGuiRegistry {
      * mixin 每 tick 询问：这个容器是不是俯瞰远程打开的、要不要放宽距离校验？
      *
      * <p>
-     * 记录过期（玩家已换开/关掉别的界面）时顺手清掉。
+     * 记录过期（玩家已换开别的界面）时顺手清掉 —— 1.3.0 只在「注册的容器
+     * 恰好等于当前传进来的容器」这个分支清理，玩家换开别的 GUI 后旧记录会
+     * 一直挂着到登出。
      */
     public static boolean shouldRelax(EntityPlayerMP player, Container container) {
         if (player == null || container == null) return false;
         Container registered = REMOTE_GUIS.get(player.getUniqueID());
         if (registered == null) return false;
-        if (registered != player.openContainer || player.openContainer != container) {
+        if (registered != player.openContainer || registered != container) {
             // 玩家已经不在这个远程界面上了 —— 记录作废
-            if (registered == container) REMOTE_GUIS.remove(player.getUniqueID());
+            REMOTE_GUIS.remove(player.getUniqueID());
             return false;
         }
         return true;
