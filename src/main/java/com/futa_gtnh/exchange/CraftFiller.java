@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.inventory.Container;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
@@ -16,7 +17,7 @@ import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 
 /**
- * NEI 合成联动的服务端半边：按客户端发来的布局填充终端界面的 2×2 合成栏，
+ * NEI 合成联动的服务端半边：按客户端发来的布局填充终端界面的 3×3 合成栏，
  * 材料优先从玩家背包取、不够的从共享存储取；自动合成则在此基础上反复
  * 「取产物进背包 → 补材料」。
  *
@@ -46,8 +47,8 @@ public final class CraftFiller {
 
     private CraftFiller() {}
 
-    /** 2×2 合成栏格数。 */
-    private static final int CRAFT_SLOTS = 4;
+    /** 合成栏格数。和容器共用同一组常量，改尺寸时不会漏。 */
+    private static final int CRAFT_SLOTS = ContainerSharedTerminal.CRAFT_SLOTS;
 
     /** 倍率上限（也是自动合成次数上限）。一次填料最多到 64 个/格，足够堆满。 */
     private static final int MAX_MULTIPLIER = 64;
@@ -55,10 +56,37 @@ public final class CraftFiller {
     /** 每格候选数上限。NEI 的矿辞置换组偶尔很长，超出的直接忽略。 */
     private static final int MAX_CANDIDATES = 16;
 
-    public static void handle(EntityPlayerMP player, ContainerSharedTerminal container, PacketStorageAction packet,
-        SharedStorage storage, DeltaRecorder recorder) {
+    /**
+     * 「把产物收进玩家背包」这件事，各个容器实现不同，所以抽出来：
+     * <ul>
+     * <li>终端：{@code ContainerSharedTerminal.transferCraftResult}（合成栏是原版的
+     * {@code InventoryCrafting} + {@code InventoryCraftResult}）；</li>
+     * <li>匠魂合成站：成品槽是 {@code SlotCraftingStation}，取走产物会顺带消耗合成栏
+     * （见 {@code station/StationCrafting}）。</li>
+     * </ul>
+     */
+    public interface ResultTaker {
+
+        /**
+         * 取一次产物。
+         *
+         * @return 被取走的产物；没产物 / 背包放不下时返回 null（自动合成循环靠这个停不停）
+         */
+        ItemStack takeOnce(EntityPlayerMP player);
+    }
+
+    /**
+     * 按客户端发来的布局填合成栏（可顺便自动合成）。
+     *
+     * <p>
+     * 容器/合成栏/产物收法都从外面传进来，是因为终端和匠魂合成站共用这一套逻辑：
+     * 两边的合成栏都是 3×3、都要「先倒空再按布局补料、材料背包优先其次共享存储」，
+     * 只有「产物怎么收进背包」不一样。
+     */
+    public static void handle(EntityPlayerMP player, Container container, IInventory matrix, ResultTaker resultTaker,
+        PacketStorageAction packet, SharedStorage storage, DeltaRecorder recorder) {
         NBTTagCompound tag = packet.getLayoutTag();
-        if (tag == null) return;
+        if (tag == null || matrix == null || resultTaker == null) return;
 
         boolean autocraft = packet.getAction() == PacketStorageAction.AUTOCRAFT;
         long requested = packet.getAmount();
@@ -70,19 +98,19 @@ public final class CraftFiller {
         // 先把合成栏里现有的东西退回共享存储 —— 和手动 Shift 点合成栏同一语义，
         // 也保证「补差」逻辑面对的合成栏一定是空的
         for (int i = 0; i < CRAFT_SLOTS; i++) {
-            InventoryExchange.depositFrom(player, container.getCraftMatrix(), i, 0L, storage, recorder);
+            InventoryExchange.depositFrom(player, matrix, i, 0L, storage, recorder);
         }
 
-        fillAll(player, container, storage, recorder, targets, multiplier);
+        fillAll(player, matrix, storage, recorder, targets, multiplier);
 
         if (autocraft) {
             int crafted = 0;
             while (crafted < multiplier) {
-                // 产物放不进背包（canAcceptAll 拦住）或产物格没东西（材料断了）都返回 null
-                if (container.transferCraftResult(player) == null) break;
+                // 产物放不进背包（防蒸发判断拦住）或产物格没东西（材料断了）都返回 null
+                if (resultTaker.takeOnce(player) == null) break;
                 crafted++;
-                // SlotCrafting 每次合成从每个非空格子扣 1，把消耗掉的补回来
-                fillAll(player, container, storage, recorder, targets, multiplier);
+                // 每次合成从每个非空格子扣 1，把消耗掉的补回来
+                fillAll(player, matrix, storage, recorder, targets, multiplier);
             }
             if (FutaGtnhMod.LOG.isDebugEnabled() && crafted > 0) {
                 FutaGtnhMod.LOG.debug("共享存储：自动合成 {} 次（玩家 {}）", crafted, player.getCommandSenderName());
@@ -106,9 +134,8 @@ public final class CraftFiller {
      * 混着放等于把玩家的摆栏直接改掉。空格子按候选顺序试，第一个能凑到料的胜出
      * （候选顺序就是 NEI 给出的优先级，通常第一个就是原配方那一种）。
      */
-    private static void fillAll(EntityPlayerMP player, ContainerSharedTerminal container, SharedStorage storage,
-        DeltaRecorder recorder, Target[] targets, int multiplier) {
-        IInventory matrix = container.getCraftMatrix();
+    private static void fillAll(EntityPlayerMP player, IInventory matrix, SharedStorage storage, DeltaRecorder recorder,
+        Target[] targets, int multiplier) {
 
         for (Target target : targets) {
             if (target == null) continue;

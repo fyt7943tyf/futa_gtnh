@@ -6,12 +6,14 @@ item.futa_gtnh.swift_step.name=迅步
 
 item.futa_gtnh.swift_step.tooltip.flight=飞行速度：%s 倍
 item.futa_gtnh.swift_step.tooltip.walk=移动速度：%s 倍
-item.futa_gtnh.swift_step.tooltip.gui=右键：调整速度
+item.futa_gtnh.swift_step.tooltip.air=跳跃/空中前进速度跟随移动速度
+item.futa_gtnh.swift_step.tooltip.gui=右键：调整速度与照明
 item.futa_gtnh.swift_step.tooltip.equip=潜行 + 右键：装备到空的饰品槽
 
 futa_gtnh.swift_step.gui.flight=飞行速度
 futa_gtnh.swift_step.gui.walk=移动速度
 futa_gtnh.swift_step.gui.range=倍率可调范围 1.00 ~ %s（以服务端配置为准）
+futa_gtnh.swift_step.gui.server_clamp=多人服务器上限 %sx，已自动压低（超了会被服务端拉回）
 
 key.categories.futa_gtnh=FutaGTNH
 key.futa_gtnh.shared_terminal=打开共享背包
@@ -20,6 +22,8 @@ futa_gtnh.gui.tab.items=物品
 futa_gtnh.gui.tab.fluids=流体
 
 futa_gtnh.gui.armor=装备
+futa_gtnh.panel.search=在共享存储里搜索…
+futa_gtnh.panel.page=第 %s/%s 页 · %s 条
 futa_gtnh.gui.crafting=合成
 
 futa_gtnh.gui.auto.on=自动入库 开
@@ -43,6 +47,7 @@ futa_gtnh.gui.store.all=全部
 futa_gtnh.gui.store.hotbar=快捷栏
 futa_gtnh.gui.store.main=主背包
 futa_gtnh.gui.store.drain=倒空容器
+futa_gtnh.msg.no_space=背包里没有空间放下它
 
 futa_gtnh.gui.status.remote=远程访问 —— 放一个共享终端方块才能选输出流体
 futa_gtnh.gui.status.output=终端输出：%s
@@ -65,6 +70,7 @@ futa_gtnh.gui.locator.count.veins=%s / %s 条矿脉
 futa_gtnh.gui.locator.pick=从左边选一个
 futa_gtnh.gui.locator.state.running=搜索中…
 futa_gtnh.gui.locator.state.found=已找到
+futa_gtnh.gui.locator.state.arrived=已传送到目标附近
 futa_gtnh.gui.locator.state.notfound=附近没有找到
 futa_gtnh.gui.locator.distance=距离 %s 格
 futa_gtnh.gui.locator.beam=关掉界面就能看到光束
@@ -73,6 +79,8 @@ futa_gtnh.gui.locator.wrongdim=结果在另一个维度
 futa_gtnh.gui.locator.hint1=左键条目 = 开始追踪
 futa_gtnh.gui.locator.hint2=滚轮翻页 / 关闭界面不取消追踪
 futa_gtnh.gui.locator.teleport=传送
+futa_gtnh.gui.locator.teleported=已传送
+futa_gtnh.gui.locator.teleported.note=已用过一次传送
 futa_gtnh.gui.locator.stop=停止
 
 futa_gtnh.gui.locator.vein.range=生成高度 %s ~ %s
@@ -80,4 +88,20 @@ futa_gtnh.gui.locator.vein.tip=按主材料定位，跨石种
 futa_gtnh.locator.vein.name=%s矿脉
 
 futa_gtnh.locator.msg.no_safe_spot=目标附近找不到能站人的地方，传送已取消
+futa_gtnh.locator.msg.no_safe_spot_protected=附近能开洞的位置全被矿石（或木头、机器这类不该动的方块）占着，不肯拆它们，传送已取消
+futa_gtnh.locator.msg.arrived=已传送到目标附近（追踪保留着，光束继续指路）
+futa_gtnh.locator.msg.teleport_used=这个结果已经传送过一次了：追踪还在，想再传送请重新选一次目标
 futa_gtnh.locator.msg.no_result=没有可用的结果，请重新搜索
+
+futa_gtnh.station.chest=共享存储
+futa_gtnh.station.title.items= · %s 项
+futa_gtnh.station.title.page= · %s/%s
+
+futa_gtnh.locator.msg.arrived_carved=目标整个埋在实心方块里，已就地清出两格落脚（那块方块本身没动；追踪保留着）
+
+item.futa_gtnh.swift_step.tooltip.light=照明：%s
+item.futa_gtnh.swift_step.light.off=关
+item.futa_gtnh.swift_step.light.torch=火把（%s 级）
+item.futa_gtnh.swift_step.light.torch_short=火把
+futa_gtnh.swift_step.gui.light=照明亮度（0 = 关）
+futa_gtnh.swift_step.gui.light.note=只照亮，不挡刷怪

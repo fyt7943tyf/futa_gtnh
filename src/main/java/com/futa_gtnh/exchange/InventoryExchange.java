@@ -7,6 +7,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
 import com.futa_gtnh.Config;
+import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -72,7 +73,7 @@ public final class InventoryExchange {
      * <p>
      * 泛化到 {@link IInventory} 是为了同时覆盖三种来源：玩家主背包、护甲槽
      * （两者都走 {@link InventoryPlayer}，索引 0..39），以及终端界面里那个
-     * <b>属于容器而不属于玩家</b>的 2×2 合成栏（{@code InventoryCrafting}）。
+     * <b>属于容器而不属于玩家</b>的 3×3 合成栏（{@code InventoryCrafting}）。
      *
      * @param requested 想存的数量；{@code <= 0} 表示整叠存入
      * @return 实际存入的数量
@@ -291,7 +292,18 @@ public final class InventoryExchange {
 
         InventoryPlayer inv = player.inventory;
         long available = storage.getItemAmount(key);
-        if (available <= 0L) return 0L;
+        if (available <= 0L) {
+            // 客户端点了一个服务端存储里<b>不存在</b>的键。
+            //
+            // 这条以前是静默 return 0，结果就是玩家看到「点了没反应」，
+            // 而且一点线索都没有 —— 服务端和客户端的条目对不上时（模组版本
+            // 不一致、键序列化对不上……）就属于这一类，值得留下证据。
+            //
+            // 把键本身打出来：它带着物品、元数据和 NBT 的特征，足够定位是哪一个。
+            FutaGtnhMod.LOG
+                .warn("共享存储：玩家 {} 请求取出一个存里没有的条目 {}（数量 {}），已忽略", player.getCommandSenderName(), key, requested);
+            return 0L;
+        }
 
         long want = requested <= 0L ? available : Math.min(requested, available);
         if (want <= 0L) return 0L;
@@ -325,7 +337,16 @@ public final class InventoryExchange {
             planned += give;
         }
 
-        if (planned <= 0L) return 0L;
+        if (planned <= 0L) {
+            // 存储里有，但背包一个格子都放不下。
+            //
+            // 这也是以前静默失败的一条：玩家点了半天不知道为什么没反应。
+            // 尤其是 maxStackSize == 1 的物品（GT 工具就是），
+            // 「先补进已有的同类堆叠」那一步对它永远是 0 空间，
+            // 只能靠空格子 —— 背包满了就真的一点办法都没有。
+            FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.msg.no_space");
+            return 0L;
+        }
 
         // --- 阶段二：从存储扣。规划时已经确认存量够，这一步必定成功 ---
         long taken = storage.extractItem(key, planned);

@@ -8,6 +8,7 @@ import net.minecraft.world.World;
 import net.minecraftforge.oredict.ShapedOreRecipe;
 
 import com.futa_gtnh.block.BlockSharedTerminal;
+import com.futa_gtnh.block.BlockSwiftLight;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
 import com.futa_gtnh.command.CommandSharedStorage;
 import com.futa_gtnh.common.ForgeEventHandler;
@@ -41,6 +42,16 @@ public class CommonProxy {
     /** 寻物魔杖。 */
     public static ItemLocatorWand locatorWand;
 
+    /**
+     * 迅步照明用的隐形光源方块。
+     *
+     * <p>
+     * 它只会被<b>客户端</b>放进世界里（见 {@code client/SwiftStepLight}），
+     * 但注册必须在两端都做：方块要有稳定的 id，客户端 {@code setBlock} 才能把它
+     * 写进区块的方块数据里（没注册的方块 id 是 0，等于写了空气，光照不会变）。
+     */
+    public static BlockSwiftLight swiftLight;
+
     public void preInit(FMLPreInitializationEvent event) {
         // 读取配置文件（config/futa_gtnh.cfg）
         Config.synchronizeConfiguration(event.getSuggestedConfigurationFile());
@@ -66,6 +77,19 @@ public class CommonProxy {
         // 处理与其他模组（例如 GregTech / NEI）的联动
     }
 
+    /**
+     * 所有模组都加载完之后再补一次的联动（由 {@code FMLLoadCompleteEvent} 转发）。
+     *
+     * <p>
+     * 存在的理由：NEI 是在 {@code LoadComplete} 阶段才加载各模组插件的
+     * （{@code NEIModContainer.loadComplete} → {@code ClientHandler.loadPluginsList}），
+     * 所以「要盖过别的模组注册的 NEI handler」这种事必须等到这之后再做。
+     * 具体见 {@code client/nei/NeiIntegration#installStationOverlay}。
+     */
+    public void lateInit() {
+        // 服务端没有 NEI 联动要做
+    }
+
     public void serverStarting(FMLServerStartingEvent event) {
         event.registerServerCommand(new CommandSharedStorage());
     }
@@ -80,6 +104,12 @@ public class CommonProxy {
         GameRegistry
             .registerTileEntity(TileEntitySharedTerminal.class, FutaGtnhMod.MODID + ":" + BlockSharedTerminal.NAME);
         FutaGtnhMod.blockSharedTerminal = blockSharedTerminal;
+
+        // 迅步的隐形光源：注册但<b>不给 ItemBlock</b>（itemclass 传 null），
+        // 这样它不会出现在创造模式物品栏 / NEI 物品列表里 —— 玩家拿不到它，
+        // 它只是客户端自己放的一个「发光标记」
+        swiftLight = new BlockSwiftLight();
+        GameRegistry.registerBlock(swiftLight, null, BlockSwiftLight.NAME);
     }
 
     /**

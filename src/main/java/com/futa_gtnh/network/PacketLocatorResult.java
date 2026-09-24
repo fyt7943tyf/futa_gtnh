@@ -13,6 +13,12 @@ import io.netty.buffer.ByteBuf;
  * <p>
  * 三种终态 + 一种中间态。中间态只带进度，是为了让界面能画进度条 ——
  * 大半径扫描要跑一两秒，没有反馈的话玩家会以为按了没反应。
+ *
+ * <p>
+ * {@link #STATE_ARRIVED} 是「已经找到、而且已经传送到过一次」——
+ * 特意做成独立状态而不是「FOUND + 一个布尔」：传送之后<b>结果要留着</b>
+ * （追踪和光束是玩家到了之后唯一的指路手段），但传送按钮得作废。
+ * 两者分开写，界面判断起来就是一句 {@code state == STATE_FOUND}。
  */
 public class PacketLocatorResult implements IMessage {
 
@@ -20,6 +26,8 @@ public class PacketLocatorResult implements IMessage {
     public static final byte STATE_FOUND = 1;
     public static final byte STATE_NOT_FOUND = 2;
     public static final byte STATE_CANCELLED = 3;
+    /** 已找到，并且已经用这次结果传送过一次（坐标和距离客户端手上那份不变）。 */
+    public static final byte STATE_ARRIVED = 4;
 
     private byte state;
     private float progress;
@@ -53,6 +61,18 @@ public class PacketLocatorResult implements IMessage {
 
     public static PacketLocatorResult cancelled() {
         return new PacketLocatorResult(STATE_CANCELLED, 0.0F, 0, 0, 0, -1.0D);
+    }
+
+    /**
+     * 传送成功。
+     *
+     * <p>
+     * <b>坐标和距离照抄结果那一份</b>（服务端只留着坐标，距离没留），
+     * 客户端收到这个包只做一件事：把状态从「已找到」改成「已传送」，
+     * 从而把传送按钮作废，而结果、坐标、光束全部原样留着。
+     */
+    public static PacketLocatorResult arrived() {
+        return new PacketLocatorResult(STATE_ARRIVED, 1.0F, 0, 0, 0, -1.0D);
     }
 
     @Override

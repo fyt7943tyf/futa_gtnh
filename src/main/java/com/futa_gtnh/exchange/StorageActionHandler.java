@@ -5,6 +5,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.inventory.Container;
+import net.minecraft.item.ItemStack;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
@@ -18,6 +20,7 @@ import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.station.StationCrafting;
 
 /**
  * 服务端处理客户端发来的存储操作请求。
@@ -61,15 +64,40 @@ public final class StorageActionHandler {
     public static void handle(EntityPlayerMP player, PacketStorageAction packet) {
         if (player == null || packet == null) return;
 
-        // 必须真的开着共享存储界面，否则视为伪造
-        if (!(player.openContainer instanceof ContainerSharedTerminal)) return;
+        Container open = player.openContainer;
+
+        // 必须真的开着共享存储界面，否则视为伪造。
+        // 例外：挂着共享存储的匠魂合成站 —— 那里的 NEI「填合成栏 / 自动合成」也走这条通道
+        // （理由见 station/StationCrafting），同样要求玩家真的开着那个界面。
+        boolean terminal = open instanceof ContainerSharedTerminal;
+        boolean station = !terminal && futa$isSharedChestStation(open);
+        if (!terminal && !station) return;
         if (isFlooding(player)) return;
 
-        ContainerSharedTerminal container = (ContainerSharedTerminal) player.openContainer;
         SharedStorage storage = SharedStorageManager.getStorage();
         PacketStorageDelta delta = new PacketStorageDelta();
         DeltaRecorder recorder = new DeltaRecorder(storage, delta);
         long amount = clamp(packet.getAmount());
+
+        if (station) {
+            // 合成站只认「填合成栏 / 自动合成」两个动作，其它动作（终端界面专用的）直接忽略
+            byte action = packet.getAction();
+            if (action != PacketStorageAction.FILL_CRAFT_MATRIX && action != PacketStorageAction.AUTOCRAFT) {
+                return;
+            }
+            try {
+                if (StationCrafting.handleCraft(player, open, packet, storage, recorder)) {
+                    StationCrafting.broadcast(open, delta);
+                }
+            } catch (Throwable t) {
+                FutaGtnhMod.LOG.error("共享存储：处理玩家 {} 的合成站配方直填时出错，将重发全量以对齐状态", player.getCommandSenderName(), t);
+                SharedStorageManager.resyncAll();
+                open.detectAndSendChanges();
+            }
+            return;
+        }
+
+        ContainerSharedTerminal container = (ContainerSharedTerminal) open;
 
         try {
             switch (packet.getAction()) {
@@ -119,6 +147,34 @@ public final class StorageActionHandler {
                     InventoryExchange.drainContainers(player, storage, recorder);
                     break;
                 }
+                case PacketStorageAction.WITHDRAW_TO_CURSOR: {
+                    // 「取到光标上」：面板里左键点一下。物品先进光标，和从箱子里拿一致。
+                    ItemKey cursorKey = packet.getItemKey();
+                    if (cursorKey != null && amount > 0L) {
+                        ItemStack cursor = player.inventory.getItemStack();
+                        int limit = 64;
+                        if (cursor != null) {
+                            // 光标上是别的东西：不动（客户端也不该发这种包）
+                            if (!cursorKey.equals(ItemKey.of(cursor))) break;
+                            limit = cursor.getMaxStackSize();
+                            if (limit <= 0) limit = 64;
+                        }
+                        int space = limit - (cursor == null ? 0 : cursor.stackSize);
+                        if (space > 0) {
+                            long got = storage.extractItem(cursorKey, Math.min(amount, (long) space));
+                            if (got > 0L) {
+                                recorder.item(cursorKey);
+                                if (cursor == null) player.inventory.setItemStack(cursorKey.prototype((int) got));
+                                else cursor.stackSize += (int) got;
+                                // 光标栈不在任何槽位里，必须显式同步：
+                                // 这就是原版 NetHandlerPlayServer 用的那条路（S2FPacketSetSlot(-1,-1,..)）
+                                player.updateHeldItem();
+                                player.inventory.markDirty();
+                            }
+                        }
+                    }
+                    break;
+                }
                 case PacketStorageAction.DRAIN_CURSOR: {
                     InventoryExchange.drainCursorContainer(player, storage, recorder);
                     break;
@@ -133,7 +189,15 @@ public final class StorageActionHandler {
                     // CraftFiller 内部会自己 detectAndSendChanges ——
                     // 就算存储一点没动（材料全来自背包），合成栏也是要同步的，
                     // 不能依赖尾部那段「delta 非空才同步」的逻辑。
-                    CraftFiller.handle(player, container, packet, storage, recorder);
+                    // 终端的合成栏是原版的 InventoryCrafting + InventoryCraftResult，
+                    // 收产物走容器自己的 transferCraftResult（里面带防蒸发判断）
+                    CraftFiller.handle(player, container, container.getCraftMatrix(), new CraftFiller.ResultTaker() {
+
+                        @Override
+                        public ItemStack takeOnce(EntityPlayerMP who) {
+                            return container.transferCraftResult(who);
+                        }
+                    }, packet, storage, recorder);
                     return;
                 }
                 default:
@@ -226,5 +290,22 @@ public final class StorageActionHandler {
     /** 供配置变更时说明用：当前是否禁止远程（按键）打开。 */
     public static boolean remoteAccessAllowed() {
         return Config.allowRemoteAccess;
+    }
+
+    /**
+     * 「这个容器是挂着共享存储的匠魂合成站吗」。
+     *
+     * <p>
+     * 单独包一层是因为 {@code station} 包里的类型全是 tconstruct 的：先探测匠魂在不在，
+     * 再让 JVM 去解析那些符号引用（不在时这个方法体根本不会执行到）。
+     */
+    private static boolean futa$isSharedChestStation(Container open) {
+        if (open == null) return false;
+        if (!com.futa_gtnh.tinkers.TinkersAutoFill.isAvailable()) return false;
+        try {
+            return com.futa_gtnh.station.StationViews.canCraftFromSharedStorage(open);
+        } catch (Throwable t) {
+            return false;
+        }
     }
 }
