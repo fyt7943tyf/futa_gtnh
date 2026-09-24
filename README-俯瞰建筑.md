@@ -28,7 +28,7 @@
 
 | 模式 | 右键 | 回车提交 | 切换方式 |
 | --- | --- | --- | --- |
-| 互动 | 互动 / 使用物品 / 开 GUI | —（提示先切模式） | V 键 / 点击顶栏按钮 |
+| 互动 | 互动 / 开 GUI（**永不放置方块**；骨粉、桶、GT 扳手等非方块物品仍可使用） | —（提示先切模式） | V 键 / 点击顶栏按钮 |
 | 建造 | 放置手中方块 | 形状建造 | 同上 |
 | 破坏 | 破坏方块 | 区域破坏 | 同上 |
 
@@ -152,8 +152,11 @@
 - **相机**：客户端构造不加入世界的 `EntityLivingBase`（1.7.10 的 `renderViewEntity` 字段类型
   要求），每 tick 写姿态、原版渲染自动插值。服务端不存相机状态（玩家不动，锚点=玩家位置），
   只按「目标在玩家半径内」校验。
-- **手臂隐藏**：GTNH Forge 反向移植的 `RenderHandEvent`（`RtsHandHider`，EFR 旁观同款）——
-  原版 `ItemRenderer` 画手只看 `mc.thePlayer`，换相机实体藏不住手。
+- **手臂隐藏**：双保险 —— GTNH Forge 反向移植的 `RenderHandEvent` 取消
+  （`RtsHandHider`，EFR 旁观同款）+ `MixinEntityRenderer` 在
+  `EntityRenderer.renderHand` HEAD 直接取消（事件链被整合包其它 mod 干扰时的
+  确定性兜底；1.3.1 真机曾出现事件取消不生效）。诊断：开
+  `enableDebugLogging` 后会话状态变化会打一条日志。
 - **输入契约**：`GuiScreen.handleInput()` 外层已按事件循环调用 `handleMouseInput()`，
   覆写必须只处理「当前事件」（1.3.0 在覆写里再套 `while (Mouse.next())` 导致每 tick
   第一个鼠标事件必丢——滚轮/单击失效的根因）；lwjgl3ify 下 `getEventDWheel()` 一格 ±1

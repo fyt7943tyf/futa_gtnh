@@ -299,6 +299,16 @@ public class Config {
      */
     public static float rtsMousePanSensitivity = 0.05F;
 
+    /**
+     * 共享终端界面的排序方式（0=名称 1=数量 2=模组），<b>默认按数量</b>。
+     *
+     * <p>
+     * 这是<b>客户端偏好</b>：点界面上的排序按钮时会写回配置文件（见
+     * {@link #saveClientGuiSort}），下次打开界面/重启游戏都记住。
+     * 存的是整数而不是引用客户端的枚举，保证服务端加载这个类时安全。
+     */
+    public static int guiSortMode = 1;
+
     // ------------------------------------------------------------------
     // 合成
     // ------------------------------------------------------------------
@@ -306,11 +316,23 @@ public class Config {
     /** 是否注册共享终端的合成配方。 */
     public static boolean enableRecipe = true;
 
+    /** 配置文件位置，在 {@link #synchronizeConfiguration} 里记下，供运行时回写用。 */
+    private static File configFileRef;
+
     public static void synchronizeConfiguration(File configFile) {
+        configFileRef = configFile;
         Configuration configuration = new Configuration(configFile);
 
         enableDebugLogging = configuration
             .getBoolean("enableDebugLogging", Configuration.CATEGORY_GENERAL, enableDebugLogging, "打开后会输出更多调试日志");
+
+        guiSortMode = configuration.getInt(
+            "guiSortMode",
+            Configuration.CATEGORY_GENERAL,
+            guiSortMode,
+            0,
+            2,
+            "共享终端界面的排序方式（0=名称 1=数量 2=模组）。客户端偏好：界面里点排序按钮会自动改写这一项。");
 
         allowRemoteAccess = configuration.getBoolean(
             "allowRemoteAccess",
@@ -580,6 +602,27 @@ public class Config {
 
         if (configuration.hasChanged()) {
             configuration.save();
+        }
+    }
+
+    /**
+     * 运行时回写共享终端的排序偏好（点界面排序按钮时调用）。
+     *
+     * <p>
+     * 这是本工程唯一一处「cfg 在 preInit 之外被写」的地方：重新读一遍配置文件、
+     * 只改 guiSortMode 一项再存盘，其余配置项保持原样。写盘在主线程、只点按钮
+     * 才发生，一次几毫秒，无感。
+     */
+    public static void saveClientGuiSort(int mode) {
+        guiSortMode = mode;
+        if (configFileRef == null) return;
+        try {
+            Configuration configuration = new Configuration(configFileRef);
+            configuration.get(Configuration.CATEGORY_GENERAL, "guiSortMode", guiSortMode)
+                .set(Integer.toString(mode));
+            configuration.save();
+        } catch (Throwable t) {
+            FutaGtnhMod.LOG.warn("保存共享终端排序偏好失败（不影响本次使用）", t);
         }
     }
 }

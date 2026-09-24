@@ -134,29 +134,21 @@ public class GuiRtsOverlay extends GuiScreen {
 
     public GuiRtsOverlay() {
         // 互动/建造/破坏用固定物品图标（拉杆=互动、砖块=建造、铁镐=破坏），
-        // 形状/填充/撤销/重做画文字（形状/填充直接显示当前值，比图标更直观）
-        buttons.add(new TopbarButton(TopbarButton.Type.MODE_INTERACT, 8, new ItemStack(Blocks.lever), "interact"));
-        buttons.add(
-            new TopbarButton(
-                TopbarButton.Type.MODE_BUILD,
-                8 + BTN_W + BTN_GAP,
-                new ItemStack(Blocks.brick_block),
-                "build"));
-        buttons.add(
-            new TopbarButton(
-                TopbarButton.Type.MODE_DESTROY,
-                8 + (BTN_W + BTN_GAP) * 2,
-                new ItemStack(Items.iron_pickaxe),
-                "destroy"));
+        // 形状/填充/撤销/重做画文字（形状/填充直接显示当前值，比图标更直观）。
+        //
+        // x 用顺序游标累加 —— 1.3.1 手写总表达式把形状按钮算进了破坏按钮的
+        // 盒子里（顶栏错位的根因），不要再退回去。
+        int x = 8;
+        buttons.add(new TopbarButton(TopbarButton.Type.MODE_INTERACT, x, new ItemStack(Blocks.lever), "interact"));
+        x += BTN_W + BTN_GAP;
+        buttons.add(new TopbarButton(TopbarButton.Type.MODE_BUILD, x, new ItemStack(Blocks.brick_block), "build"));
+        x += BTN_W + BTN_GAP;
+        buttons.add(new TopbarButton(TopbarButton.Type.MODE_DESTROY, x, new ItemStack(Items.iron_pickaxe), "destroy"));
         // 模式组与工具组之间加组间距（RTSBuilding 规格）
-        buttons.add(
-            new TopbarButton(TopbarButton.Type.SHAPE, 8 + (BTN_W + BTN_GAP) * 2 + GROUP_GAP + BTN_GAP, null, "shape"));
-        buttons.add(
-            new TopbarButton(
-                TopbarButton.Type.FILL,
-                8 + (BTN_W + BTN_GAP) * 2 + GROUP_GAP + BTN_GAP * 2 + BTN_W,
-                null,
-                "fill"));
+        x += BTN_W + GROUP_GAP;
+        buttons.add(new TopbarButton(TopbarButton.Type.SHAPE, x, null, "shape"));
+        x += BTN_W + BTN_GAP;
+        buttons.add(new TopbarButton(TopbarButton.Type.FILL, x, null, "fill"));
         // 撤销/重做右对齐（x 在 initGui 里按屏幕宽度算）
         buttons.add(new TopbarButton(TopbarButton.Type.UNDO, 0, null, "undo"));
         buttons.add(new TopbarButton(TopbarButton.Type.REDO, 0, null, "redo"));
@@ -525,9 +517,18 @@ public class GuiRtsOverlay extends GuiScreen {
         sendPlacePacket(pick);
     }
 
+    /**
+     * 发「对方块右键」包（放置/互动共用）。
+     *
+     * <p>
+     * 互动模式走 {@code useBlockInteractOnly}：只互动/开 GUI，手持方块物品时
+     * <b>不会放置</b>（1.3.1 上机反馈互动模式还能放方块）。建造模式走原版完整
+     * 语义（onBlockActivated 优先，所以对着箱子还是会开箱子——Shift 可越过）。
+     */
     private void sendPlacePacket(RtsPickResult pick) {
-        NetworkHandler.INSTANCE.sendToServer(
-            PacketRtsInteract.useBlock(
+        boolean interactOnly = RtsBuildPlanner.getMode() == RtsMode.INTERACT;
+        PacketRtsInteract packet = interactOnly
+            ? PacketRtsInteract.useBlockInteractOnly(
                 pick.blockX,
                 pick.blockY,
                 pick.blockZ,
@@ -538,7 +539,20 @@ public class GuiRtsOverlay extends GuiScreen {
                 pick.dirX,
                 pick.dirY,
                 pick.dirZ,
-                isShiftDown()));
+                isShiftDown())
+            : PacketRtsInteract.useBlock(
+                pick.blockX,
+                pick.blockY,
+                pick.blockZ,
+                pick.side,
+                (float) (pick.worldHitX - pick.blockX),
+                (float) (pick.worldHitY - pick.blockY),
+                (float) (pick.worldHitZ - pick.blockZ),
+                pick.dirX,
+                pick.dirY,
+                pick.dirZ,
+                isShiftDown());
+        NetworkHandler.INSTANCE.sendToServer(packet);
     }
 
     private void sendEntityInteract(RtsPickResult pick) {

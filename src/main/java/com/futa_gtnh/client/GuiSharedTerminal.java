@@ -7,6 +7,7 @@ import java.util.Locale;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.gui.inventory.GuiContainer;
+import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.ResourceLocation;
@@ -16,6 +17,7 @@ import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
 
+import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.exchange.InventoryExchange;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
@@ -67,11 +69,26 @@ public class GuiSharedTerminal extends GuiContainer {
     private final List<com.futa_gtnh.shared.FluidKey> pageFluidKeys = new ArrayList<>();
 
     private int tab = TAB_ITEMS;
-    private int page;
-    private int sortMode = StorageSort.BY_NAME;
+    /**
+     * 列表的行滚动偏移（每行 {@code COLS} 格，视口 {@code ROWS} 行）。
+     * 1.3.1 及以前是「整页翻页」（一次 45 格），上机反馈太粗糙 —— 现在滚轮逐行。
+     */
+    private int scrollRow;
+    /** 排序方式，跨界面/跨重启记住（见 {@link Config#guiSortMode}），默认按数量。 */
+    private int sortMode = StorageSort.fromIndex(Config.guiSortMode);
 
     private int lastRevision = -1;
     private boolean viewDirty = true;
+    /**
+     * 下一次重建视图时是否<b>重新排序</b>。
+     *
+     * <p>
+     * 只有显式动作（打开界面、点排序按钮、改搜索词、切页签）才重排；
+     * 服务端增量（shift 存放导致的数量变化）只刷新数字、<b>不重排</b> ——
+     * 按数量排序时每取一个东西就整片重排、鼠标底下的东西跳走，是 1.3.1
+     * 上机反馈的痛点（合成站存储面板早就为同样的原因锁死了按名称）。
+     */
+    private boolean pendingResort = true;
     /** 按钮上当前显示的自动入库状态，用来判断服务端回包后要不要重画文字 */
     private boolean autoStoreShown;
 
@@ -163,6 +180,7 @@ public class GuiSharedTerminal extends GuiContainer {
 
         updateTabStates();
         viewDirty = true;
+        pendingResort = true;
     }
 
     private void updateTabStates() {
@@ -209,31 +227,63 @@ public class GuiSharedTerminal extends GuiContainer {
     // ==================================================================
 
     /**
-     * 重新过滤 + 排序 + 重算分页，并把结果推给虚拟槽位。
+     * 重新过滤 + （按需）排序 + 重算滚动范围，并把结果推给虚拟槽位。
      *
      * <p>
      * 只在「真的变了」的时候跑：内容版本号变了、搜索词变了、排序变了、换页签了。
      * 每帧都重排几千个条目是会把帧率吃掉的。
+     *
+     * @param resort 是否重新排序。增量刷新（shift 存放导致的数量变化）传 false：
+     *               用「旧顺序排名」稳定重排 —— 已有条目保持原位、新条目追加到
+     *               尾部、消失的条目移除。直接不过滤排序的话列表会退回存储的
+     *               插入序，等于变相重排；真正的排序只在显式触发时做。
      */
-    private void rebuildView() {
+    private void rebuildView(boolean resort) {
         List<StorageViewEntry> source = tab == TAB_FLUIDS ? ClientStorageCache.fluids() : ClientStorageCache.items();
 
-        StorageSearch.filter(source, StorageSearch.compile(searchField == null ? "" : searchField.getText()), filtered);
-        StorageSort.sort(filtered, sortMode);
+        if (resort) {
+            StorageSearch
+                .filter(source, StorageSearch.compile(searchField == null ? "" : searchField.getText()), filtered);
+            StorageSort.sort(filtered, sortMode);
+        } else {
+            // 记录当前显示顺序，过滤后按旧排名稳定排列（新条目排到最后）。
+            // 用 IdentityHashMap：条目对象是同一个引用（增量是原地 setAmount），
+            // 而且 StorageViewEntry 有自定义 equals 的风险也一并规避。
+            java.util.Map<StorageViewEntry, Integer> rank = new java.util.IdentityHashMap<>();
+            for (int i = 0; i < filtered.size(); i++) {
+                rank.put(filtered.get(i), i);
+            }
+            StorageSearch
+                .filter(source, StorageSearch.compile(searchField == null ? "" : searchField.getText()), filtered);
+            java.util.Comparator<StorageViewEntry> stable = new java.util.Comparator<StorageViewEntry>() {
 
-        clampPage();
+                @Override
+                public int compare(StorageViewEntry a, StorageViewEntry b) {
+                    int ra = rank.containsKey(a) ? rank.get(a) : Integer.MAX_VALUE;
+                    int rb = rank.containsKey(b) ? rank.get(b) : Integer.MAX_VALUE;
+                    // 新条目彼此之间按名称兜底，避免同一批新条目顺序抖动
+                    if (ra != rb) return Integer.compare(ra, rb);
+                    return StorageSort.comparator(sortMode)
+                        .compare(a, b);
+                }
+            };
+            java.util.Collections.sort(filtered, stable);
+        }
+
+        clampScrollRow();
         pushPage();
         viewDirty = false;
     }
 
-    private int maxPage() {
-        return Math.max(0, (filtered.size() - 1) / ContainerSharedTerminal.SHARED_SLOTS);
+    /** @return 行滚动下标上限（含）：条目不足一屏时为 0 */
+    private int maxScrollRow() {
+        return Math.max(0, (filtered.size() - 1) / ContainerSharedTerminal.COLS - (ContainerSharedTerminal.ROWS - 1));
     }
 
-    private void clampPage() {
-        int max = maxPage();
-        if (page > max) page = max;
-        if (page < 0) page = 0;
+    private void clampScrollRow() {
+        int max = maxScrollRow();
+        if (scrollRow > max) scrollRow = max;
+        if (scrollRow < 0) scrollRow = 0;
     }
 
     private void pushPage() {
@@ -241,7 +291,7 @@ public class GuiSharedTerminal extends GuiContainer {
         pageItemKeys.clear();
         pageFluidKeys.clear();
 
-        int start = page * ContainerSharedTerminal.SHARED_SLOTS;
+        int start = scrollRow * ContainerSharedTerminal.COLS;
         for (int i = 0; i < ContainerSharedTerminal.SHARED_SLOTS; i++) {
             int index = start + i;
             StorageViewEntry entry = index < filtered.size() ? filtered.get(index) : null;
@@ -259,9 +309,10 @@ public class GuiSharedTerminal extends GuiContainer {
         container.setPageDisplay(pageStacks, pageItemKeys, pageFluidKeys);
     }
 
-    private void changePage(int delta) {
-        page += delta;
-        clampPage();
+    /** 滚动 {@code deltaRows} 行（负 = 向列表开头）。 */
+    private void scrollBy(int deltaRows) {
+        scrollRow += deltaRows;
+        clampScrollRow();
         pushPage();
     }
 
@@ -286,10 +337,12 @@ public class GuiSharedTerminal extends GuiContainer {
         int revision = ClientStorageCache.getRevision();
         if (revision != lastRevision) {
             lastRevision = revision;
+            // 增量只刷新数字、不重排（见 pendingResort 的注释）
             viewDirty = true;
         }
         if (viewDirty) {
-            rebuildView();
+            rebuildView(pendingResort);
+            pendingResort = false;
         }
     }
 
@@ -368,13 +421,14 @@ public class GuiSharedTerminal extends GuiContainer {
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         // 这一层已经在 (guiLeft, guiTop) 的平移矩阵里了，坐标直接用 GUI 相对坐标
 
-        // ---- 分页信息 ----
-        // 用 translateToLocalFormatted 而不是拼字符串：中文的语序是「第 1/5 页」，
-        // 把「页」放在前缀里拼出来会变成「第 1/5」，少一个字
+        // ---- 滚动位置信息 ----
+        // 行滚动模型下按「屏」换算：一屏 = ROWS 行。用 translateToLocalFormatted
+        // 而不是拼字符串：中文的语序是「第 1/5 页」，把「页」放在前缀里拼出来
+        // 会变成「第 1/5」，少一个字
         String pageText = StatCollector.translateToLocalFormatted(
             "futa_gtnh.gui.page",
-            filtered.isEmpty() ? 0 : page + 1,
-            filtered.isEmpty() ? 0 : maxPage() + 1);
+            filtered.isEmpty() ? 0 : scrollRow / ContainerSharedTerminal.ROWS + 1,
+            filtered.isEmpty() ? 0 : maxScrollRow() / ContainerSharedTerminal.ROWS + 1);
         fontRendererObj.drawString(pageText, 42, ContainerSharedTerminal.NAV_Y + 3, 0x404040);
 
         String typeText = StatCollector.translateToLocalFormatted(
@@ -439,7 +493,7 @@ public class GuiSharedTerminal extends GuiContainer {
 
     /** 在网格里每一格的右下角画出「有多少」。 */
     private void drawSlotAmounts() {
-        int start = page * ContainerSharedTerminal.SHARED_SLOTS;
+        int start = scrollRow * ContainerSharedTerminal.COLS;
         for (int i = 0; i < ContainerSharedTerminal.SHARED_SLOTS; i++) {
             int index = start + i;
             if (index >= filtered.size()) break;
@@ -502,12 +556,77 @@ public class GuiSharedTerminal extends GuiContainer {
         int delta = Mouse.getEventDWheel();
         if (delta == 0) return;
 
-        // 只在鼠标位于网格区域时翻页，免得在背包那边滚轮也把页面翻掉
         int mouseX = Mouse.getEventX() * width / mc.displayWidth;
         int mouseY = height - Mouse.getEventY() * height / mc.displayHeight - 1;
-        if (!isInsideGrid(mouseX, mouseY)) return;
 
-        changePage(delta > 0 ? -1 : 1);
+        // Shift + 滚轮 = 快速存取（不分方向，见 handleQuickWheel），不滚动列表
+        if (isShiftKeyDown()) {
+            if (isInsideScrollRegion(mouseX, mouseY)) {
+                handleQuickWheel(mouseX, mouseY);
+            }
+            return;
+        }
+
+        // 触发区域从「网格内」扩大为网格包围盒外扩一圈（上机反馈不容易滚到）；
+        // 不在区域里就不滚动，免得在侧栏/背包那边误翻
+        if (!isInsideScrollRegion(mouseX, mouseY)) return;
+
+        // 滚轮方向沿用工程约定：向上 = 向列表开头。格数双语义兼容：
+        // lwjgl3ify 的 getEventDWheel() 一格返回 ±1，纯 LWJGL2 是 ±120
+        int notches = Math.abs(delta) >= 120 ? delta / 120 : delta;
+        scrollBy(-notches);
+    }
+
+    /**
+     * Shift + 滚轮快速存取（<b>不分方向</b>）：
+     * <ul>
+     * <li>悬停共享存储条目 → 取出一组该物品进背包（数量 = 该物品的堆叠上限）；</li>
+     * <li>悬停自己背包格 → 该格整叠存入共享背包。</li>
+     * </ul>
+     * 语义对齐 InvTweaks 的快速搬移，方向不参与含义（上下都一样）。
+     */
+    private void handleQuickWheel(int mouseX, int mouseY) {
+        StorageViewEntry entry = getHoveredEntry(mouseX, mouseY);
+        if (entry != null) {
+            ItemStack display = entry.getDisplay();
+            int amount = display == null ? 1 : Math.max(1, display.getMaxStackSize());
+            container.requestWithdrawFromDisplay(hoveredGhostIndex(mouseX, mouseY), amount);
+            return;
+        }
+
+        // 不在共享网格上：看是不是自己的背包格（只认主背包区，护甲/合成栏不参与滚轮）
+        Slot slot = hoveredContainerSlot(mouseX, mouseY);
+        if (slot != null && slot.slotNumber >= ContainerSharedTerminal.MAIN_START
+            && slot.slotNumber < ContainerSharedTerminal.ARMOR_START) {
+            container.sendDepositFromSlot(slot.slotNumber, 0L);
+        }
+    }
+
+    /**
+     * 自查鼠标下的容器槽位。
+     *
+     * <p>
+     * 原版 {@code GuiContainer.getSlotAtPosition} 是 private，这里按同样的
+     * 16×16 规则遍历一遍（槽位坐标是 GUI 相对坐标，鼠标是绝对坐标，注意偏移）。
+     */
+    private Slot hoveredContainerSlot(int mouseX, int mouseY) {
+        for (Object object : container.inventorySlots) {
+            Slot slot = (Slot) object;
+            int x = guiLeft + slot.xDisplayPosition;
+            int y = guiTop + slot.yDisplayPosition;
+            if (mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16) return slot;
+        }
+        return null;
+    }
+
+    /** @return 共享网格上悬停格对应的虚拟槽下标（0..44，页面内偏移）；网格外返回 -1 */
+    private int hoveredGhostIndex(int mouseX, int mouseY) {
+        int left = guiLeft + ContainerSharedTerminal.GRID_X;
+        int top = guiTop + ContainerSharedTerminal.GRID_Y;
+        if (!isInsideGrid(mouseX, mouseY)) return -1;
+        int col = (mouseX - left) / 18;
+        int row = (mouseY - top) / 18;
+        return row * ContainerSharedTerminal.COLS + col;
     }
 
     @Override
@@ -516,14 +635,15 @@ public class GuiSharedTerminal extends GuiContainer {
         // 覆写时加上 throws IOException 会直接编译不过
         if (searchField != null && searchField.textboxKeyTyped(typedChar, keyCode)) {
             viewDirty = true;
+            pendingResort = true;
             return;
         }
-        if (keyCode == Keyboard.KEY_PRIOR) { // PageUp / PageDown 快速翻页
-            changePage(-1);
+        if (keyCode == Keyboard.KEY_PRIOR) { // PageUp / PageDown 按屏滚动
+            scrollBy(-ContainerSharedTerminal.ROWS);
             return;
         }
         if (keyCode == Keyboard.KEY_NEXT) {
-            changePage(1);
+            scrollBy(ContainerSharedTerminal.ROWS);
             return;
         }
         super.keyTyped(typedChar, keyCode);
@@ -557,26 +677,30 @@ public class GuiSharedTerminal extends GuiContainer {
         switch (button.id) {
             case BTN_TAB_ITEMS:
                 tab = TAB_ITEMS;
-                page = 0;
+                scrollRow = 0;
                 updateTabStates();
                 viewDirty = true;
+                pendingResort = true;
                 break;
             case BTN_TAB_FLUIDS:
                 tab = TAB_FLUIDS;
-                page = 0;
+                scrollRow = 0;
                 updateTabStates();
                 viewDirty = true;
+                pendingResort = true;
                 break;
             case BTN_PREV:
-                changePage(-1);
+                scrollBy(-ContainerSharedTerminal.ROWS);
                 break;
             case BTN_NEXT:
-                changePage(1);
+                scrollBy(ContainerSharedTerminal.ROWS);
                 break;
             case BTN_SORT:
                 sortMode = StorageSort.next(sortMode);
+                Config.saveClientGuiSort(sortMode);
                 updateTabStates();
                 viewDirty = true;
+                pendingResort = true;
                 break;
             case BTN_STORE_ALL:
                 container.sendDepositAll(InventoryExchange.SCOPE_ALL);
@@ -621,6 +745,20 @@ public class GuiSharedTerminal extends GuiContainer {
             && mouseY < top + ContainerSharedTerminal.ROWS * 18;
     }
 
+    /**
+     * 滚轮的触发区域：网格包围盒向外扩一圈（1.3.1 上机反馈只在网格内滚动
+     * 太难滚准）。搜索栏/页签/导航行都在这个外扩圈里，滚轮照常生效；
+     * 侧栏和玩家背包区不受影响。
+     */
+    private boolean isInsideScrollRegion(int mouseX, int mouseY) {
+        final int margin = 16;
+        int left = guiLeft + ContainerSharedTerminal.GRID_X - margin;
+        int top = guiTop + ContainerSharedTerminal.GRID_Y - margin;
+        int right = guiLeft + ContainerSharedTerminal.GRID_X + ContainerSharedTerminal.COLS * 18 + margin;
+        int bottom = guiTop + ContainerSharedTerminal.GRID_Y + ContainerSharedTerminal.ROWS * 18 + margin;
+        return mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom;
+    }
+
     /** @return 鼠标指着的那一条；不在网格上或那一格是空的时返回 null */
     private StorageViewEntry getHoveredEntry(int mouseX, int mouseY) {
         int left = guiLeft + ContainerSharedTerminal.GRID_X;
@@ -633,7 +771,7 @@ public class GuiSharedTerminal extends GuiContainer {
             return null;
         }
 
-        int index = page * ContainerSharedTerminal.SHARED_SLOTS + row * ContainerSharedTerminal.COLS + col;
+        int index = scrollRow * ContainerSharedTerminal.COLS + row * ContainerSharedTerminal.COLS + col;
         return index < filtered.size() ? filtered.get(index) : null;
     }
 

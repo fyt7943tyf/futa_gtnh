@@ -11,6 +11,6 @@
 		"MixinEntityPlayerMP",
 		"MixinSlotCraftingStation"
 	],
-	"client": [],
+	"client": ["MixinEntityRenderer"],
 	"server": []
 }

@@ -26,6 +26,12 @@ public class PacketRtsInteract implements IMessage {
     public static final byte MODE_USE_BLOCK = 0;
     public static final byte MODE_INTERACT_ENTITY = 1;
     public static final byte MODE_ATTACK_ENTITY = 2;
+    /**
+     * 互动模式的「只互动、不放置」右键：只跑方块的 onBlockActivated（开 GUI /
+     * 互动），未消费且手持<b>非方块物品</b>时才落到物品使用（骨粉/桶/GT 扳手）。
+     * 方块物品在此路径下永不放置 —— 1.3.1 上机反馈互动模式还会放方块。
+     */
+    public static final byte MODE_USE_BLOCK_INTERACT_ONLY = 3;
 
     private byte mode;
     // 方块目标（MODE_USE_BLOCK）
@@ -43,8 +49,19 @@ public class PacketRtsInteract implements IMessage {
 
     public static PacketRtsInteract useBlock(int x, int y, int z, int side, float hitX, float hitY, float hitZ,
         double dirX, double dirY, double dirZ, boolean sneak) {
+        return useBlockInternal(MODE_USE_BLOCK, x, y, z, side, hitX, hitY, hitZ, dirX, dirY, dirZ, sneak);
+    }
+
+    /** 互动模式的右键：只互动不放置（见 {@link #MODE_USE_BLOCK_INTERACT_ONLY}）。 */
+    public static PacketRtsInteract useBlockInteractOnly(int x, int y, int z, int side, float hitX, float hitY,
+        float hitZ, double dirX, double dirY, double dirZ, boolean sneak) {
+        return useBlockInternal(MODE_USE_BLOCK_INTERACT_ONLY, x, y, z, side, hitX, hitY, hitZ, dirX, dirY, dirZ, sneak);
+    }
+
+    private static PacketRtsInteract useBlockInternal(byte mode, int x, int y, int z, int side, float hitX, float hitY,
+        float hitZ, double dirX, double dirY, double dirZ, boolean sneak) {
         PacketRtsInteract packet = new PacketRtsInteract();
-        packet.mode = MODE_USE_BLOCK;
+        packet.mode = mode;
         packet.x = x;
         packet.y = y;
         packet.z = z;
@@ -112,12 +129,14 @@ public class PacketRtsInteract implements IMessage {
             if (!RtsActionGuard.tryConsume(player)) return null;
 
             switch (message.mode) {
-                case MODE_USE_BLOCK: {
+                case MODE_USE_BLOCK:
+                case MODE_USE_BLOCK_INTERACT_ONLY: {
                     // 范围校验以方块中心为准（服务端权威）
                     if (!RtsActionGuard.isWithinRange(player, message.x + 0.5D, message.y + 0.5D, message.z + 0.5D)) {
                         RtsActionGuard.notifyRejected(player, "futa_gtnh.rts.msg.out_of_range");
                         return null;
                     }
+                    boolean interactOnly = message.mode == MODE_USE_BLOCK_INTERACT_ONLY;
                     RtsInteractionService.handleUseBlock(
                         player,
                         message.x,
@@ -130,7 +149,8 @@ public class PacketRtsInteract implements IMessage {
                         message.dirX,
                         message.dirY,
                         message.dirZ,
-                        message.sneak);
+                        message.sneak,
+                        interactOnly);
                     break;
                 }
                 case MODE_INTERACT_ENTITY:
