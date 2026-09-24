@@ -62,6 +62,9 @@ public class GuiSharedTerminal extends GuiContainer {
     /** 当前过滤 + 排序后的结果，是这一页内容的来源 */
     private final List<StorageViewEntry> filtered = new ArrayList<>();
     private final List<ItemStack> pageStacks = new ArrayList<>();
+    /** 和 {@link #pageStacks} 一一对应的原始键，见 pushPage 里的说明 */
+    private final List<com.futa_gtnh.shared.ItemKey> pageItemKeys = new ArrayList<>();
+    private final List<com.futa_gtnh.shared.FluidKey> pageFluidKeys = new ArrayList<>();
 
     private int tab = TAB_ITEMS;
     private int page;
@@ -77,6 +80,31 @@ public class GuiSharedTerminal extends GuiContainer {
         this.container = container;
         this.xSize = ContainerSharedTerminal.GUI_WIDTH;
         this.ySize = ContainerSharedTerminal.GUI_HEIGHT;
+    }
+
+    /**
+     * 建界面。<b>所有打开终端的地方都要走这里，不要直接 new。</b>
+     *
+     * <p>
+     * 装了 MouseTweaks 时返回它的兼容子类
+     * （{@link MouseTweaksCompat.Gui}）：那里面实现 MouseTweaks 的
+     * {@code IMTModGuiContainer} 接口，把「滚轮 tweak」在这个界面上关掉 ——
+     * 否则滚轮每滚一格，MouseTweaks 就会替玩家点一下鼠标下的格子，
+     * 而共享存储的格子是「点一下 = 取一个」，于是翻页变成往外掏东西。
+     *
+     * <p>
+     * 子类只在装了 MouseTweaks 时才被加载（{@code instanceof} 检查要求接口真的存在，
+     * 没装时加载它会 NoClassDefFoundError），所以用 modid 守卫 + try/catch 兜底。
+     */
+    public static GuiSharedTerminal create(ContainerSharedTerminal container) {
+        if (MouseTweaksCompat.isAvailable()) {
+            try {
+                return new MouseTweaksCompat.Gui(container);
+            } catch (Throwable t) {
+                FutaGtnhMod.LOG.warn("MouseTweaks 兼容子类创建失败，退回普通界面", t);
+            }
+        }
+        return new GuiSharedTerminal(container);
     }
 
     // ==================================================================
@@ -98,7 +126,14 @@ public class GuiSharedTerminal extends GuiContainer {
         searchField.setMaxStringLength(64);
         searchField.setEnableBackgroundDrawing(false);
         searchField.setText(previousQuery);
-        searchField.setFocused(true);
+        // 默认不给焦点。
+        //
+        // 以前这里是 setFocused(true) + 点击时强制回焦点，理由是
+        // 「点到空白处再敲字母会触发快捷键直接关界面」。那个担心其实不成立：
+        // KeyHandler 里有 currentScreen != null 就 return 的守卫，B 键不可能关掉界面；
+        // 而 GuiContainer 只对「打开背包」那个键（默认 E）关界面，字母键不会。
+        // 代价是搜索框永远失不了焦，玩家点别处也没法退出输入状态，很别扭。
+        searchField.setFocused(false);
         // 按住退格能连删。1.7.10 的 GuiTextField 不会自己开重复事件，
         // 这里开、关界面时关（和原版 GuiEditSign 同一个套路）
         Keyboard.enableRepeatEvents(true);
@@ -203,14 +238,25 @@ public class GuiSharedTerminal extends GuiContainer {
 
     private void pushPage() {
         pageStacks.clear();
+        pageItemKeys.clear();
+        pageFluidKeys.clear();
+
         int start = page * ContainerSharedTerminal.SHARED_SLOTS;
         for (int i = 0; i < ContainerSharedTerminal.SHARED_SLOTS; i++) {
             int index = start + i;
-            pageStacks.add(
-                index < filtered.size() ? filtered.get(index)
-                    .getDisplay() : null);
+            StorageViewEntry entry = index < filtered.size() ? filtered.get(index) : null;
+
+            pageStacks.add(entry == null ? null : entry.getDisplay());
+            // 键跟着显示物品一起送进容器。
+            //
+            // 不能等点击时再从显示物品反推：有些模组的 getter 会改写物品栈
+            // （GT 的 MetaGeneratedTool.getToolStats 就会重写 ench），
+            // 界面一画出来显示栈就已经和存档里的不一样了，反推出来的键查不到东西。
+            pageItemKeys.add(entry == null ? null : entry.getItemKey());
+            pageFluidKeys.add(entry == null ? null : entry.getFluidKey());
         }
-        container.setPageDisplay(pageStacks);
+
+        container.setPageDisplay(pageStacks, pageItemKeys, pageFluidKeys);
     }
 
     private void changePage(int delta) {
@@ -290,6 +336,23 @@ public class GuiSharedTerminal extends GuiContainer {
             .bindTexture(TEXTURE);
         drawTexturedModalRect(guiLeft, guiTop, 0, 0, xSize, ySize);
 
+        // 聚焦时把搜索框描一圈亮边 —— 现在它默认不是焦点了，
+        // 得让玩家一眼看出「现在敲键盘是往这里输」还是「不在输入状态」
+        if (searchField != null && searchField.isFocused()) {
+            drawRect(
+                guiLeft + 7,
+                guiTop + ContainerSharedTerminal.SEARCH_Y - 1,
+                guiLeft + 7 + 162,
+                guiTop + ContainerSharedTerminal.SEARCH_Y,
+                0xFF55FF55);
+            drawRect(
+                guiLeft + 7,
+                guiTop + ContainerSharedTerminal.SEARCH_Y + 12,
+                guiLeft + 7 + 162,
+                guiTop + ContainerSharedTerminal.SEARCH_Y + 13,
+                0xFF55FF55);
+        }
+
         // 搜索框的输入提示：只在空的时候显示
         if (searchField != null && searchField.getText()
             .isEmpty()) {
@@ -367,7 +430,9 @@ public class GuiSharedTerminal extends GuiContainer {
         String crafting = tr("futa_gtnh.gui.crafting");
         fontRendererObj.drawString(
             crafting,
-            ContainerSharedTerminal.ARMOR_X + 9 - fontRendererObj.getStringWidth(crafting) / 2,
+            // 合成栏是 3×3，居中按它自己的宽度算（侧栏比格子窄，不能用 ARMOR_X）
+            ContainerSharedTerminal.CRAFT_X + ContainerSharedTerminal.CRAFT_SLOTS * 9
+                - fontRendererObj.getStringWidth(crafting) / 2,
             ContainerSharedTerminal.CRAFT_LABEL_Y,
             0x404040);
     }
@@ -422,10 +487,11 @@ public class GuiSharedTerminal extends GuiContainer {
         super.mouseClicked(mouseX, mouseY, mouseButton);
         if (searchField != null) {
             boolean before = searchField.isFocused();
+            // GuiTextField.mouseClicked 自己就会按「点在不在框内」决定聚焦还是失焦
+            // （canLoseFocus 默认 true），所以这里不要再补一句 setFocused(true)——
+            // 那样搜索框就永远退不出输入状态了。
             searchField.mouseClicked(mouseX, mouseY, mouseButton);
-            // 搜索框始终保持焦点：否则点到空白处再敲字母会触发快捷键直接关界面
-            searchField.setFocused(true);
-            if (!before) viewDirty = true;
+            if (before != searchField.isFocused()) viewDirty = true;
         }
     }
 

@@ -70,13 +70,33 @@ public class Config {
      * 就算客户端还显示着 20x，实际写进物品的也会被压到上限。
      *
      * <p>
-     * 默认 20 差不多就是<b>专用服务器的物理上限</b>了：飞行终端速度约等于
-     * {@code flySpeed × 9.1} 格/tick，20 倍正好是 9.1 格/tick，而
-     * {@code NetHandlerPlayServer} 在单轴超过 10 格/tick 时会判定
-     * 「moved too quickly」并把你拉回原地。再往上就会开始被拉回
-     * （单人 / 局域网主机不受这条检查限制，所以自己开档感觉不出来）。
+     * <b>专用服务器的硬上限是 18.0，超过就是一个加速都拿不到</b> —— 不是「快一点但
+     * 有点风险」，而是每 tick 都被服务端判定 {@code moved too quickly} 并拉回原地。
+     * 推导（全部来自原版源码）：
+     *
+     * <pre>
+     *   飞行每 tick 水平加速 = flySpeed = 倍率 × 0.05
+     *   飞行水平阻力         = 0.91        （EntityLivingBase.moveEntityWithHeading）
+     *   终端速度             = flySpeed / (1 - 0.91) = 倍率 × 0.5556 格/tick
+     *   服务端判定           = 位移平方和 &gt; 100，即 位移 &gt; 10 格/tick
+     *                          （NetHandlerPlayServer.processPlayer）
+     *   ⇒ 倍率 ≤ 10 / 0.5556 = 18.0
+     * </pre>
+     *
+     * 校验：代倍率 1 进去得 0.556 格/tick = 11.1 格/秒，正好是创造模式飞行的体感。
+     *
+     * <p>
+     * <b>单人存档不受这条限制</b>：那个判定带一个
+     * {@code !isSinglePlayer() || !getServerOwner().equals(playerName)} 的豁免条件，
+     * 自己开档时整条检查会被跳过（所以「单人里好好的、一连服务器就失效」）。
+     * 想在单人里开更快就把这个值调大。
+     *
+     * <p>
+     * 默认 16 是 18 再留一点余量（斜着飞加上垂直分量时位移的平方和会更大）。
+     * 就算这里调得比 18 高，客户端在多人服务器上也会自动压到 18 并在界面上说明，
+     * 不会让玩家对着一个「按了没反应」的速度发呆。
      */
-    public static double swiftStepMaxMultiplier = 20.0D;
+    public static double swiftStepMaxMultiplier = 16.0D;
 
     // ------------------------------------------------------------------
     // 寻物魔杖
@@ -117,6 +137,24 @@ public class Config {
      */
     public static int locatorScanTimeoutTicks = 600;
 
+    /**
+     * 传送找不到现成落脚点时，是否允许<b>就地开一小块地方</b>（清掉玩家身上那两格）。
+     *
+     * <p>
+     * 为什么需要它：目标矿脉十有八九整个埋在实心石头里，周围几十格都没有一处天然
+     * 能站人的地方（这正是「挖矿」的常态）。不允许开洞的话，传送在矿洞里基本用不了。
+     *
+     * <p>
+     * 开洞是<b>有节制的</b>：只在目标附近 ±4 格内找，只清玩家身体那两格，
+     * 而且脚下必须本来就是实心的（不会凭空放方块）、不碰<b>目标方块本身</b>
+     * （免得把你来找的那块矿挖掉）、不碰挖不动的方块、不碰带方块实体的方块
+     * （免得把箱子/机器删成一个幽灵方块）、四周有液体就不开（免得灌进来）。
+     *
+     * <p>
+     * 关掉它就退回旧行为：找不到现成位置就只提示一声、不传送。
+     */
+    public static boolean locatorTeleportCarve = true;
+
     // ------------------------------------------------------------------
     // 界面（客户端行为）
     // ------------------------------------------------------------------
@@ -130,6 +168,19 @@ public class Config {
      * 各端读自己配置文件里的值。
      */
     public static boolean hideNeiPanelInTerminalGui = true;
+
+    // ------------------------------------------------------------------
+    // 匠魂工作站自动补料（服务端行为）
+    // ------------------------------------------------------------------
+
+    /**
+     * 开着匠魂工作站界面时，缺的部件 / 材料自动从共享存储补（见 {@code com.futa_gtnh.tinkers} 包）。
+     *
+     * <p>
+     * 判定和取料都在服务端，所以各端读的是<b>服务端</b>那份配置。只在玩家开着那个工作站的
+     * 界面时才会补，关掉就停 —— 免得变成一个无人看管的自动吞料机。
+     */
+    public static boolean tinkersAutoFill = true;
 
     // ------------------------------------------------------------------
     // 合成
@@ -189,6 +240,12 @@ public class Config {
         enableRecipe = configuration
             .getBoolean("enableRecipe", Configuration.CATEGORY_GENERAL, enableRecipe, "是否注册共享终端的合成配方。");
 
+        tinkersAutoFill = configuration.getBoolean(
+            "tinkersAutoFill",
+            Configuration.CATEGORY_GENERAL,
+            tinkersAutoFill,
+            "开着匠魂工作站界面时，自动从共享存储补上缺的部件/材料（工匠工作站、锻造台、部件加工台、合成站、冶炼炉）。" + "只在界面开着时生效；工作站里什么都没放时不猜、不补。服务端行为。");
+
         enableSwiftStep = configuration.getBoolean(
             "enableSwiftStep",
             Configuration.CATEGORY_GENERAL,
@@ -201,7 +258,7 @@ public class Config {
             (float) swiftStepMaxMultiplier,
             1.0F,
             100.0F,
-            "迅步的速度倍率上限（原版速度的倍数）。实际上限由服务端决定；超过约 20 倍时专用服务器会因「moved too quickly」把人拉回。");
+            "迅步的速度倍率上限（原版速度的倍数）。专用服务器的飞行硬上限是 18.0：超过之后每 tick 都会被服务端判定 moved too quickly 并拉回原地，等于完全没加速。单人存档不受此限制。");
 
         enableLocatorWand = configuration.getBoolean(
             "enableLocatorWand",
@@ -232,6 +289,28 @@ public class Config {
             20,
             72000,
             "一次寻物扫描最多跑多少 tick，超时放弃（兜底，防止任务一直挂在服务端 tick 里）。");
+
+        locatorTeleportCarve = configuration.getBoolean(
+            "locatorTeleportCarve",
+            Configuration.CATEGORY_GENERAL,
+            locatorTeleportCarve,
+            "传送找不到现成落脚点时，是否允许就地清掉玩家身体那两格。" + "只清「没用的方块」（石头/泥土/沙子这类），并且永不碰矿石和木头/玻璃/金属/机器；"
+                + "不碰目标方块本身，也不掉落物品。"
+                + "矿脉大多整个埋在石头里，关掉它传送在矿洞里基本用不了。");
+
+        // 上限调到超过服务器安全值时提醒一句。
+        //
+        // 这个值不是"偏好"，是物理约束：超过去之后飞行速度不是"快一点但有点风险"，
+        // 而是每 tick 都被服务端拉回原地，玩家会觉得"这东西坏了"却查不出原因。
+        float safeFly = com.futa_gtnh.item.ItemSwiftStep.serverSafeFlyMultiplier();
+        if (swiftStepMaxMultiplier > safeFly) {
+            FutaGtnhMod.LOG.warn(
+                "迅步：swiftStepMaxMultiplier={} 超过了专用服务器的飞行安全上限 {}。"
+                    + "超过之后服务端会每 tick 判定 moved too quickly 并把玩家拉回原地，等于完全没加速"
+                    + "（单人存档不受此限制）。客户端在多人服务器上会自动压到安全值。",
+                swiftStepMaxMultiplier,
+                safeFly);
+        }
 
         if (configuration.hasChanged()) {
             configuration.save();

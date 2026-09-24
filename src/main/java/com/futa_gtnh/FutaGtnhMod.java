@@ -85,6 +85,14 @@ public class FutaGtnhMod {
     public void postInit(FMLPostInitializationEvent event) {
         LOG.info("{} postInit", NAME);
         proxy.postInit(event);
+        // 匠魂联动的探测提前做掉：混入是在类加载那一刻生效的，早一点加载
+        // 就能让「已启用」那条日志（以及 mixin 应用失败时的报错）出现在启动阶段，
+        // 而不是等到第一个 tick。匠魂缺席时它会自己安静返回
+        try {
+            com.futa_gtnh.tinkers.TinkersAutoFill.prewarm();
+        } catch (Throwable t) {
+            LOG.warn("匠魂联动预热失败（功能会按缺席处理）", t);
+        }
     }
 
     @Mod.EventHandler
@@ -119,6 +127,13 @@ public class FutaGtnhMod {
     @Mod.EventHandler
     public void loadComplete(cpw.mods.fml.common.event.FMLLoadCompleteEvent event) {
         com.futa_gtnh.locator.OreVeinCatalog.isAvailable();
+        // NEI 是在这个阶段才加载各模组插件的，所以「盖过别的模组注册的 NEI handler」
+        // 这种事要等它之后再补一次（实现只在客户端，见 CommonProxy#lateInit）
+        try {
+            proxy.lateInit();
+        } catch (Throwable t) {
+            LOG.warn("模组加载完成后的联动补充失败（不影响其它功能）", t);
+        }
     }
 
     /** 服务端停止前落盘。此时各维度还没被卸载，写文件是安全的。 */

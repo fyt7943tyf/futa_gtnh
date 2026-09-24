@@ -6,6 +6,7 @@ import com.futa_gtnh.exchange.StorageActionHandler;
 import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.locator.LocatorManager;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.tinkers.TinkersAutoFill;
 
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
@@ -39,6 +40,8 @@ public class ModEventHandler {
         SharedStorageManager.onServerTick();
         // 推进寻物扫描。没有任务时它第一件事就是返回，开销是一次 isEmpty()
         LocatorManager.onServerTick();
+        // 匠魂工作站的自动补料（没装匠魂、或配置关掉时，第一步就返回）
+        TinkersAutoFill.onServerTick();
     }
 
     /** 玩家下线时清掉他那份操作频率计数，避免 UUID 表越积越大。 */
@@ -70,5 +73,11 @@ public class ModEventHandler {
     public void onPlayerTick(TickEvent.PlayerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         ItemSwiftStep.applyWalkSpeedModifier(event.player);
+        // 空中前进速度也要跟着放大，否则「走着 5 倍、一跳起来掉回原版」。
+        //
+        // 这里必须是 END 阶段：EntityPlayer.onLivingUpdate 先在第 612 行做移动、
+        // 第 620 行才把 jumpMovementFactor 从 speedInAir 重置回来，而 END 事件在那之后。
+        // 放到 START 反而会被第 620 行盖掉。
+        ItemSwiftStep.applyAirSpeedModifier(event.player);
     }
 }

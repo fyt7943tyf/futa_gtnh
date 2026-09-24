@@ -37,6 +37,10 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void init(FMLInitializationEvent event) {
         super.init(event);
+
+        // 共享存储面板：匠魂工作站界面开着时画在它下面（画用 Forge 总线，
+        // 点击/键盘走 NEI 的输入钩子，见 StoragePanelEvents 的注释）
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.client.StoragePanelEvents());
     }
 
     @Override
@@ -51,6 +55,21 @@ public class ClientProxy extends CommonProxy {
         // 否则没装 NEI 的环境会在类加载时直接 NoClassDefFoundError。
         if (cpw.mods.fml.common.Loader.isModLoaded("NotEnoughItems")) {
             com.futa_gtnh.client.nei.NeiIntegration.register();
+        }
+    }
+
+    /**
+     * 所有模组都加载完之后再补一次 NEI 联动。
+     *
+     * <p>
+     * NEI 是在 {@code LoadComplete} 阶段才加载各模组插件的，所以「盖过匠魂注册的
+     * NEI 配方转移 handler」这件事必须在 postInit 之后再注册一次，
+     * 否则会被匠魂那边覆盖掉（详见 {@code NeiIntegration#installStationOverlay}）。
+     */
+    @Override
+    public void lateInit() {
+        if (cpw.mods.fml.common.Loader.isModLoaded("NotEnoughItems")) {
+            com.futa_gtnh.client.nei.NeiIntegration.installStationOverlay();
         }
     }
 

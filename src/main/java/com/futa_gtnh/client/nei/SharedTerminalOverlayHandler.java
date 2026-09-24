@@ -34,7 +34,7 @@ import gregtech.api.util.GTUtility;
  * 基类 {@link DefaultOverlayHandler} 那套「数背包 → 模拟点击搬运」整体不用
  * （原因见服务端 {@code CraftFiller} 的类注释）——这里只做三件事：
  * <ol>
- * <li>把 NEI 的 {@link PositionedStack} 布局归一化成 2×2 合成栏的格位，
+ * <li>把 NEI 的 {@link PositionedStack} 布局归一化成 3×3 合成栏的格位，
  * 连同每个位置的候选（矿物词典置换组）打包发给服务端；</li>
  * <li>「材料够不够」的绿红提示（{@link #presenceOverlay}）把
  * <b>背包 + 共享存储</b>算在一起 —— 仓库里有就算够；</li>
@@ -45,13 +45,20 @@ import gregtech.api.util.GTUtility;
 public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
 
     /**
-     * NEI 配方界面里 2×2 配方的材料坐标原点约在 (25, 6)（这也是它自己给原版
-     * 背包界面注册 overlay 用的参照），把我们的合成栏换算过去：
-     * {@code CRAFT_X + 1 - 25} / {@code CRAFT_Y + 1 - 6}。
-     * 只影响 2×2 配方的「幽灵材料指引」叠层的对齐，不影响取料本身。
+     * NEI 配方界面里材料的坐标原点是 (25, 6)（这是 NEI 给原版工作台注册 overlay 时用的
+     * 参照：工作台合成栏在 (30, 17)，而它给的偏移是 (5, 11)，两者相减就是 25 / 6）。
+     * 3×3 与 2×2 配方共用同一个坐标空间（{@code ShapedRecipeHandler.CachedShapedRecipe}
+     * 按配方自身宽高摆材料），所以两种配方能用同一组偏移。
+     *
+     * <p>
+     * 只影响幽灵材料指引叠层的对齐，不影响取料本身 —— 填栏走的是服务端
+     * {@code CraftFiller}，那边按「第几行第几列」归一化，和绝对坐标无关。
      */
     public static final int OVERLAY_OFFSET_X = ContainerSharedTerminal.CRAFT_X + 1 - 25;
     public static final int OVERLAY_OFFSET_Y = ContainerSharedTerminal.CRAFT_Y + 1 - 6;
+
+    /** 合成栏边长（3×3），和容器共用同一组常量。 */
+    private static final int SIDE = ContainerSharedTerminal.CRAFT_SIZE;
 
     /** 每格最多带多少个候选去服务端（矿辞置换组偶尔很长）。 */
     private static final int MAX_CANDIDATES = 16;
@@ -178,14 +185,20 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
     // ==================================================================
 
     /**
-     * 把 NEI 的材料坐标归一化到 2×2 合成栏格位（0=左上 1=右上 2=左下 3=右下）。
+     * 把 NEI 的材料坐标归一化到 3×3 合成栏格位（0=左上 … 8=右下，行优先）。
      *
      * <p>
      * 不同配方处理器给的 relx/rely 基准不一样，所以不按绝对坐标算，而是
-     * 「收集所有出现过的 x 和 y，各取前两个不同值」—— 行列各最多两档才放得进
-     * 2×2，3×3 的配方（比如工作台）在这里直接放弃，和原版背包界面的行为一致。
+     * 「收集所有出现过的 x 和 y，各取前三个不同值」并排成 0/1/2 档：
+     * 3×3（工作台）和 2×2（原版背包那种，会落在左上角 2×2 ——
+     * 原版 {@code ShapedRecipes.matches} 本来就会在整个 3×3 里平移匹配，所以位置合法）
+     * 都能填；行列超过三档的（某些 GT 多方块配方）直接放弃，免得摆出个错的形状。
+     *
+     * <p>
+     * 可见性是 protected：合成站那边的 {@code StationOverlayHandler} 直接复用这一套
+     * （合成站也是 3×3，归一化规则一模一样），见那个类的说明。
      */
-    private NBTTagCompound buildLayout(IRecipeHandler recipe, int recipeIndex) {
+    protected NBTTagCompound buildLayout(IRecipeHandler recipe, int recipeIndex) {
         List<PositionedStack> ingredients = recipe.getIngredientStacks(recipeIndex);
         if (ingredients == null || ingredients.isEmpty()) return null;
 
@@ -197,7 +210,7 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
             if (!columnRanks.containsKey(positioned.relx)) columnRanks.put(positioned.relx, 0);
             if (!rowRanks.containsKey(positioned.rely)) rowRanks.put(positioned.rely, 0);
         }
-        if (columnRanks.size() > 2 || rowRanks.size() > 2) return null;
+        if (columnRanks.size() > SIDE || rowRanks.size() > SIDE) return null;
 
         int rank = 0;
         for (int key : columnRanks.keySet()) {
@@ -209,13 +222,13 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
         }
 
         NBTTagList slotList = new NBTTagList();
-        NBTTagCompound[] perSlot = { null, null, null, null };
+        NBTTagCompound[] perSlot = new NBTTagCompound[SIDE * SIDE];
 
         for (PositionedStack positioned : ingredients) {
             if (positioned == null || positioned.items == null || positioned.items.length == 0) continue;
 
-            int index = rowRanks.get(positioned.rely) * 2 + columnRanks.get(positioned.relx);
-            if (index < 0 || index >= 4) continue;
+            int index = rowRanks.get(positioned.rely) * SIDE + columnRanks.get(positioned.relx);
+            if (index < 0 || index >= perSlot.length) continue;
 
             if (perSlot[index] == null) {
                 NBTTagCompound slot = new NBTTagCompound();

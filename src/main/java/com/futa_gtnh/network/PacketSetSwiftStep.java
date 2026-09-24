@@ -35,26 +35,37 @@ public class PacketSetSwiftStep implements IMessage {
     /** 表示「这一项别动」。取值必须在合法倍率区间之外，用负数最直观。 */
     public static final float UNCHANGED = -1.0F;
 
+    /** 照明那一项的「别动」标记（合法亮度是 0~15）。 */
+    public static final int LIGHT_UNCHANGED = -1;
+
     private float flightMultiplier;
     private float walkMultiplier;
+    private int lightLevel;
 
     public PacketSetSwiftStep() {}
 
     public PacketSetSwiftStep(float flightMultiplier, float walkMultiplier) {
+        this(flightMultiplier, walkMultiplier, LIGHT_UNCHANGED);
+    }
+
+    public PacketSetSwiftStep(float flightMultiplier, float walkMultiplier, int lightLevel) {
         this.flightMultiplier = flightMultiplier;
         this.walkMultiplier = walkMultiplier;
+        this.lightLevel = lightLevel;
     }
 
     @Override
     public void fromBytes(ByteBuf buf) {
         flightMultiplier = buf.readFloat();
         walkMultiplier = buf.readFloat();
+        lightLevel = buf.readInt();
     }
 
     @Override
     public void toBytes(ByteBuf buf) {
         buf.writeFloat(flightMultiplier);
         buf.writeFloat(walkMultiplier);
+        buf.writeInt(lightLevel);
     }
 
     public static class Handler implements IMessageHandler<PacketSetSwiftStep, IMessage> {
@@ -72,6 +83,9 @@ public class PacketSetSwiftStep implements IMessage {
             }
             if (message.walkMultiplier != UNCHANGED) {
                 ItemSwiftStep.setWalkMultiplier(held, message.walkMultiplier);
+            }
+            if (message.lightLevel != LIGHT_UNCHANGED) {
+                ItemSwiftStep.setLightLevel(held, message.lightLevel);
             }
             return null;
         }

@@ -58,7 +58,7 @@ public class PacketStorageAction implements IMessage {
      *
      * <p>
      * 需要单独一个动作，是因为合成栏<b>不在玩家背包里</b>：
-     * 1.7.10 的 2×2 合成栏是 {@code ContainerPlayer} 私有的 {@code InventoryCrafting}，
+     * 1.7.10 原版背包的 2×2 合成栏是 {@code ContainerPlayer} 私有的 {@code InventoryCrafting}，
      * 我们自己的容器同理。所以它没法用 {@code DEPOSIT_INV_SLOT} 那套
      * 「玩家背包索引 0..39」的编号表达，服务端得去操作自己容器里的那个合成栏。
      */
@@ -77,13 +77,22 @@ public class PacketStorageAction implements IMessage {
      */
     public static final byte DRAIN_CURSOR = 16;
 
+    /**
+     * 把共享存储里的条目<b>取到光标上</b>（共享存储面板里左键点一下的效果）。
+     *
+     * <p>
+     * 和 {@link #WITHDRAW_ITEM} 的区别只在「落到哪里」：那个是直接写进玩家背包，
+     * 这个放在光标上 —— 面板要的就是「像从箱子里拿出来」的手感。
+     */
+    public static final byte WITHDRAW_TO_CURSOR = 17;
+
     // ---- 终端 ----
     /** 设置方块终端往相邻管道/流体罐输出的流体。 */
     public static final byte SET_TERMINAL_FLUID = 20;
 
     // ---- NEI 合成联动 ----
     /**
-     * 按客户端发来的布局填充 2×2 合成栏：材料优先从玩家背包取，不够的从共享存储取。
+     * 按客户端发来的布局填充终端界面的 3×3 合成栏：材料优先从玩家背包取，不够的从共享存储取。
      * 布局（候选 + 每格数量）放在 {@link #keyTag} 里，见 {@link #fillCraft}。
      * {@link #amount} 是倍率：{@code <= 0} 表示「尽量填满」（每格填到堆叠上限）。
      */

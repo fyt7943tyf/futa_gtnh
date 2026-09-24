@@ -55,6 +55,22 @@ public class ItemSwiftStep extends Item implements IBauble {
 
     private static final String TAG_FLIGHT = "futa_gtnh.swift_step.flight";
     private static final String TAG_WALK = "futa_gtnh.swift_step.walk";
+    private static final String TAG_LIGHT = "futa_gtnh.swift_step.light";
+
+    /**
+     * 照明亮度的默认值：<b>0 = 不亮</b>。
+     *
+     * <p>
+     * 默认关着，是因为它会在客户端脚下放一个隐形的发光方块 ——
+     * 玩家没要求就别替他把世界点亮。
+     */
+    public static final int DEFAULT_LIGHT = 0;
+
+    /** 照明亮度上限 = 原版光照上限（火把是 14）。 */
+    public static final int MAX_LIGHT = 15;
+
+    /** 原版火把的亮度，界面里当参照用。 */
+    public static final int TORCH_LIGHT = 14;
 
     /** 没调过时的默认倍率（1.0 = 原版速度）。 */
     public static final float DEFAULT_MULTIPLIER = 1.0F;
@@ -67,6 +83,106 @@ public class ItemSwiftStep extends Item implements IBauble {
 
     /** 原版移动速度（= {@code PlayerCapabilities.walkSpeed} 的默认值）。 */
     public static final float VANILLA_WALK_SPEED = 0.1F;
+
+    /**
+     * 飞行时每 tick 的水平阻力。
+     *
+     * <p>
+     * 取自 {@code EntityLivingBase.moveEntityWithHeading}：玩家在飞行时那两个分支
+     * （水中、岩浆）都会被 {@code !capabilities.isFlying} 挡掉，走的是最后那条
+     * {@code f2 = 0.91F} 的路，末尾 {@code motionX *= 0.91; motionZ *= 0.91}。
+     */
+    private static final double FLY_HORIZONTAL_DRAG = 0.91D;
+
+    /**
+     * 飞行终端速度相对 {@code flySpeed} 的倍数 = {@code 1 / (1 - 0.91) ≈ 11.11}。
+     *
+     * <p>
+     * 水平速度是个等比级数：每 tick 先加速 {@code flySpeed}，再乘 0.91，
+     * 收敛到 {@code flySpeed / 0.09}。所以
+     * <b>每 tick 位移 = 倍率 × 0.05 × 11.11 = 倍率 × 0.5556 格</b>。
+     *
+     * <p>
+     * 原版 1 倍代进去是 0.556 格/tick = 11.1 格/秒 —— 正好对上创造模式飞行的体感，
+     * 可以用来校验这个系数没算错。
+     */
+    public static final double FLY_TERMINAL_FACTOR = 1.0D / (1.0D - FLY_HORIZONTAL_DRAG);
+
+    /**
+     * 服务端允许的每 tick 位移上限（格）。
+     *
+     * <p>
+     * 来自 {@code NetHandlerPlayServer.processPlayer}：
+     *
+     * <pre>
+     * double d10 = d7*d7 + d8*d8 + d9*d9;   // 每轴取 max(|位移|, |motion|)
+     * if (d10 &gt; 100.0D &amp;&amp; (!serverController.isSinglePlayer()
+     *                      || !serverController.getServerOwner().equals(playerName))) {
+     *     logger.warn("... moved too quickly! ...");
+     *     this.setPlayerLocation(lastPosX, lastPosY, lastPosZ, ...);   // 拉回原地
+     *     return;
+     * }
+     * </pre>
+     *
+     * {@code d10} 就是位移的平方和，所以 {@code > 100} 等价于
+     * <b>每 tick 移动超过 10 格</b>（不分方向，斜着飞也一样）。
+     *
+     * <p>
+     * <b>注意那个 {@code isSinglePlayer} 条件：单人存档里只要你就是房主，
+     * 整条检查会被跳过。</b>这就是「自己开档感觉不出来、一连服务器就失效」的原因。
+     */
+    private static final double SERVER_MAX_BLOCKS_PER_TICK = 10.0D;
+
+    /**
+     * 专用服务器上不会被拉回的最大飞行倍率。
+     *
+     * <p>
+     * 解 {@code 倍率 × 0.05 × 11.11 ≤ 10} 得 {@code 倍率 ≤ 18.0}。
+     * 这是<b>物理上限，不是偏好</b>：超过它的飞行速度不是「快一点但有点风险」，
+     * 而是<b>每 tick 都被服务端拉回原地，等于完全没加速</b>。
+     *
+     * <p>
+     * 所以默认上限取的是比它低一点的 16（留出垂直分量的余量）。
+     */
+    public static float serverSafeFlyMultiplier() {
+        return (float) (SERVER_MAX_BLOCKS_PER_TICK / (VANILLA_FLY_SPEED * FLY_TERMINAL_FACTOR));
+    }
+
+    /**
+     * 原版空中前进的加速度（{@code EntityLivingBase.jumpMovementFactor} 的默认值）。
+     *
+     * <p>
+     * <b>为什么空中要单独处理：</b>{@code EntityLivingBase.moveEntityWithHeading}
+     * 里地面和空中用的是两个完全不同的量 ——
+     *
+     * <pre>
+     *   地面：f4 = getAIMoveSpeed() * 0.16277136 / (阻力³)
+     *   空中：f4 = jumpMovementFactor
+     * </pre>
+     *
+     * 地面的那个来自「移动速度属性」，所以 {@link #applyWalkSpeedModifier} 一放大，
+     * 走路就快了。但 {@code jumpMovementFactor} 是 {@code EntityLivingBase} 上的一个
+     * 常量字段，和属性没有任何关系 —— 于是会出现
+     * <b>「走着 5 倍，一跳起来就掉回原版速度」</b>。
+     *
+     * <p>
+     * 数值上两者本来是配平的：原版地面终端速度
+     * {@code 0.1 * 1.0 / (1 - 0.546) ≈ 0.2203} 格/tick，空中
+     * {@code 0.02 / (1 - 0.91) ≈ 0.2222}，基本相等。所以把
+     * {@code jumpMovementFactor} 按同一个倍率放大，就又配平了。
+     */
+    public static final float VANILLA_JUMP_MOVEMENT_FACTOR = 0.02F;
+
+    /**
+     * 疾跑时原版给空中加速度的额外加成。
+     *
+     * <p>
+     * 见 {@code EntityPlayer.onLivingUpdate}：
+     * {@code if (isSprinting()) jumpMovementFactor += speedInAir * 0.3F}。
+     * 我们整个覆写这个字段，所以要自己把这 30% 补回去，
+     * 否则「疾跑跳」会比原版还慢。
+     */
+    private static final float SPRINT_AIR_BONUS = 1.3F;
 
     /**
      * 移动速度修饰符的固定 UUID。
@@ -125,6 +241,48 @@ public class ItemSwiftStep extends Item implements IBauble {
         writeMultiplier(stack, TAG_WALK, value);
     }
 
+    // ==================================================================
+    // 照明亮度（0 = 关）
+    // ==================================================================
+
+    /**
+     * @return 这个迅步的照明亮度（0 = 不亮，1~15 是光照等级）
+     */
+    public static int getLightLevel(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return DEFAULT_LIGHT;
+        NBTTagCompound tag = stack.getTagCompound();
+        if (tag == null || !tag.hasKey(TAG_LIGHT)) return DEFAULT_LIGHT;
+        return clampLight(tag.getInteger(TAG_LIGHT));
+    }
+
+    public static void setLightLevel(ItemStack stack, int value) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) {
+            stack.setTagCompound(new NBTTagCompound());
+        }
+        stack.getTagCompound()
+            .setInteger(TAG_LIGHT, clampLight(value));
+    }
+
+    /**
+     * 夹到 0~15。
+     *
+     * <p>
+     * 和倍率一样：客户端的数字一律不信，服务端收到包之后要再夹一次。
+     * 交给光照引擎一个 16 以上的值会溢出到元数据的高位，那已经不是「亮一点」了。
+     */
+    public static int clampLight(int value) {
+        if (value < 0) return DEFAULT_LIGHT;
+        return Math.min(value, MAX_LIGHT);
+    }
+
+    /** @return 给日志/提示用的一句话，例如「14（火把）」或「关」 */
+    public static String describeLight(int level) {
+        if (level <= 0) return "关";
+        if (level >= TORCH_LIGHT) return level + "（" + (level == TORCH_LIGHT ? "火把" : "最亮") + "）";
+        return Integer.toString(level);
+    }
+
     private static float readMultiplier(ItemStack stack, String key) {
         if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return DEFAULT_MULTIPLIER;
         NBTTagCompound tag = stack.getTagCompound();
@@ -160,7 +318,7 @@ public class ItemSwiftStep extends Item implements IBauble {
     /** @return 配置里的倍率上限。配置读失败时退回一个保守值，免得算出 NaN。 */
     public static float maxMultiplier() {
         float configured = (float) Config.swiftStepMaxMultiplier;
-        if (Float.isNaN(configured) || configured < MIN_MULTIPLIER) return 20.0F;
+        if (Float.isNaN(configured) || configured < MIN_MULTIPLIER) return 16.0F;
         return configured;
     }
 
@@ -225,6 +383,47 @@ public class ItemSwiftStep extends Item implements IBauble {
         if (wanted && existing == null) {
             instance
                 .applyModifier(new AttributeModifier(WALK_MODIFIER_ID, WALK_MODIFIER_NAME, amount, OP_MULTIPLY_BASE));
+        }
+    }
+
+    /**
+     * 让空中的前进速度和地面上的移动速度保持一致。
+     *
+     * <p>
+     * 直接写 {@code EntityLivingBase.jumpMovementFactor} —— 那是个 <b>public 字段</b>，
+     * 不需要碰任何私有成员，也不涉及 {@code capabilities} 那套只在客户端存在的 API。
+     *
+     * <p>
+     * <b>时序是安全的，而且不需要每 tick 抢：</b>
+     * {@code EntityPlayer.onLivingUpdate} 里先在第 612 行做移动、第 620 行才把
+     * {@code jumpMovementFactor} 从 {@code speedInAir} 重置回来；而
+     * {@code PlayerTickEvent(END)} 在那之后。所以我们写的值会一直保留到
+     * <b>下一 tick 的移动</b>时被读到。这也正是「走路快、跳起来慢」的补法：
+     * 地面那半边由属性负责，空中这半边由这里负责。
+     *
+     * <p>
+     * <b>摘掉饰品不需要还原逻辑。</b>没有迅步时我们什么都不写，而原版第 620 行
+     * 每 tick 都会把字段重置成 {@code speedInAir}（0.02 / 疾跑 0.026），
+     * 自己就回到原样了。反过来特意去写 0.02 反而会在别的模组也调这个字段时打架。
+     *
+     * <p>
+     * 飞行时不用担心被覆盖：{@code EntityPlayer.moveEntityWithHeading} 会在飞行的
+     * 那一段临时把它换成 {@code flySpeed}，出来再换回来，我们的值不受影响。
+     */
+    public static void applyAirSpeedModifier(EntityPlayer player) {
+        if (player == null) return;
+
+        ItemStack charm = findEquipped(player);
+        float multiplier = charm == null ? DEFAULT_MULTIPLIER : getWalkMultiplier(charm);
+        // 没超速就完全不碰这个字段，让原版自己管（见上面的说明）
+        if (multiplier <= DEFAULT_MULTIPLIER + 1.0E-4F) return;
+
+        float wanted = VANILLA_JUMP_MOVEMENT_FACTOR * multiplier;
+        if (player.isSprinting()) {
+            wanted *= SPRINT_AIR_BONUS;
+        }
+        if (Math.abs(player.jumpMovementFactor - wanted) > 1.0E-5F) {
+            player.jumpMovementFactor = wanted;
         }
     }
 
@@ -335,8 +534,9 @@ public class ItemSwiftStep extends Item implements IBauble {
 
     @Override
     public boolean hasEffect(ItemStack stack, int pass) {
-        // 附魔光效：一眼能看出这个迅步是「调过速度的」
-        return getFlightMultiplier(stack) > DEFAULT_MULTIPLIER || getWalkMultiplier(stack) > DEFAULT_MULTIPLIER;
+        // 附魔光效：一眼能看出这个迅步是「调过的」
+        return getFlightMultiplier(stack) > DEFAULT_MULTIPLIER || getWalkMultiplier(stack) > DEFAULT_MULTIPLIER
+            || getLightLevel(stack) > 0;
     }
 
     @Override
@@ -351,9 +551,31 @@ public class ItemSwiftStep extends Item implements IBauble {
                 "item.futa_gtnh.swift_step.tooltip.walk",
                 fixed(getWalkMultiplier(stack), 2)));
         tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector
+                .translateToLocalFormatted("item.futa_gtnh.swift_step.tooltip.light", describeLightLocalized(stack)));
+        tooltip.add(
+            EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.air"));
+        tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.gui"));
         tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.equip"));
+    }
+
+    /**
+     * 照明那一行的取值部分（会被翻译键套进去）。
+     *
+     * <p>
+     * 和 {@link #describeLight} 的区别：这里要出<b>可翻译</b>的文字
+     * （「关」/「火把」在英文客户端上得是 Off / torch），
+     * 方法名里的 Localized 就是提醒这一点。
+     */
+    public static String describeLightLocalized(ItemStack stack) {
+        int level = getLightLevel(stack);
+        if (level <= 0) return StatCollector.translateToLocal("item.futa_gtnh.swift_step.light.off");
+        if (level == TORCH_LIGHT) {
+            return StatCollector.translateToLocalFormatted("item.futa_gtnh.swift_step.light.torch", level);
+        }
+        return Integer.toString(level);
     }
 
     private static String fixed(float value, int decimals) {
