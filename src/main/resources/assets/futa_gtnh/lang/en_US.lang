@@ -109,3 +109,46 @@ item.futa_gtnh.swift_step.light.torch=torch (%s)
 item.futa_gtnh.swift_step.light.torch_short=torch
 futa_gtnh.swift_step.gui.light=Light level (0 = off)
 futa_gtnh.swift_step.gui.light.note=lights up only; mobs still spawn
+
+# --- RTS build mode ---
+key.futa_gtnh.rts_toggle=Toggle RTS build mode
+futa_gtnh.rts.msg.disabled=RTS build mode is disabled on this server
+futa_gtnh.rts.hud.title=RTS Build Mode
+futa_gtnh.rts.hud.exit=G / ESC to exit
+futa_gtnh.rts.hud.move=Camera: WASD pan Q/E turn Space/Shift up-down wheel zoom MMB-drag rotate RMB-drag pan
+futa_gtnh.rts.hud.mouse=Actions: LMB break (drag=paint) RMB use/place Shift+RMB sneak Ctrl+RMB-drag paint-place
+futa_gtnh.rts.hud.radius=Action radius %s blocks
+futa_gtnh.rts.msg.wrong_tool=Tool not good enough: this block needs a better tool
+futa_gtnh.rts.msg.unbreakable=This block is unbreakable
+futa_gtnh.rts.hud.keys=R rotate | Ctrl+Z undo | Ctrl+Y redo
+futa_gtnh.rts.mode.build=Build
+futa_gtnh.rts.mode.destroy=Destroy
+futa_gtnh.rts.shape.line=Line
+futa_gtnh.rts.shape.wall=Wall
+futa_gtnh.rts.shape.plane=Plane
+futa_gtnh.rts.shape.circle=Circle
+futa_gtnh.rts.shape.cylinder=Cylinder
+futa_gtnh.rts.shape.sphere=Sphere
+futa_gtnh.rts.shape.box=Box
+futa_gtnh.rts.fill.solid=Solid
+futa_gtnh.rts.fill.hollow=Hollow
+futa_gtnh.rts.fill.wireframe=Wireframe
+futa_gtnh.rts.hud.shape=Shape %s (B) | Fill %s (F) | %s (V)
+futa_gtnh.rts.hud.select=Points Ctrl+LMB A->B: %s | Enter confirm | C clear
+futa_gtnh.rts.hud.select.none=none
+futa_gtnh.rts.hud.select.half=A set
+futa_gtnh.rts.hud.select.ready=ready (~%s blocks)
+futa_gtnh.rts.msg.too_large_axis=Shape too large: max %s blocks per axis
+futa_gtnh.rts.msg.too_large_volume=Volume limit exceeded: max %s blocks
+futa_gtnh.rts.msg.too_large_local=Shape/volume exceeds limits
+futa_gtnh.rts.msg.need_itemblock=Quick build needs a block item in hand
+futa_gtnh.rts.msg.batch_started_build=Batch build started: %s blocks (materials: inventory first, then shared storage)
+futa_gtnh.rts.msg.batch_started_destroy=Area destroy started: %s blocks
+futa_gtnh.rts.msg.batch_out_of_material=Out of materials: stopped after placing %s blocks
+futa_gtnh.rts.msg.batch_done_build=Batch build done: placed %s (skipped %s)
+futa_gtnh.rts.msg.batch_done_destroy=Area destroy done: broke %s (skipped %s)
+futa_gtnh.rts.msg.undo=Undid changes on %s blocks
+futa_gtnh.rts.msg.redo=Redid changes on %s blocks
+futa_gtnh.rts.msg.nothing_to_undo=Nothing to undo
+futa_gtnh.rts.msg.nothing_to_redo=Nothing to redo
+futa_gtnh.rts.msg.cannot_rotate=This block cannot be rotated

@@ -32,6 +32,11 @@ public class ClientProxy extends CommonProxy {
         // 世界渲染事件在 MinecraftForge.EVENT_BUS 上，不在 FML 的那条总线上。
         // 挂错了不会报错，只会永远收不到事件 —— 光渲染器会安静地什么都不画。
         MinecraftForge.EVENT_BUS.register(new LocatorBeamRenderer());
+        MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.rts.client.RtsOverlayRenderer());
+
+        // 俯瞰模式的客户端 tick（相机推进/守卫）。TickEvent 在 FML 总线上，
+        // 和 KeyHandler 的 Listener 同一条，见 RtsClientTickHandler 的类注释
+        com.futa_gtnh.rts.client.RtsClientTickHandler.register();
     }
 
     @Override
@@ -111,5 +116,19 @@ public class ClientProxy extends CommonProxy {
     public void clearLocatorTracking() {
         LocatorState.clear();
         NetworkHandler.INSTANCE.sendToServer(new PacketLocatorAction(PacketLocatorAction.CANCEL));
+    }
+
+    /**
+     * 服务端拒绝了俯瞰模式的开启请求：把客户端退回正常状态并提示原因。
+     *
+     * <p>
+     * 由 {@code PacketRtsToggleAck} 的 handler 调用。放在代理里是本项目的
+     * 老规矩：公共的网络包类不能直接引用 {@code net.minecraft.client.*}。
+     *
+     * @param reasonKey 语言键，null 表示服务端没给原因
+     */
+    @Override
+    public void onRtsToggleRejected(String reasonKey) {
+        com.futa_gtnh.rts.client.RtsClientState.onServerRejected(reasonKey);
     }
 }

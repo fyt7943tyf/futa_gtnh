@@ -42,6 +42,12 @@ public class ModEventHandler {
         LocatorManager.onServerTick();
         // 匠魂工作站的自动补料（没装匠魂、或配置关掉时，第一步就返回）
         TinkersAutoFill.onServerTick();
+        // 俯瞰模式的单块操作限频计数清零（同样是空表时一次 isEmpty 的开销）
+        com.futa_gtnh.rts.server.RtsActionGuard.tick();
+        // 推进俯瞰批量任务（同上，空表即返回）
+        com.futa_gtnh.rts.server.RtsBatchEngine.onServerTick();
+        // 撤销/重做的方块写回也按预算推进（同上）
+        com.futa_gtnh.rts.server.RtsHistoryManager.onServerTick();
     }
 
     /** 玩家下线时清掉他那份操作频率计数，避免 UUID 表越积越大。 */
@@ -53,6 +59,13 @@ public class ModEventHandler {
             // 寻物任务和结果也一起清掉：任务里存着 World 引用，
             // 玩家走了还留着的话，那个 World 就没法被回收了
             LocatorManager.forget(player.getUniqueID());
+            // 俯瞰会话的登记也一样要清
+            com.futa_gtnh.rts.RtsSessionManager.forget(player.getUniqueID());
+            com.futa_gtnh.rts.server.RtsActionGuard.forget(player.getUniqueID());
+            com.futa_gtnh.rts.server.RtsRemoteGuiRegistry.forget(player.getUniqueID());
+            // 批量任务持有玩家引用（进而持有 World），不清就泄漏
+            com.futa_gtnh.rts.server.RtsBatchEngine.forget(player.getUniqueID());
+            com.futa_gtnh.rts.server.RtsHistoryManager.forget(player.getUniqueID());
         }
     }
 
