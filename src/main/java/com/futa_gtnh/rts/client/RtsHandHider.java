@@ -22,14 +22,27 @@ import cpw.mods.fml.common.eventhandler.SubscribeEvent;
  */
 public class RtsHandHider {
 
+    /** 上一次的会话状态，用于只在状态变化时打一条诊断日志（renderHand 每帧都来）。 */
+    private static boolean lastActive;
+
     public static void register() {
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(new RtsHandHider());
     }
 
     @SubscribeEvent
     public void onRenderHand(RenderHandEvent event) {
-        if (RtsClientState.isActive()) {
+        boolean active = RtsClientState.isActive();
+        if (active) {
             event.setCanceled(true);
+        }
+        // 诊断日志：1.3.1 真机上事件取消未生效（手臂仍显示），根因未定位。
+        // 这两条日志能区分「事件根本没来」「来了但 isActive 为假」两种情形，
+        // 由 enableDebugLogging 门控，平时零输出。
+        if (active != lastActive) {
+            lastActive = active;
+            if (com.futa_gtnh.Config.enableDebugLogging) {
+                com.futa_gtnh.FutaGtnhMod.LOG.info("俯瞰手臂隐藏：会话状态变化 active={}", active);
+            }
         }
     }
 }

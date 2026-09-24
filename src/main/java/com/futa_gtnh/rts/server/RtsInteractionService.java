@@ -47,16 +47,47 @@ public final class RtsInteractionService {
      * @param dirX/dirY/dirZ 客户端射线方向（用于反推虚拟眼位）
      * @param sneak          按住 Shift 的「潜行右键」语义（原版里潜行右键会跳过方块
      *                       互动、直接用物品 —— 比如潜行右键箱子放火把）
+     * @param interactOnly   互动模式的「只互动、不放置」：先跑方块 onBlockActivated
+     *                       （开 GUI/互动），未消费且手持<b>非方块物品</b>时才落到
+     *                       完整物品使用链（骨粉/桶/GT 扳手）；方块物品永不放置
      */
     public static void handleUseBlock(EntityPlayerMP player, int x, int y, int z, int side, float hitX, float hitY,
-        float hitZ, double dirX, double dirY, double dirZ, boolean sneak) {
+        float hitZ, double dirX, double dirY, double dirZ, boolean sneak, boolean interactOnly) {
         // 命中点世界坐标：方块原点 + 面内偏移
         double worldHitX = x + hitX;
         double worldHitY = y + hitY;
         double worldHitZ = z + hitZ;
 
         ContainerSnapshot containers = new ContainerSnapshot(player);
-        ItemStack held = player.getCurrentEquippedItem();
+        final ItemStack held = player.getCurrentEquippedItem();
+
+        final Runnable action;
+        if (interactOnly) {
+            action = new Runnable() {
+
+                @Override
+                public void run() {
+                    net.minecraft.world.World world = player.worldObj;
+                    net.minecraft.block.Block block = world.getBlock(x, y, z);
+                    boolean consumed = block.onBlockActivated(world, x, y, z, player, side, hitX, hitY, hitZ);
+                    if (!consumed && held != null && !(held.getItem() instanceof net.minecraft.item.ItemBlock)) {
+                        // 非方块物品才走完整使用链（含 GT 工具的 onItemUseFirst 优先级）；
+                        // 方块物品在这里会被放置，所以必须挡在 instanceof 上
+                        player.theItemInWorldManager
+                            .activateBlockOrUseItem(player, world, held, x, y, z, side, hitX, hitY, hitZ);
+                    }
+                }
+            };
+        } else {
+            action = new Runnable() {
+
+                @Override
+                public void run() {
+                    player.theItemInWorldManager
+                        .activateBlockOrUseItem(player, player.worldObj, held, x, y, z, side, hitX, hitY, hitZ);
+                }
+            };
+        }
 
         TemporaryContextSwitcher.withVirtualEye(
             player,
@@ -71,14 +102,7 @@ public final class RtsInteractionService {
 
                 @Override
                 public void run() {
-                    TemporaryContextSwitcher.withSneaking(player, sneak, new Runnable() {
-
-                        @Override
-                        public void run() {
-                            player.theItemInWorldManager
-                                .activateBlockOrUseItem(player, player.worldObj, held, x, y, z, side, hitX, hitY, hitZ);
-                        }
-                    });
+                    TemporaryContextSwitcher.withSneaking(player, sneak, action);
                 }
             });
         containers.captureOpened(player);

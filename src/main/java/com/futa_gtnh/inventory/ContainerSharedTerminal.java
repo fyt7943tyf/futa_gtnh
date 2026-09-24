@@ -697,7 +697,7 @@ public class ContainerSharedTerminal extends Container {
      * 所以单独一个动作，让服务端去操作自己那个 {@code craftMatrix}。</li>
      * </ul>
      */
-    private void sendDepositFromSlot(int containerSlot, long amount) {
+    public void sendDepositFromSlot(int containerSlot, long amount) {
         int playerIndex = toPlayerSlotIndex(containerSlot);
         if (playerIndex >= 0) {
             NetworkHandler.INSTANCE.sendToServer(
