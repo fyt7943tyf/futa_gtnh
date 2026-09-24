@@ -32,6 +32,10 @@ public final class RtsActionGuard {
 
     private static final Map<UUID, Integer> OPS_THIS_TICK = new HashMap<>();
 
+    /** 拒绝提示的每玩家冷却（毫秒）：拒绝可以频繁发生，提示不能刷屏。 */
+    private static final long HINT_COOLDOWN_MS = 5000L;
+    private static final Map<UUID, Long> LAST_HINT_AT = new HashMap<>();
+
     /** 服务端 tick END 调：清零本 tick 的操作计数。 */
     public static void tick() {
         OPS_THIS_TICK.clear();
@@ -39,7 +43,23 @@ public final class RtsActionGuard {
 
     /** 玩家下线时清掉，避免 UUID 表泄漏。 */
     public static void forget(UUID id) {
-        if (id != null) OPS_THIS_TICK.remove(id);
+        if (id != null) {
+            OPS_THIS_TICK.remove(id);
+            LAST_HINT_AT.remove(id);
+        }
+    }
+
+    /**
+     * 发一条「操作被拒绝」的本地化提示，带每玩家冷却 —— 1.3.0 里所有拒绝都
+     * 静默（上机反馈「点了没反应」的来源之一），现在至少让玩家知道为什么。
+     */
+    public static void notifyRejected(EntityPlayerMP player, String langKey) {
+        if (player == null) return;
+        long now = System.currentTimeMillis();
+        Long last = LAST_HINT_AT.get(player.getUniqueID());
+        if (last != null && now - last < HINT_COOLDOWN_MS) return;
+        LAST_HINT_AT.put(player.getUniqueID(), now);
+        player.addChatMessage(new net.minecraft.util.ChatComponentTranslation(langKey));
     }
 
     /** 目标坐标是否在玩家的操作范围内（立方体判定，三轴同半径）。 */
@@ -50,18 +70,27 @@ public final class RtsActionGuard {
     }
 
     /**
-     * 消费一次操作额度：没开俯瞰会话、或本 tick 已用完额度时返回 false。
+     * 消费一次操作额度：没开俯瞰会话、或本 tick 已用完额度时返回 false
+     * 并给玩家一条带冷却的提示。
      *
      * <p>
      * 会话门控也放这里（而不是只放在包 handler 里），让「必须开着俯瞰模式
-     * 才能发动作包」这条规则只有一份实现、不会被哪张新包漏掉。
+     * 才能发动作包」这条规则只有一份实现、不会被哪张新包漏掉。会话失效的
+     * 提示尤其重要：1.3.0 里 ACK 丢失会让客户端还在俯瞰、服务端没有会话，
+     * 之后所有操作静默失效 —— 玩家毫无头绪。
      */
     public static boolean tryConsume(EntityPlayerMP player) {
         if (player == null) return false;
-        if (!com.futa_gtnh.rts.RtsSessionManager.isActive(player)) return false;
+        if (!com.futa_gtnh.rts.RtsSessionManager.isActive(player)) {
+            notifyRejected(player, "futa_gtnh.rts.msg.no_session");
+            return false;
+        }
 
         int used = OPS_THIS_TICK.getOrDefault(player.getUniqueID(), 0);
-        if (used >= Config.rtsOpsPerTickPerPlayer) return false;
+        if (used >= Config.rtsOpsPerTickPerPlayer) {
+            notifyRejected(player, "futa_gtnh.rts.msg.rate_limited");
+            return false;
+        }
         OPS_THIS_TICK.put(player.getUniqueID(), used + 1);
         return true;
     }

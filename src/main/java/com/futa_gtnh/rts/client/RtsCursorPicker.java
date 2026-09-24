@@ -88,10 +88,9 @@ public final class RtsCursorPicker {
             .createVectorHelper(origin[0] + dir[0] * range, origin[1] + dir[1] * range, origin[2] + dir[2] * range);
 
         // --- 方块命中 -------------------------------------------------------
-        // 本工程的映射里 5 参版本没有 MCP 名，照 Et-Futurum 的写法直接用 SRG 名：
-        // (from, to, stopOnLiquid=false, ignoreBlockWithoutBoundingBox=false,
-        // returnLastUncollidable=false) —— 与原版准星同款参数
-        MovingObjectPosition blockHit = world.func_147447_a/* rayTraceBlocks */(from, to, false, false, false);
+        // 2 参重载 = (from, to, stopOnLiquid=false, ignoreBlockWithoutBoundingBox=false,
+        // returnLastUncollidable=false)，与原版准星同款参数（原版实现就是这三参委托）
+        MovingObjectPosition blockHit = world.rayTraceBlocks(from, to);
         double blockDist = Double.MAX_VALUE;
         if (blockHit != null && blockHit.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK
             && blockHit.hitVec != null) {
@@ -100,28 +99,35 @@ public final class RtsCursorPicker {
             blockHit = null;
         }
 
-        // --- 实体命中 -------------------------------------------------------
+        // --- 实体命中：沿射线步进采样 ----------------------------------------
+        // 1.3.0 用整条射线的大 AABB 一次查询（边长可达 2×128 格），每帧跑一次在
+        // 实体密集场景明显掉帧。改为沿射线每 4 格取样一个 ±4 盒子逐段查询：
+        // 覆盖连续、开销有界；一旦已找到的实体入射距离不大于当前段起点即可停
+        // （更远的段里不可能有更近的命中）。
         Entity nearestEntity = null;
         double entityDist = Double.MAX_VALUE;
         double entityHitX = 0, entityHitY = 0, entityHitZ = 0;
-        AxisAlignedBB searchBox = AxisAlignedBB.getBoundingBox(
-            Math.min(from.xCoord, to.xCoord) - 1.0D,
-            Math.min(from.yCoord, to.yCoord) - 1.0D,
-            Math.min(from.zCoord, to.zCoord) - 1.0D,
-            Math.max(from.xCoord, to.xCoord) + 1.0D,
-            Math.max(from.yCoord, to.yCoord) + 1.0D,
-            Math.max(from.zCoord, to.zCoord) + 1.0D);
-        List<Entity> candidates = world.getEntitiesWithinAABB(Entity.class, searchBox);
-        for (Entity entity : candidates) {
-            if (!isPickable(mc, entity)) continue;
-            double t = rayAabbEntry(from, dir, entity.boundingBox);
-            if (t >= 0.0D && t < entityDist) {
-                entityDist = t;
-                nearestEntity = entity;
-                entityHitX = from.xCoord + dir[0] * t;
-                entityHitY = from.yCoord + dir[1] * t;
-                entityHitZ = from.zCoord + dir[2] * t;
+        double blockLimit = blockHit != null ? blockDist : range;
+        final double STEP = 4.0D;
+        for (double t = 0.0D; t < blockLimit; t += STEP) {
+            double sx = from.xCoord + dir[0] * t;
+            double sy = from.yCoord + dir[1] * t;
+            double sz = from.zCoord + dir[2] * t;
+            AxisAlignedBB segmentBox = AxisAlignedBB
+                .getBoundingBox(sx - STEP, sy - STEP, sz - STEP, sx + STEP, sy + STEP, sz + STEP);
+            List<Entity> candidates = world.getEntitiesWithinAABB(Entity.class, segmentBox);
+            for (Entity entity : candidates) {
+                if (!isPickable(mc, entity)) continue;
+                double entry = rayAabbEntry(from, dir, entity.boundingBox);
+                if (entry >= 0.0D && entry <= blockLimit && entry < entityDist) {
+                    entityDist = entry;
+                    nearestEntity = entity;
+                    entityHitX = from.xCoord + dir[0] * entry;
+                    entityHitY = from.yCoord + dir[1] * entry;
+                    entityHitZ = from.zCoord + dir[2] * entry;
+                }
             }
+            if (nearestEntity != null && entityDist <= t) break;
         }
 
         // --- 择近 -----------------------------------------------------------
@@ -204,6 +210,38 @@ public final class RtsCursorPicker {
         if (entity instanceof EntityItem || entity instanceof EntityXPOrb || entity instanceof EntityArrow)
             return false;
         return true;
+    }
+
+    /**
+     * 拾取目标是否超出「玩家周围的操作半径」（服务端的同款立方体规则，见
+     * {@code RtsActionGuard}）。
+     *
+     * <p>
+     * 相机钳制半径与拾取距离都是 128 时，对角线方向的目标离玩家可达 ~181 格，
+     * 必然被服务端拒绝 —— 1.3.0 里这类拒绝全部静默（上机反馈「点了没反应」
+     * 的一个来源）。现在客户端提前用同一规则判定：渲染高亮变红 + 状态行提示，
+     * 把「为什么点了没反应」提前暴露出来。
+     */
+    public static boolean isBeyondPlayerRange(RtsPickResult pick) {
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc.thePlayer == null || pick == null || pick.type == RtsPickResult.Type.MISS) return false;
+
+        double tx, ty, tz;
+        if (pick.type == RtsPickResult.Type.BLOCK) {
+            tx = pick.blockX + 0.5D;
+            ty = pick.blockY + 0.5D;
+            tz = pick.blockZ + 0.5D;
+        } else if (pick.entity != null) {
+            tx = pick.entity.posX;
+            ty = pick.entity.posY;
+            tz = pick.entity.posZ;
+        } else {
+            return false;
+        }
+
+        double r = Config.rtsMaxActionRadius;
+        return Math.abs(tx - mc.thePlayer.posX) > r || Math.abs(ty - mc.thePlayer.posY) > r
+            || Math.abs(tz - mc.thePlayer.posZ) > r;
     }
 
     /**

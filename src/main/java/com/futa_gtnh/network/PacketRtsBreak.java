@@ -51,8 +51,10 @@ public class PacketRtsBreak implements IMessage {
             EntityPlayerMP player = ctx.getServerHandler().playerEntity;
             if (player == null) return null;
             if (!RtsActionGuard.tryConsume(player)) return null;
-            if (!RtsActionGuard.isWithinRange(player, message.x + 0.5D, message.y + 0.5D, message.z + 0.5D))
+            if (!RtsActionGuard.isWithinRange(player, message.x + 0.5D, message.y + 0.5D, message.z + 0.5D)) {
+                RtsActionGuard.notifyRejected(player, "futa_gtnh.rts.msg.out_of_range");
                 return null;
+            }
 
             RtsBuildService.handleBreakBlock(player, message.x, message.y, message.z);
             return null;

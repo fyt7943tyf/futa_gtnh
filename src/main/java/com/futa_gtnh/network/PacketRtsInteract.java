@@ -115,6 +115,7 @@ public class PacketRtsInteract implements IMessage {
                 case MODE_USE_BLOCK: {
                     // 范围校验以方块中心为准（服务端权威）
                     if (!RtsActionGuard.isWithinRange(player, message.x + 0.5D, message.y + 0.5D, message.z + 0.5D)) {
+                        RtsActionGuard.notifyRejected(player, "futa_gtnh.rts.msg.out_of_range");
                         return null;
                     }
                     RtsInteractionService.handleUseBlock(
@@ -137,7 +138,10 @@ public class PacketRtsInteract implements IMessage {
                     World world = player.worldObj;
                     Entity target = world != null ? world.getEntityByID(message.entityId) : null;
                     if (target == null) return null;
-                    if (!RtsActionGuard.isWithinRange(player, target.posX, target.posY, target.posZ)) return null;
+                    if (!RtsActionGuard.isWithinRange(player, target.posX, target.posY, target.posZ)) {
+                        RtsActionGuard.notifyRejected(player, "futa_gtnh.rts.msg.out_of_range");
+                        return null;
+                    }
 
                     if (message.mode == MODE_INTERACT_ENTITY) {
                         RtsInteractionService
