@@ -49,6 +49,8 @@ public class ModEventHandler {
         com.futa_gtnh.rts.server.RtsBatchEngine.onServerTick();
         // 撤销/重做的方块写回也按预算推进（同上）
         com.futa_gtnh.rts.server.RtsHistoryManager.onServerTick();
+        // 小游戏助手的渐进搜索（没装 lootgames / 没有任务时一次布尔判断的开销）
+        com.futa_gtnh.lootassist.LootassistManager.onServerTick();
     }
 
     /** 玩家下线时清掉他那份操作频率计数，避免 UUID 表越积越大。 */
@@ -67,6 +69,8 @@ public class ModEventHandler {
             // 批量任务持有玩家引用（进而持有 World），不清就泄漏
             com.futa_gtnh.rts.server.RtsBatchEngine.forget(player.getUniqueID());
             com.futa_gtnh.rts.server.RtsHistoryManager.forget(player.getUniqueID());
+            // 助手的 viewer 表和搜索进度接收者
+            com.futa_gtnh.lootassist.LootassistManager.forget(player.getUniqueID());
         }
     }
 

@@ -10,7 +10,14 @@
 		"MixinCraftingStationLogic",
 		"MixinEntityPlayer",
 		"MixinEntityPlayerMP",
-		"MixinSlotCraftingStation"
+		"MixinSlotCraftingStation",
+		"lootgames.MixinLootGame",
+		"lootgames.MixinGameMineSweeper",
+		"lootgames.MixinGameOfLight",
+		"lootgames.MixinGameSudoku",
+		"lootgames.MixinGameMasterBlock",
+		"lootgames.InvokerGameMineSweeper",
+		"lootgames.InvokerGOLStage"
 	],
 	"client": ["MixinEntityRenderer", "MixinEntityPlayerSP"],
 	"server": []

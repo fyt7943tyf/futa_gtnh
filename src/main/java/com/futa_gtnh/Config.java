@@ -157,6 +157,34 @@ public class Config {
     public static boolean locatorTeleportCarve = true;
 
     // ------------------------------------------------------------------
+    // 小游戏助手（lootgames 联动）
+    // ------------------------------------------------------------------
+
+    /** 是否注册小游戏助手。没装 LootGames 时这项无效（注册了也搜不到任何地牢）。 */
+    public static boolean enableMinigameHelper = true;
+
+    /**
+     * lootgames 小游戏「无限重试」后，第几次失败自动按满奖励结算（4 个战利品箱）。
+     *
+     * <p>
+     * 这个值<b>会直接覆写 LootGames 自己的 attempt_count 配置</b>（扫雷/光之游戏
+     * 在 preInit 阶段写它的公共字段，数独在运行时用 mixin 拦截），所以
+     * {@code config/lootgames/*.cfg} 里的 attempt_count 在装了本模组后不再生效。
+     * 失败惩罚（爆炸/刷怪/岩浆）会被 mixin 全部取消 —— 失败只是重开当前关卡。
+     */
+    public static int lootgamesFullRewardRetries = 10;
+
+    /**
+     * 小游戏助手「搜索附近」的半径（方块，以发起搜索的玩家为圆心）。
+     *
+     * <p>
+     * 候选点是按种子推算的（不加载区块、零开销），真正花时间的是逐个候选加载
+     * 区块去确认地牢是否真的生成了 —— 半径越大候选越多、确认越久（按距离从近到远，
+     * 期间界面有进度）。上限 3000 时一次搜索最多几百个候选，十几秒跑完。
+     */
+    public static int lootassistSearchRadius = 1000;
+
+    // ------------------------------------------------------------------
     // 界面（客户端行为）
     // ------------------------------------------------------------------
 
@@ -461,6 +489,28 @@ public class Config {
             "传送找不到现成落脚点时，是否允许就地清掉玩家身体那两格。" + "只清「没用的方块」（石头/泥土/沙子这类），并且永不碰矿石和木头/玻璃/金属/机器；"
                 + "不碰目标方块本身，也不掉落物品。"
                 + "矿脉大多整个埋在石头里，关掉它传送在矿洞里基本用不了。");
+
+        enableMinigameHelper = configuration.getBoolean(
+            "enableMinigameHelper",
+            Configuration.CATEGORY_GENERAL,
+            enableMinigameHelper,
+            "是否注册小游戏助手（右键打开全服共享的 lootgames 地牢列表，可搜索附近并标记已完成）。需要装了 LootGames。");
+
+        lootgamesFullRewardRetries = configuration.getInt(
+            "lootgamesFullRewardRetries",
+            Configuration.CATEGORY_GENERAL,
+            lootgamesFullRewardRetries,
+            1,
+            1000,
+            "lootgames 小游戏第几次失败自动按满奖励结算（4 个战利品箱）。失败次数未到之前无限重试，且失败不再有爆炸/刷怪/岩浆惩罚。会覆写 LootGames 自己的 attempt_count 配置。");
+
+        lootassistSearchRadius = configuration.getInt(
+            "lootassistSearchRadius",
+            Configuration.CATEGORY_GENERAL,
+            lootassistSearchRadius,
+            128,
+            3000,
+            "小游戏助手「搜索附近」的半径（方块，以玩家为圆心）。候选点按种子推算零开销，确认地牢是否生成需要逐个加载区块，半径越大确认越久。");
 
         rtsEnable = configuration.getBoolean(
             "rtsEnable",
