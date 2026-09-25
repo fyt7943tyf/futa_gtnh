@@ -75,7 +75,7 @@ public class ModEventHandler {
     }
 
     /**
-     * 每 tick 更新迅步的飞行权限、生长光环和移动速度修饰符。
+     * 每 tick 更新迅步的飞行权限、生长光环、掉落物吸附和移动速度修饰符。
      *
      * <p>
      * 飞行权限和生长光环只在服务端处理；移动速度修饰符则两端都要调整：
@@ -93,6 +93,7 @@ public class ModEventHandler {
             ItemSwiftStep.updateFlightPermission(event.player);
             SwiftStepGrowthAura.tick(event.player);
             SwiftStepRecovery.tick(event.player);
+            SwiftStepItemMagnet.tick(event.player);
         }
         ItemSwiftStep.applyWalkSpeedModifier(event.player);
         // 空中前进速度也要跟着放大，否则「走着 5 倍、一跳起来掉回原版」。

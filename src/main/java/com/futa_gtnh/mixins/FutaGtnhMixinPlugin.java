@@ -55,6 +55,7 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
     private static final Set<String> VANILLA_TARGET_MIXINS = new HashSet<>(
         Arrays.asList(
             "MixinBlockReed",
+            "MixinEntityItem",
             "MixinEntityPlayer",
             "MixinEntityPlayerMP",
             "MixinEntityPlayerSP",

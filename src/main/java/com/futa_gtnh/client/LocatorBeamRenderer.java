@@ -53,7 +53,7 @@ public class LocatorBeamRenderer {
         EntityPlayer player = mc.thePlayer;
         if (player == null || mc.theWorld == null) return;
 
-        // 只在真的拿着魔杖的时候画。否则换手之后那道光还挂在天上，很碍眼。
+        // 手持或佩戴魔杖时都保持当前追踪光线；取下并切换物品后才隐藏。
         if (!LocatorState.isHoldingWand(player)) return;
         if (!LocatorState.hasBeam()) return;
         // 换维度之后坐标就失效了（搜索只在当前维度做），别把玩家往错的地方引

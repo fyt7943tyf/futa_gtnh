@@ -14,6 +14,7 @@ import org.lwjgl.opengl.GL11;
 import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketSetSwiftStep;
+import com.futa_gtnh.network.PacketSetSwiftStepMagnet;
 
 /** 迅步设置界面，按移动、生长和恢复分为三个页面。 */
 public class GuiSwiftStep extends GuiScreen {
@@ -52,6 +53,13 @@ public class GuiSwiftStep extends GuiScreen {
     private static final int BTN_RECOVERY_SPEED_UP = 19;
     private static final int BTN_GROWTH_SPEED_DOWN_10 = 20;
     private static final int BTN_GROWTH_SPEED_UP_10 = 21;
+    private static final int BTN_ITEM_MAGNET_TOGGLE = 22;
+    private static final int BTN_ITEM_MAGNET_RADIUS_DOWN_1 = 23;
+    private static final int BTN_ITEM_MAGNET_RADIUS_UP_1 = 24;
+    private static final int BTN_ITEM_MAGNET_RADIUS_DOWN_10 = 25;
+    private static final int BTN_ITEM_MAGNET_RADIUS_UP_10 = 26;
+    private static final int BTN_ITEM_MAGNET_RADIUS_DOWN_100 = 27;
+    private static final int BTN_ITEM_MAGNET_RADIUS_UP_100 = 28;
 
     private static final float STEP = 0.25F;
     private static final float[] PRESETS = { 1.0F, 2.0F, 3.0F, 5.0F, 10.0F, 16.0F };
@@ -86,6 +94,7 @@ public class GuiSwiftStep extends GuiScreen {
         updateGrowthAuraSpeedButtons();
         updateRecoveryToggleButtons();
         updateRecoverySpeedButtons();
+        updateItemMagnetButtons();
     }
 
     private void addTabs(int left, int top) {
@@ -152,6 +161,15 @@ public class GuiSwiftStep extends GuiScreen {
         buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_DOWN, left + 54, top + 152, 42, 18, "-1"));
         buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_UP, left + 104, top + 152, 42, 18, "+1"));
         buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_UP_10, left + 150, top + 152, 42, 18, "+10"));
+
+        buttonList
+            .add(new GuiSmallButton(BTN_ITEM_MAGNET_TOGGLE, left + 8, top + 211, 184, 18, itemMagnetToggleText()));
+        buttonList.add(new GuiSmallButton(BTN_ITEM_MAGNET_RADIUS_DOWN_100, left + 8, top + 235, 42, 18, "-100"));
+        buttonList.add(new GuiSmallButton(BTN_ITEM_MAGNET_RADIUS_DOWN_10, left + 54, top + 235, 42, 18, "-10"));
+        buttonList.add(new GuiSmallButton(BTN_ITEM_MAGNET_RADIUS_UP_10, left + 104, top + 235, 42, 18, "+10"));
+        buttonList.add(new GuiSmallButton(BTN_ITEM_MAGNET_RADIUS_UP_100, left + 150, top + 235, 42, 18, "+100"));
+        buttonList.add(new GuiSmallButton(BTN_ITEM_MAGNET_RADIUS_DOWN_1, left + 8, top + 259, 90, 18, "-1"));
+        buttonList.add(new GuiSmallButton(BTN_ITEM_MAGNET_RADIUS_UP_1, left + 102, top + 259, 90, 18, "+1"));
     }
 
     private void addRecoveryControls(int left, int top) {
@@ -328,6 +346,18 @@ public class GuiSwiftStep extends GuiScreen {
             width / 2,
             top + 80,
             0xFFFFFF);
+        boolean magnetEnabled = ItemSwiftStep.isItemMagnetEnabled(charm);
+        drawCenteredFittedString(
+            EnumChatFormatting.YELLOW + tr("futa_gtnh.swift_step.gui.item_magnet"),
+            width / 2,
+            top + 183,
+            0xFFFFFF);
+        drawCenteredFittedString(
+            (magnetEnabled ? EnumChatFormatting.GREEN : EnumChatFormatting.GRAY)
+                + tr("futa_gtnh.swift_step.gui.item_magnet.status", ItemSwiftStep.getItemMagnetRadius(charm)),
+            width / 2,
+            top + 197,
+            0xFFFFFF);
     }
 
     private void drawRecoveryPage(int top) {
@@ -420,6 +450,12 @@ public class GuiSwiftStep extends GuiScreen {
                 : "futa_gtnh.swift_step.gui.growth_aura.animal_off");
     }
 
+    private String itemMagnetToggleText() {
+        return tr(
+            ItemSwiftStep.isItemMagnetEnabled(charm) ? "futa_gtnh.swift_step.gui.item_magnet.on"
+                : "futa_gtnh.swift_step.gui.item_magnet.off");
+    }
+
     private String healthRecoveryToggleText() {
         return tr(
             "futa_gtnh.swift_step.gui.recovery.health_"
@@ -483,6 +519,33 @@ public class GuiSwiftStep extends GuiScreen {
         }
     }
 
+    private void updateItemMagnetButtons() {
+        int radius = ItemSwiftStep.getItemMagnetRadius(charm);
+        for (Object object : buttonList) {
+            if (!(object instanceof GuiButton)) continue;
+            GuiButton button = (GuiButton) object;
+            if (button.id == BTN_ITEM_MAGNET_TOGGLE) button.displayString = itemMagnetToggleText();
+            if (button.id == BTN_ITEM_MAGNET_RADIUS_DOWN_1) {
+                button.enabled = radius > ItemSwiftStep.MIN_ITEM_MAGNET_RADIUS;
+            }
+            if (button.id == BTN_ITEM_MAGNET_RADIUS_DOWN_10) {
+                button.enabled = radius - 10 >= ItemSwiftStep.MIN_ITEM_MAGNET_RADIUS;
+            }
+            if (button.id == BTN_ITEM_MAGNET_RADIUS_DOWN_100) {
+                button.enabled = radius - 100 >= ItemSwiftStep.MIN_ITEM_MAGNET_RADIUS;
+            }
+            if (button.id == BTN_ITEM_MAGNET_RADIUS_UP_1) {
+                button.enabled = radius < ItemSwiftStep.MAX_ITEM_MAGNET_RADIUS;
+            }
+            if (button.id == BTN_ITEM_MAGNET_RADIUS_UP_10) {
+                button.enabled = radius + 10 <= ItemSwiftStep.MAX_ITEM_MAGNET_RADIUS;
+            }
+            if (button.id == BTN_ITEM_MAGNET_RADIUS_UP_100) {
+                button.enabled = radius + 100 <= ItemSwiftStep.MAX_ITEM_MAGNET_RADIUS;
+            }
+        }
+    }
+
     @Override
     protected void actionPerformed(GuiButton button) {
         if (button.id == BTN_DONE) {
@@ -516,6 +579,21 @@ public class GuiSwiftStep extends GuiScreen {
             applyGrowthAuraSpeed(ItemSwiftStep.getGrowthAuraSpeed(charm) - 10);
         else if (button.id == BTN_GROWTH_SPEED_UP_10)
             applyGrowthAuraSpeed(ItemSwiftStep.getGrowthAuraSpeed(charm) + 10);
+        else if (button.id == BTN_ITEM_MAGNET_TOGGLE) {
+            applyItemMagnetEnabled(!ItemSwiftStep.isItemMagnetEnabled(charm));
+            updateItemMagnetButtons();
+        } else if (button.id == BTN_ITEM_MAGNET_RADIUS_DOWN_1)
+            applyItemMagnetRadius(ItemSwiftStep.getItemMagnetRadius(charm) - 1);
+        else if (button.id == BTN_ITEM_MAGNET_RADIUS_UP_1)
+            applyItemMagnetRadius(ItemSwiftStep.getItemMagnetRadius(charm) + 1);
+        else if (button.id == BTN_ITEM_MAGNET_RADIUS_DOWN_10)
+            applyItemMagnetRadius(ItemSwiftStep.getItemMagnetRadius(charm) - 10);
+        else if (button.id == BTN_ITEM_MAGNET_RADIUS_UP_10)
+            applyItemMagnetRadius(ItemSwiftStep.getItemMagnetRadius(charm) + 10);
+        else if (button.id == BTN_ITEM_MAGNET_RADIUS_DOWN_100)
+            applyItemMagnetRadius(ItemSwiftStep.getItemMagnetRadius(charm) - 100);
+        else if (button.id == BTN_ITEM_MAGNET_RADIUS_UP_100)
+            applyItemMagnetRadius(ItemSwiftStep.getItemMagnetRadius(charm) + 100);
         else if (button.id == BTN_HEALTH_RECOVERY_TOGGLE) {
             applyHealthRecoveryEnabled(!ItemSwiftStep.isHealthRecoveryEnabled(charm));
             updateRecoveryToggleButtons();
@@ -680,5 +758,23 @@ public class GuiSwiftStep extends GuiScreen {
                 PacketSetSwiftStep.RECOVERY_UNCHANGED,
                 clamped));
         updateRecoverySpeedButtons();
+    }
+
+    private void applyItemMagnetEnabled(boolean enabled) {
+        ItemSwiftStep.setItemMagnetEnabled(charm, enabled);
+        sendItemMagnetSettings();
+    }
+
+    private void applyItemMagnetRadius(int radius) {
+        ItemSwiftStep.setItemMagnetRadius(charm, radius);
+        sendItemMagnetSettings();
+        updateItemMagnetButtons();
+    }
+
+    private void sendItemMagnetSettings() {
+        NetworkHandler.INSTANCE.sendToServer(
+            new PacketSetSwiftStepMagnet(
+                ItemSwiftStep.isItemMagnetEnabled(charm),
+                ItemSwiftStep.getItemMagnetRadius(charm)));
     }
 }

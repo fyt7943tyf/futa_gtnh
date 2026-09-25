@@ -74,5 +74,7 @@ public class ItemLocatorWand extends Item {
             .add(EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.locator_wand.tip.gui"));
         tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.locator_wand.tip.clear"));
+        tooltip.add(
+            EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.locator_wand.tip.bauble"));
     }
 }
