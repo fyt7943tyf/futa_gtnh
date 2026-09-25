@@ -37,9 +37,10 @@ import com.futa_gtnh.network.PacketLootassistSync;
  * <ul>
  * <li><b>共享数据</b>：全部地牢记录（{@link LootassistEntry}）+「已验证不存在」的
  * 区块负缓存，落盘走 {@link LootassistFile}（原子写 + 备份）。</li>
- * <li><b>渐进搜索</b>：种子推算候选（{@link LootgameFinder}，零开销）→ 每 tick
- * 用一小段时长预算逐个加载区块验证 → 结果进共享列表并广播。同一时间只允许一个
- * 搜索任务；请求者中途下线任务也会跑完（结果对所有人有价值），只是没人收进度。</li>
+ * <li><b>搜索</b>：种子推算候选（{@link LootgameFinder}，零开销）→ 候选立即以
+ * 「待验证」进共享列表 → <b>只验证当前已加载的区块（绝不强制生成）</b>，
+ * 未加载的交给 {@link #onChunkLoad} 在区块被正常加载时补验。同一时间只允许一个
+ * 搜索任务；请求者中途下线任务也会跑完，只是没人收进度。</li>
  * <li><b>自然发现</b>：区块被正常加载时（任何人走过/生成）顺带验证对应候选点 ——
  * 玩家探索本身就在一点点补全地图。</li>
  * <li><b>同步</b>：打开界面的玩家登记为 viewer，改动（新验证/标记完成）以增量包
@@ -262,8 +263,9 @@ public final class LootassistManager {
     // ==================================================================
 
     /**
-     * 玩家发起「搜索附近」：种子推算候选 → 未验证的进任务队列并先以
-     * 「待验证」状态登记进共享列表（所有人立刻可见），随后逐个确认。
+     * 玩家发起「搜索附近」：种子推算候选 → 全部以「待验证」登记进共享列表
+     * （所有人立刻可见）→ 已加载的立即验证，未加载的等自然加载补验。
+     * 整个过程不强制生成任何区块，点下去立刻返回。
      */
     public static void startSearch(EntityPlayerMP player) {
         if (!LootgamesCompat.isAvailable()) {
@@ -314,7 +316,16 @@ public final class LootassistManager {
         }
     }
 
-    /** 每 tick 的搜索推进：在时长预算内逐个加载候选区块并验证。 */
+    /**
+     * 每 tick 的搜索推进：在时长预算内逐个验证候选。
+     *
+     * <p>
+     * <b>只验证当前已加载的区块，绝不强制生成。</b>强制生成是初版卡服的根因：
+     * GTNH 的世界生成很重，一次同步生成就要几百毫秒到几秒，tick 预算只能限制
+     * 「发起几个」、管不住单次的耗时；服务端一卡，所有依赖服务端往返的界面
+     * （共享背包、俯瞰视角的服务端确认……）全部超时。未加载的候选保持
+     * 「待验证」，由 {@link #onChunkLoad} 在区块被正常加载时补验。
+     */
     private static void processSearchTick() {
         if (searchQueue.isEmpty()) return;
 
@@ -331,13 +342,9 @@ public final class LootassistManager {
                 .worldServerForDimension(candidate.dim);
             if (world == null) continue;
 
-            // 按需读盘/生成 —— 这里是搜索的主要开销，所以前面有时长预算挡着
-            world.getChunkFromChunkCoords(candidate.chunkX, candidate.chunkZ);
-
-            // getChunkFromChunkCoords 会触发 ChunkEvent.Load，自然发现逻辑可能已经
-            // 顺手验证过这一块了；再看一眼，别白扫
-            existing = entries.get(candidate.key());
-            if (existing != null && existing.verified()) continue;
+            // 区块没加载就跳过：不生成、也不进「不存在」负缓存（它以后可能真的会生成）。
+            // 条目已登记在列表里，保持「待验证」，等自然加载补验。
+            if (!LootgameFinder.isChunkLoaded(world, candidate.chunkX, candidate.chunkZ)) continue;
 
             int masterY = LootgameFinder.findMasterY(world, candidate.x(), candidate.z());
             if (masterY >= 0) {
@@ -371,14 +378,24 @@ public final class LootassistManager {
     }
 
     /**
-     * 自然发现：任何区块被加载（生成/读盘/传送进来）时顺带验证一次候选点。
+     * 自然发现：任何区块被加载（生成/读盘/传送进来）时顺带做两件事——
+     * 补算「已验证但入口未定」条目的地表入口；验证落到本区块的候选点。
      * 挂在 Forge 总线的 {@code ChunkEvent.Load} 上（两端都会触发，这里只管服务端）。
+     *
+     * <p>
+     * 两件事都<b>只读已加载的区块</b>（本区块必然已加载，入口探测列由
+     * {@link LootgameFinder#findEntrance} 的红线保证），所以这里的开销就是
+     * 「一次纯数学候选判定 + 至多一列方块扫描」，与区块加载本身同级。
      */
     public static void onChunkLoad(Chunk chunk) {
         if (!loaded || chunk == null || chunk.worldObj == null || chunk.worldObj.isRemote) return;
 
         int dim = chunk.worldObj.provider.dimensionId;
         if (!LootgameFinder.isWorldGenEnabled(dim)) return;
+
+        // 先补算入口：搜索/自然发现验证地牢时，南侧探测列可能还没加载（推不出来），
+        // 现在它们随本区块加载而齐全了，把「已验证但入口未定」的条目补全
+        backfillEntrances(chunk);
 
         int chunkX = chunk.xPosition;
         int chunkZ = chunk.zPosition;
@@ -405,6 +422,39 @@ public final class LootassistManager {
             if (existing != null) removeEntry(key);
             absentChunks.add(chunkKey);
             dirty = true;
+        }
+    }
+
+    /**
+     * 给「已验证、但地表入口还没推算出来」的条目补算入口。
+     *
+     * <p>
+     * 入口探测列在条目南侧 11..25 格、横跨最多两个区块；只处理探测列范围
+     * 覆盖到本区块的条目，避免每次区块加载都全表扫一遍。条目本身是少量数据，
+     * 未命中的开销是一次坐标比较。
+     */
+    private static void backfillEntrances(Chunk chunk) {
+        int dim = chunk.worldObj.provider.dimensionId;
+        int chunkX = chunk.xPosition;
+        int chunkZ = chunk.zPosition;
+
+        for (LootassistEntry entry : entries.values()) {
+            if (!entry.verified() || entry.entranceY >= 0 || entry.dim != dim) continue;
+            // 入口探测列在 (entry.x, entry.z + 11..25)：只关心南侧这两三个区块
+            if (chunkX != (entry.x >> 4)) continue;
+            int minChunkZ = (entry.z + LootgameFinder.CENTER_TO_BORDER + 1) >> 4;
+            int maxChunkZ = (entry.z + LootgameFinder.CENTER_TO_BORDER + LootgameFinder.ENTRANCE_MAX_RUN) >> 4;
+            if (chunkZ < minChunkZ || chunkZ > maxChunkZ) continue;
+
+            int[] entrance = LootgameFinder.findEntrance(chunk.worldObj, entry.x, entry.z, entry.y);
+            if (entrance[1] >= 0) {
+                entry.entranceX = entrance[0];
+                entry.entranceY = entrance[1];
+                entry.entranceZ = entrance[2];
+                upsertEntry(entry);
+            }
+            // 还是推不出来（探测列仍有未加载的 / 15 格内没有出口）：
+            // 留着下次南侧区块加载时再试，开销可忽略
         }
     }
 
