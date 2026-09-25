@@ -637,8 +637,8 @@ public class ContainerSharedTerminal extends Container {
         if (mouseButton == 2) {
             // 方块终端中键选择物品管道的输出；远程打开的共享存储仍保留原本的整组取出语义。
             if (terminal != null) {
-                NetworkHandler.INSTANCE.sendToServer(
-                    PacketStorageAction.item(PacketStorageAction.SET_TERMINAL_ITEM, itemKey, 0L));
+                NetworkHandler.INSTANCE
+                    .sendToServer(PacketStorageAction.item(PacketStorageAction.SET_TERMINAL_ITEM, itemKey, 0L));
                 return;
             }
         }
