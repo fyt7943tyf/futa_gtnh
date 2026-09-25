@@ -34,12 +34,20 @@ public final class KeyHandler {
 
     public static final String KEY_CATEGORY = "key.categories.futa_gtnh";
     public static final String KEY_OPEN_TERMINAL = "key.futa_gtnh.shared_terminal";
+    public static final String KEY_DUNGEON_MAP = "key.futa_gtnh.dungeon_map";
+    public static final String KEY_DUNGEON_MINIMAP = "key.futa_gtnh.dungeon_minimap";
 
     private static KeyBinding openTerminal;
+    private static KeyBinding dungeonMap;
+    private static KeyBinding dungeonMiniMap;
 
     public static void register() {
         openTerminal = new KeyBinding(KEY_OPEN_TERMINAL, Keyboard.KEY_B, KEY_CATEGORY);
+        dungeonMap = new KeyBinding(KEY_DUNGEON_MAP, Keyboard.KEY_M, KEY_CATEGORY);
+        dungeonMiniMap = new KeyBinding(KEY_DUNGEON_MINIMAP, Keyboard.KEY_N, KEY_CATEGORY);
         ClientRegistry.registerKeyBinding(openTerminal);
+        ClientRegistry.registerKeyBinding(dungeonMap);
+        ClientRegistry.registerKeyBinding(dungeonMiniMap);
         FMLCommonHandler.instance()
             .bus()
             .register(new Listener());
@@ -49,9 +57,17 @@ public final class KeyHandler {
 
         @SubscribeEvent
         public void onKeyInput(InputEvent.KeyInputEvent event) {
+            Minecraft minecraft = Minecraft.getMinecraft();
+            if (dungeonMap != null && dungeonMap.isPressed()) {
+                RoguelikeMapClient.toggleFullScreen();
+                return;
+            }
+            if (dungeonMiniMap != null && dungeonMiniMap.isPressed()) {
+                RoguelikeMapClient.toggleMiniMap();
+                return;
+            }
             if (openTerminal == null || !openTerminal.isPressed()) return;
 
-            Minecraft minecraft = Minecraft.getMinecraft();
             // 已经开着别的界面（聊天、背包、容器）时不要抢按键
             if (minecraft.thePlayer == null || minecraft.currentScreen != null) return;
 
