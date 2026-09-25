@@ -100,19 +100,13 @@ dependencies {
 
     // ---- LootGames（可选联动：小游戏助手 + 行为 Mixin）----
     //
-    // 编译与 dev 运行都用「本地原样构建」的 dev jar（../LootGames-master，
-    // 不改它一行代码，只是跑一次 gradlew build 出 jar），原因：
-    //  1. 本 mod 对 lootgames 的 mixin 目标类必须和运行时那份 lootgames 完全一致，
-    //     用本地源码构建出来的 jar 才能保证这一点（Maven 上的发布版未必和手里
-    //     的源码同步，mixin 目标差一个签名就会应用失败）；
-    //  2. 整合包里也应放同一份构建产物（官方 jar 的行为完全一样，只是没有本地
-    //     构建这一层保证）。
-    //
-    // 没构建过 LootGames-master 时这里是空集合：mixin 与助手相关代码会编译报错，
-    // 提示先去那边跑一次 gradlew build。
-    def lootGamesDevJars = fileTree(dir: '../LootGames-master/build/libs', include: ['*-dev.jar'])
-    compileOnly(lootGamesDevJars)
-    runtimeOnlyNonPublishable(lootGamesDevJars)
+    // 使用与当前 GTNH 整合包一致的官方 LootGames dev artifact；Gradle 会从 GTNH
+    // Maven 下载，不要求本机存在游戏目录或 LootGames 源码仓库。
+    // 版本固定为当前 GTNH 实例使用的 2.2.14，确保编译时的目标类与运行时版本对齐；
+    // 更新整合包版本时，也要同步更新这里的版本并重新构建验证 Mixin 目标。
+    def lootGamesVersion = '2.2.14'
+    compileOnly("com.github.GTNewHorizons:LootGames:${lootGamesVersion}:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:LootGames:${lootGamesVersion}:dev")
 
     // ---- runClient / runServer 里真正要加载的模组 ----
     //
