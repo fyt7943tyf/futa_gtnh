@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.ModifyConstant;
 @Mixin(BlockReed.class)
 public abstract class MixinBlockReed {
 
-    @ModifyConstant(method = "updateTick", constant = @Constant(intValue = 3))
+    @ModifyConstant(method = "updateTick", constant = @Constant(intValue = 3), require = 1)
     private int futa$removeSugarCaneHeightLimit(int vanillaLimit) {
         return Integer.MAX_VALUE;
     }
