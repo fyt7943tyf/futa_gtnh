@@ -44,7 +44,10 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // lwjgl3ify 也是硬依赖：本模组的目标运行时是「GTNH（LWJGL3 + 新 Java）」，
     // 搜索框的中文输入法支持建立它的 GuiTextField mixin 之上（能力探测见
     // client/ImeCompat.java，老版本会自动退回旧路径，不会崩）。
-    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:NotEnoughItems")
+    // after:lootgames 是软依赖排序：小游戏助手要读它的世界生成配置、
+    // preInit 里还要覆写它已加载的尝试次数配置（见 lootassist.LootgamesCompat），
+    // 没装 lootgames 时这条排序没有副作用。
+    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:NotEnoughItems;after:lootgames")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";
@@ -68,6 +71,9 @@ public class FutaGtnhMod {
 
     /** 寻物魔杖。 */
     public static com.futa_gtnh.item.ItemLocatorWand locatorWand;
+
+    /** 小游戏助手。 */
+    public static com.futa_gtnh.item.ItemMinigameHelper minigameHelper;
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
@@ -110,6 +116,8 @@ public class FutaGtnhMod {
     @Mod.EventHandler
     public void serverStarted(FMLServerStartedEvent event) {
         SharedStorageManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
+        // 小游戏助手的共享列表：同一个存档目录、同一套加载时机（见 lootassist 包）
+        com.futa_gtnh.lootassist.LootassistManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
     }
 
     /**
@@ -140,5 +148,6 @@ public class FutaGtnhMod {
     @Mod.EventHandler
     public void serverStopping(FMLServerStoppingEvent event) {
         SharedStorageManager.onServerStopping();
+        com.futa_gtnh.lootassist.LootassistManager.onServerStopping();
     }
 }

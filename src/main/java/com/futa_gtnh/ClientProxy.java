@@ -5,6 +5,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraftforge.common.MinecraftForge;
 
 import com.futa_gtnh.client.GuiLocatorWand;
+import com.futa_gtnh.client.GuiMinigameHelper;
 import com.futa_gtnh.client.GuiSwiftStep;
 import com.futa_gtnh.client.KeyHandler;
 import com.futa_gtnh.client.LocatorBeamRenderer;
@@ -109,6 +110,20 @@ public class ClientProxy extends CommonProxy {
     public void openLocatorGui() {
         Minecraft.getMinecraft()
             .displayGuiScreen(new GuiLocatorWand());
+    }
+
+    /**
+     * 小游戏助手的清单界面。
+     *
+     * <p>
+     * 覆盖 {@link CommonProxy#openMinigameHelperGui}。纯客户端 GuiScreen：
+     * 打开时会自己向服务端要全量快照，之后的增量由包 handler 推进
+     * {@code ClientLootassistCache}，界面每 tick 从缓存重绘。
+     */
+    @Override
+    public void openMinigameHelperGui() {
+        Minecraft.getMinecraft()
+            .displayGuiScreen(new GuiMinigameHelper());
     }
 
     /**
