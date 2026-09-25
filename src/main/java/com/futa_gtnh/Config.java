@@ -70,17 +70,18 @@ public class Config {
      * 就算客户端还显示着 20x，实际写进物品的也会被压到上限。
      *
      * <p>
-     * <b>专用服务器的硬上限是 18.0，超过就是一个加速都拿不到</b> —— 不是「快一点但
-     * 有点风险」，而是每 tick 都被服务端判定 {@code moved too quickly} 并拉回原地。
-     * 推导（全部来自原版源码）：
+     * <b>专用服务器上限按水平与竖直合成后的位移计算</b>。竖直速度最高为 10 倍，
+     * 再用服务端每 tick 的 10 格位移阈值计算水平速度余量。超过安全倍率后，玩家会被
+     * 判定为 {@code moved too quickly} 并拉回原地。推导（全部来自原版源码）：
      *
      * <pre>
      *   飞行每 tick 水平加速 = flySpeed = 倍率 × 0.05
      *   飞行水平阻力         = 0.91        （EntityLivingBase.moveEntityWithHeading）
      *   终端速度             = flySpeed / (1 - 0.91) = 倍率 × 0.5556 格/tick
-     *   服务端判定           = 位移平方和 &gt; 100，即 位移 &gt; 10 格/tick
+     *   竖直终端位移         = min(倍率, 10) × 0.15 / (1 - 0.6) 格/tick
+     *   服务端判定           = 三轴位移平方和 &gt; 100，即 合位移 &gt; 10 格/tick
      *                          （NetHandlerPlayServer.processPlayer）
-     *   ⇒ 倍率 ≤ 10 / 0.5556 = 18.0
+     *   ⇒ 竖直倍率封顶后，再由剩余位移预算算水平安全倍率
      * </pre>
      *
      * 校验：代倍率 1 进去得 0.556 格/tick = 11.1 格/秒，正好是创造模式飞行的体感。
@@ -92,8 +93,8 @@ public class Config {
      * 想在单人里开更快就把这个值调大。
      *
      * <p>
-     * 默认 16 是 18 再留一点余量（斜着飞加上垂直分量时位移的平方和会更大）。
-     * 就算这里调得比 18 高，客户端在多人服务器上也会自动压到 18 并在界面上说明，
+     * 默认 16 低于竖直速度封顶后计算出的多人安全倍率，并留有余量。
+     * 就算这里设得更高，客户端在多人服务器上也会自动压到安全值并在界面上说明，
      * 不会让玩家对着一个「按了没反应」的速度发呆。
      */
     public static double swiftStepMaxMultiplier = 16.0D;
@@ -397,7 +398,7 @@ public class Config {
             (float) swiftStepMaxMultiplier,
             1.0F,
             100.0F,
-            "迅步的速度倍率上限（原版速度的倍数）。专用服务器的飞行硬上限是 18.0：超过之后每 tick 都会被服务端判定 moved too quickly 并拉回原地，等于完全没加速。单人存档不受此限制。");
+            "迅步的速度倍率上限（原版速度的倍数）。专用服务器按水平与竖直合位移计算安全上限，超过后会被判定 moved too quickly 并拉回原地；单人存档不受此限制。");
 
         enableLocatorWand = configuration.getBoolean(
             "enableLocatorWand",

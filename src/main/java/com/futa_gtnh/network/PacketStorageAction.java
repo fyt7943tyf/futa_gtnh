@@ -11,7 +11,7 @@ import cpw.mods.fml.common.network.simpleimpl.MessageContext;
 import io.netty.buffer.ByteBuf;
 
 /**
- * 客户端 -> 服务端的操作请求（取东西、存东西、选终端输出流体）。
+ * 客户端 -> 服务端的操作请求（取东西、存东西、设置终端管道输出）。
  *
  * <p>
  * 设计上<b>只发「意图」，不发「结果」</b>：客户端说的是「我要取 1000 个铁锭」，
@@ -89,6 +89,8 @@ public class PacketStorageAction implements IMessage {
     // ---- 终端 ----
     /** 设置方块终端往相邻管道/流体罐输出的流体。 */
     public static final byte SET_TERMINAL_FLUID = 20;
+    /** 设置方块终端往物品管道输出的物品。 */
+    public static final byte SET_TERMINAL_ITEM = 21;
 
     // ---- NEI 合成联动 ----
     /**
@@ -162,8 +164,9 @@ public class PacketStorageAction implements IMessage {
      * 
      * <pre>
      * root: {
-     *   "slots": [ { "idx": 0..3, "count": 每次合成需要几个,
-     *                "cands": [ ItemKey 的 NBT, ... 按优先级排序的候选 ] }, ... ]
+     *   "slots": [ { "idx": 0..8, "count": 每次合成需要几个,
+     *                "cands": [ ItemKey 的 NBT, ... 按优先级排序的候选 ],
+     *                "toolOres": [ "craftingToolSaw", ... 可选的工具矿辞 ] }, ... ]
      * }
      * </pre>
      */
