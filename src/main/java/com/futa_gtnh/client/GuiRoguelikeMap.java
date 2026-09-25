@@ -23,6 +23,8 @@ public final class GuiRoguelikeMap extends GuiScreen {
 
     private RoguelikeMapRenderer.View view;
     private int selectedLevel;
+    private long stateGeneration;
+    private boolean userSelectedLevel;
 
     @Override
     public boolean doesGuiPauseGame() {
@@ -34,6 +36,9 @@ public final class GuiRoguelikeMap extends GuiScreen {
         super.initGui();
         selectedLevel = RoguelikeMapClient.state()
             .getCurrentLevel();
+        stateGeneration = RoguelikeMapClient.state()
+            .getGeneration();
+        userSelectedLevel = false;
         buttonList.clear();
         int buttonWidth = 46;
         int startX = width - 6 - buttonWidth * RoguelikeMapSource.LEVEL_COUNT;
@@ -61,6 +66,17 @@ public final class GuiRoguelikeMap extends GuiScreen {
 
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        RoguelikeMapState state = RoguelikeMapClient.state();
+        if (stateGeneration != state.getGeneration()) {
+            selectedLevel = state.getCurrentLevel();
+            stateGeneration = state.getGeneration();
+            userSelectedLevel = false;
+            view = null;
+        } else if (!userSelectedLevel) {
+            // 未手动选层时跟随玩家当前层，避免扫描重建后仍停留在空楼层。
+            selectedLevel = state.getCurrentLevel();
+        }
+
         drawDefaultBackground();
         drawRect(4, 4, width - 4, height - 4, 0xD0101010);
 
@@ -74,21 +90,10 @@ public final class GuiRoguelikeMap extends GuiScreen {
 
         int mapWidth = width - MAP_LEFT * 2;
         int mapHeight = height - MAP_TOP - MAP_BOTTOM;
-        int playerX = mc.thePlayer == null ? RoguelikeMapClient.state()
-            .getCenterX() : (int) Math.floor(mc.thePlayer.posX);
-        int playerZ = mc.thePlayer == null ? RoguelikeMapClient.state()
-            .getCenterZ() : (int) Math.floor(mc.thePlayer.posZ);
-        view = RoguelikeMapRenderer.draw(
-            RoguelikeMapClient.state()
-                .getFloor(level),
-            playerX,
-            playerZ,
-            MAP_LEFT,
-            MAP_TOP,
-            mapWidth,
-            mapHeight,
-            true,
-            true);
+        int playerX = mc.thePlayer == null ? state.getCenterX() : (int) Math.floor(mc.thePlayer.posX);
+        int playerZ = mc.thePlayer == null ? state.getCenterZ() : (int) Math.floor(mc.thePlayer.posZ);
+        view = RoguelikeMapRenderer
+            .draw(state.getFloor(level), playerX, playerZ, MAP_LEFT, MAP_TOP, mapWidth, mapHeight, true, true);
 
         if (view == null) {
             fontRendererObj.drawStringWithShadow(
@@ -126,6 +131,7 @@ public final class GuiRoguelikeMap extends GuiScreen {
     protected void actionPerformed(GuiButton button) {
         if (button.id >= BUTTON_LEVEL_BASE && button.id < BUTTON_LEVEL_BASE + RoguelikeMapSource.LEVEL_COUNT) {
             selectedLevel = button.id - BUTTON_LEVEL_BASE;
+            userSelectedLevel = true;
             return;
         }
         if (button.id == BUTTON_REFRESH) {
@@ -145,14 +151,22 @@ public final class GuiRoguelikeMap extends GuiScreen {
         }
         if (keyCode == Keyboard.KEY_R) {
             RoguelikeMapClient.resetScan();
+            selectedLevel = RoguelikeMapClient.state()
+                .getCurrentLevel();
+            stateGeneration = RoguelikeMapClient.state()
+                .getGeneration();
+            userSelectedLevel = false;
+            view = null;
             return;
         }
         if (keyCode == Keyboard.KEY_UP || keyCode == Keyboard.KEY_LEFT) {
             selectedLevel = Math.max(0, selectedLevel - 1);
+            userSelectedLevel = true;
             return;
         }
         if (keyCode == Keyboard.KEY_DOWN || keyCode == Keyboard.KEY_RIGHT) {
             selectedLevel = Math.min(RoguelikeMapSource.LEVEL_COUNT - 1, selectedLevel + 1);
+            userSelectedLevel = true;
             return;
         }
         super.keyTyped(typedChar, keyCode);
@@ -164,8 +178,10 @@ public final class GuiRoguelikeMap extends GuiScreen {
         int wheel = Mouse.getEventDWheel();
         if (wheel > 0) {
             selectedLevel = Math.max(0, selectedLevel - 1);
+            userSelectedLevel = true;
         } else if (wheel < 0) {
             selectedLevel = Math.min(RoguelikeMapSource.LEVEL_COUNT - 1, selectedLevel + 1);
+            userSelectedLevel = true;
         }
     }
 

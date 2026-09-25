@@ -93,6 +93,10 @@ public final class RoguelikeMapScanner {
             || playerChunkZ != lastPlayerChunkZ;
 
         if (contextChanged) {
+            // 玩家跨区块或楼层时先提交旧任务，避免已读取的来源方块因任务被替换而丢失。
+            if (currentTask != null) {
+                finishTask(state, currentTask);
+            }
             lastDimension = world.provider.dimensionId;
             lastLevel = currentLevel;
             lastPlayerChunkX = playerChunkX;

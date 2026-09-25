@@ -21,8 +21,10 @@ public final class RoguelikeMapState {
     private int centerX;
     private int centerZ;
     private boolean initialized;
+    private long generation;
 
     public void reset(int dimension, int centerX, int centerZ) {
+        generation++;
         this.dimension = dimension;
         this.centerX = centerX;
         this.centerZ = centerZ;
@@ -33,6 +35,11 @@ public final class RoguelikeMapState {
 
     public boolean isInitialized() {
         return initialized;
+    }
+
+    /** 返回地图数据的代数，用于让全屏界面识别世界或扫描重置。 */
+    public long getGeneration() {
+        return generation;
     }
 
     public int getDimension() {

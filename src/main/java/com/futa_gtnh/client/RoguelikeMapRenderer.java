@@ -44,7 +44,9 @@ public final class RoguelikeMapRenderer {
         int mapWidth = maxX - minX + 1;
         int mapHeight = maxZ - minZ + 1;
         double scale = Math.min((double) (width - 4) / mapWidth, (double) (height - 4) / mapHeight);
-        if (scale < 1.0D) scale = 1.0D;
+        // 全屏地图必须允许缩小，否则探索范围变大后地图会超出绘制区域，看起来像空白。
+        // 悬浮小地图仍保持至少一个像素对应一个方块，避免近距离视图过度缩小。
+        if (!fitAll && scale < 1.0D) scale = 1.0D;
         int renderedWidth = (int) Math.ceil(mapWidth * scale);
         int renderedHeight = (int) Math.ceil(mapHeight * scale);
         int mapLeft = left + Math.max(2, (width - renderedWidth) / 2);
