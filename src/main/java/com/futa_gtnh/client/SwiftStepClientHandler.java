@@ -86,8 +86,6 @@ public class SwiftStepClientHandler {
 
     public static final class Listener {
 
-        /** 上次报告过的状态串，用来避免每 tick 刷日志。 */
-        private String lastReport;
         /** 「处理器活着」这条只打一次。 */
         private boolean aliveReported;
 
@@ -141,7 +139,6 @@ public class SwiftStepClientHandler {
                 // 换了玩家对象：上一次那份「原值」已经不属于这个对象了，丢掉
                 watchedPlayer = player;
                 originalFlySpeed = null;
-                lastReport = null;
             }
 
             ItemStack charm = ItemSwiftStep.findEquipped(player);
@@ -197,55 +194,10 @@ public class SwiftStepClientHandler {
                 }
             }
 
-            report(player, charm, capabilities);
         }
 
         /** 照明失败只报一次，避免每 tick 刷屏。 */
         private boolean lightFailed;
 
-        /**
-         * 状态变了才打一行日志。
-         *
-         * <p>
-         * 「飞行速度没反应」有两条完全不同的岔路，光看游戏画面分不出来：
-         *
-         * <ul>
-         * <li><b>没装备 / 倍率还是 1.0</b> —— 物品没戴上，或者界面里的值没写进 NBT；</li>
-         * <li><b>装备了、倍率也对，但 flySpeed 没跟着变</b> —— 那才是速度本身的问题。</li>
-         * </ul>
-         *
-         * 这一行把「饰品找没找到、NBT 里是什么、capabilities 现在是多少」一次摊开，
-         * 省掉来回猜。只在变化时打，一次会话最多几行。
-         *
-         * <p>
-         * 顺带也把「戴着迅步却一点速度都没加」这种状态暴露出来 —— 那正是
-         * 玩家会报「无效」的情形。
-         */
-        private void report(EntityPlayer player, ItemStack charm, PlayerCapabilities capabilities) {
-            String line;
-            if (charm == null) {
-                line = "未装备（capabilities.flySpeed=" + capabilities.getFlySpeed() + "）";
-            } else {
-                line = "已装备：飞行 x" + ItemSwiftStep.getFlightMultiplier(charm)
-                    + " / 移动 x"
-                    + ItemSwiftStep.getWalkMultiplier(charm)
-                    + " / 照明 "
-                    + ItemSwiftStep.describeLight(ItemSwiftStep.getLightLevel(charm))
-                    + "，NBT="
-                    + (charm.getTagCompound() == null ? "无" : "有")
-                    + "，capabilities.flySpeed="
-                    + capabilities.getFlySpeed()
-                    + "，isFlying="
-                    + capabilities.isFlying
-                    + (clampedForServer ? "，[已按服务器上限压低]" : "")
-                    + "，光源="
-                    + SwiftStepLight.describe();
-            }
-
-            if (!line.equals(lastReport)) {
-                lastReport = line;
-                FutaGtnhMod.LOG.info("迅步：{}", line);
-            }
-        }
     }
 }

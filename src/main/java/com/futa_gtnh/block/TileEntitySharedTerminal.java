@@ -147,20 +147,19 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
     @Override
     public FluidTankInfo[] getTankInfo(ForgeDirection from) {
-        if (outputFluid == null) {
-            return new FluidTankInfo[] { new FluidTankInfo(null) };
-        }
-
-        long amount = SharedStorageManager.getStorage()
-            .getFluidAmount(outputFluid);
-        if (amount <= 0L) {
-            return new FluidTankInfo[] { new FluidTankInfo(null) };
+        FluidStack fluid = null;
+        if (outputFluid != null) {
+            long amount = SharedStorageManager.getStorage()
+                .getFluidAmount(outputFluid);
+            if (amount > 0L) {
+                fluid = outputFluid.prototype(Math.min(amount, Integer.MAX_VALUE));
+            }
         }
 
         // 容量报 Integer.MAX_VALUE：共享存储实际上限是 long，
         // 但 IFluidHandler 的接口只认 int，报个「管道这边永远灌不满」就够了
-        return new FluidTankInfo[] {
-            new FluidTankInfo(outputFluid.prototype(Math.min(amount, Integer.MAX_VALUE)), Integer.MAX_VALUE) };
+        // 即使当前为空也返回合法的 tank 信息；FluidTankInfo(IFluidTank) 不能传 null。
+        return new FluidTankInfo[] { new FluidTankInfo(fluid, Integer.MAX_VALUE) };
     }
 
     // ==================================================================
