@@ -9,6 +9,7 @@ import com.futa_gtnh.client.GuiSwiftStep;
 import com.futa_gtnh.client.KeyHandler;
 import com.futa_gtnh.client.LocatorBeamRenderer;
 import com.futa_gtnh.client.LocatorState;
+import com.futa_gtnh.client.RoguelikeMapClient;
 import com.futa_gtnh.client.SwiftStepClientHandler;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketLocatorAction;
@@ -26,6 +27,7 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void preInit(FMLPreInitializationEvent event) {
         super.preInit(event);
+        RoguelikeMapClient.register();
         KeyHandler.register();
         SwiftStepClientHandler.register();
 

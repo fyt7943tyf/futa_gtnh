@@ -17,6 +17,8 @@ futa_gtnh.swift_step.gui.server_clamp=多人服务器上限 %sx，已自动压�
 
 key.categories.futa_gtnh=FutaGTNH
 key.futa_gtnh.shared_terminal=打开共享背包
+key.futa_gtnh.dungeon_map=打开地牢全屏地图
+key.futa_gtnh.dungeon_minimap=切换地牢悬浮小地图
 
 futa_gtnh.gui.tab.items=物品
 futa_gtnh.gui.tab.fluids=流体
