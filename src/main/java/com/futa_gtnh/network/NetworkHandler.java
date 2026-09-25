@@ -50,7 +50,8 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketRtsUndoRedo.Handler.class, PacketRtsUndoRedo.class, 16, Side.SERVER);
         INSTANCE.registerMessage(PacketRtsRotate.Handler.class, PacketRtsRotate.class, 17, Side.SERVER);
         // 小游戏助手（lootgames 联动）：操作 / 快照 / 增量 / 进度
-        INSTANCE.registerMessage(PacketLootassistAction.Handler.class, PacketLootassistAction.class, 18, Side.SERVER);
+        // discriminator 在同一个 SimpleNetworkWrapper 内必须唯一；18 已用于 PacketTerminalItem。
+        INSTANCE.registerMessage(PacketLootassistAction.Handler.class, PacketLootassistAction.class, 22, Side.SERVER);
         INSTANCE.registerMessage(PacketLootassistSync.Handler.class, PacketLootassistSync.class, 19, Side.CLIENT);
         INSTANCE.registerMessage(PacketLootassistDelta.Handler.class, PacketLootassistDelta.class, 20, Side.CLIENT);
         INSTANCE
