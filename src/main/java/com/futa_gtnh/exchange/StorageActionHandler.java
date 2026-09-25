@@ -260,8 +260,8 @@ public final class StorageActionHandler {
             selected = null;
         } else if (key != null && !SharedStorageManager.getStorage()
             .hasItem(key)) {
-            return;
-        }
+                return;
+            }
 
         terminal.setOutputItem(selected);
         NetworkHandler.INSTANCE.sendTo(new PacketTerminalItem(selected), player);
