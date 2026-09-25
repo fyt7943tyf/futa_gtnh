@@ -38,13 +38,19 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
     /** 匠魂里最能代表「这个模组在」的一个类。 */
     private static final String TCONSTRUCT_PROBE = "tconstruct.tools.logic.CraftingStationLogic";
 
+    /** LootGames 里最能代表「这个模组在」的一个类。 */
+    private static final String LOOTGAMES_PROBE = "ru.timeconqueror.lootgames.api.block.GameMasterBlock";
+
+    /** lootgames 目标的 mixin 全部收在这个子包里，按包前缀分流探测。 */
+    private static final String LOOTGAMES_MIXIN_PACKAGE = "com.futa_gtnh.mixins.lootgames.";
+
     /**
      * 目标是原版类、任何时候都该生效的 mixin。
      *
      * <p>
-     * 其余的 mixin 都针对可选依赖（匠魂），缺席时要整组跳过 —— 见
+     * 其余的 mixin 都针对可选依赖（匠魂 / LootGames），缺席时要整组跳过 —— 见
      * {@link #shouldApplyMixin} 的分流逻辑。新加原版目标的 mixin 记得
-     * 把类名登记进来，否则匠魂缺席的环境里它会被一起跳掉。
+     * 把类名登记进来，否则可选依赖缺席的环境里它会被一起跳掉。
      */
     private static final Set<String> VANILLA_TARGET_MIXINS = new HashSet<>(
         Arrays.asList(
@@ -55,6 +61,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
             "MixinEntityRenderer"));
 
     private static boolean present;
+
+    private static boolean lootgamesPresent;
 
     private static boolean tinkersPresent() {
         if (present) return true;
@@ -81,6 +89,32 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         return false;
     }
 
+    /** 和 {@link #tinkersPresent()} 同一套两来源判定，只是换了个探测类。 */
+    private static boolean lootgamesPresent() {
+        if (lootgamesPresent) return true;
+
+        try {
+            if (Loader.isModLoaded("lootgames")) {
+                lootgamesPresent = true;
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // 同上：启动早期兜底走类查找
+        }
+
+        try {
+            if (Launch.classLoader != null
+                && Launch.classLoader.getResource(LOOTGAMES_PROBE.replace('.', '/') + ".class") != null) {
+                lootgamesPresent = true;
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // 同上
+        }
+
+        return false;
+    }
+
     @Override
     public void onLoad(String mixinPackage) {}
 
@@ -91,6 +125,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        // lootgames 目标的 mixin：装了 lootgames 才应用，没装连碰都不碰
+        if (mixinClassName.startsWith(LOOTGAMES_MIXIN_PACKAGE)) return lootgamesPresent();
         // 原版目标的 mixin（俯瞰远程 GUI 的距离校验放宽等）无条件生效
         String simpleName = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
         if (VANILLA_TARGET_MIXINS.contains(simpleName)) return true;

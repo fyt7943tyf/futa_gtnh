@@ -15,6 +15,7 @@ import com.futa_gtnh.common.ForgeEventHandler;
 import com.futa_gtnh.common.GuiHandler;
 import com.futa_gtnh.common.ModEventHandler;
 import com.futa_gtnh.item.ItemLocatorWand;
+import com.futa_gtnh.item.ItemMinigameHelper;
 import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.shared.SharedStorageManager;
@@ -42,6 +43,9 @@ public class CommonProxy {
     /** 寻物魔杖。 */
     public static ItemLocatorWand locatorWand;
 
+    /** 小游戏助手。 */
+    public static ItemMinigameHelper minigameHelper;
+
     /**
      * 迅步照明用的隐形光源方块。
      *
@@ -64,7 +68,12 @@ public class CommonProxy {
         registerBlocks();
         registerSwiftStep();
         registerLocatorWand();
+        registerMinigameHelper();
         registerRecipes();
+
+        // lootgames 联动的服务端行为覆写（重试上限等）。
+        // 必须在它的配置加载之后：本模组声明了 after:lootgames，preInit 一定排在后面。
+        com.futa_gtnh.lootassist.LootgamesCompat.applyServerTweaks();
 
         NetworkRegistry.INSTANCE.registerGuiHandler(FutaGtnhMod.instance, new GuiHandler());
     }
@@ -160,6 +169,22 @@ public class CommonProxy {
     }
 
     /**
+     * 注册小游戏助手。
+     *
+     * <p>
+     * 物品本身不依赖 lootgames（候选点推算、列表都在服务端按需探测），
+     * 所以只受配置开关守卫；没装 LootGames 时打开界面会看到空态提示。
+     */
+    private void registerMinigameHelper() {
+        if (!Config.enableMinigameHelper) return;
+
+        minigameHelper = new ItemMinigameHelper();
+        GameRegistry.registerItem(minigameHelper, ItemMinigameHelper.NAME);
+        FutaGtnhMod.minigameHelper = minigameHelper;
+        FutaGtnhMod.LOG.info("已注册小游戏助手");
+    }
+
+    /**
      * 共享终端的合成配方。
      *
      * <p>
@@ -203,6 +228,16 @@ public class CommonProxy {
                     new ItemStack(locatorWand, 1),
                     new Object[] { " G ", "ECE", " G ", 'G', "ingotGold", 'E', Items.ender_eye, 'C', Items.compass }));
         }
+
+        // 小游戏助手：纸×8 + 指南针。
+        // 「纸」对应清单/地图，「指南针」对应导航 —— 和功能是自洽的。
+        // 指南针故意用原版物品而不是矿物词典，理由同寻物魔杖。
+        if (minigameHelper != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(minigameHelper, 1),
+                    new Object[] { "PPP", "PCP", "PPP", 'P', Items.paper, 'C', Items.compass }));
+        }
     }
 
     /**
@@ -227,6 +262,18 @@ public class CommonProxy {
      * 所以不需要服务端配合开容器，也就不需要 {@code IGuiHandler} 那一套。
      */
     public void openLocatorGui() {
+        // 服务端不做任何事
+    }
+
+    /**
+     * 打开小游戏助手的清单界面。只有 {@link ClientProxy} 覆写了它。
+     *
+     * <p>
+     * 和 {@link #openLocatorGui} 同一个理由：纯客户端 GuiScreen，没有 Container。
+     * 界面打开时会自己向服务端要快照（{@code PacketLootassistAction.SYNC}），
+     * 所以这里连坐标都不需要。
+     */
+    public void openMinigameHelperGui() {
         // 服务端不做任何事
     }
 

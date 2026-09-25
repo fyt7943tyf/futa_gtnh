@@ -79,11 +79,14 @@ public final class KeyHandler {
                 RoguelikeMapClient.toggleMiniMap();
                 return;
             }
-            if (openTerminal == null || !openTerminal.isPressed()) return;
 
             // 已经开着别的界面（聊天、背包、容器）时不要抢按键
             if (minecraft.thePlayer == null || minecraft.currentScreen != null) return;
 
+            // ★ isPressed() 每调用一次就消耗一次按压计数（pressTime--）——
+            // 对同一个键只能调一次！之前这里先 `!openTerminal.isPressed()` 判断
+            // 又在发包处再判一次，第二次恒为 false，B 键的包永远发不出去
+            // （共享背包只能靠终端方块打开）。恢复为单次消费。
             if (openTerminal != null && openTerminal.isPressed()) {
                 NetworkHandler.INSTANCE.sendToServer(new PacketOpenGui());
             }
