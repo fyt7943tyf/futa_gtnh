@@ -56,6 +56,8 @@ futa_gtnh.swift_step.gui.recovery.speed_up=Speed +
 
 key.categories.futa_gtnh=FutaGTNH
 key.futa_gtnh.shared_terminal=Open Shared Storage
+key.futa_gtnh.dungeon_map=Open Dungeon Fullscreen Map
+key.futa_gtnh.dungeon_minimap=Toggle Dungeon Minimap
 
 futa_gtnh.gui.tab.items=Items
 futa_gtnh.gui.tab.fluids=Fluids
