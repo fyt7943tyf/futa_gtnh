@@ -40,5 +40,13 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketLocatorAction.Handler.class, PacketLocatorAction.class, 9, Side.SERVER);
         // 匠魂合成站旁边那块共享存储区：客户端算好「这一页显示哪些东西」推给服务端
         INSTANCE.registerMessage(PacketStationView.Handler.class, PacketStationView.class, 10, Side.SERVER);
+        // 俯瞰建筑：会话开关（C2S）与开启答复（S2C）
+        INSTANCE.registerMessage(PacketRtsToggle.Handler.class, PacketRtsToggle.class, 11, Side.SERVER);
+        INSTANCE.registerMessage(PacketRtsToggleAck.Handler.class, PacketRtsToggleAck.class, 12, Side.CLIENT);
+        INSTANCE.registerMessage(PacketRtsInteract.Handler.class, PacketRtsInteract.class, 13, Side.SERVER);
+        INSTANCE.registerMessage(PacketRtsBreak.Handler.class, PacketRtsBreak.class, 14, Side.SERVER);
+        INSTANCE.registerMessage(PacketRtsQuickBuild.Handler.class, PacketRtsQuickBuild.class, 15, Side.SERVER);
+        INSTANCE.registerMessage(PacketRtsUndoRedo.Handler.class, PacketRtsUndoRedo.class, 16, Side.SERVER);
+        INSTANCE.registerMessage(PacketRtsRotate.Handler.class, PacketRtsRotate.class, 17, Side.SERVER);
     }
 }

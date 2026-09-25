@@ -246,6 +246,16 @@ public class CommonProxy {
     }
 
     /**
+     * 服务端拒绝了俯瞰模式的开启请求。只有 {@link ClientProxy} 覆写了它
+     * （客户端要退掉乐观进入的界面并提示原因），服务端这个方法什么都不做。
+     *
+     * @param reasonKey 语言键，null 表示服务端没给原因
+     */
+    public void onRtsToggleRejected(String reasonKey) {
+        // 服务端不做任何事
+    }
+
+    /**
      * 给玩家发一条本地化的聊天提示。
      *
      * <p>

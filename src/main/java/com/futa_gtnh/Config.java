@@ -193,17 +193,156 @@ public class Config {
     public static boolean tinkersAutoFill = true;
 
     // ------------------------------------------------------------------
+    // 俯瞰建筑（RTS 模式）
+    // ------------------------------------------------------------------
+
+    /**
+     * 是否启用俯瞰建筑模式（G 键开关的 RTS 视角 + 远程搭建/互动）。
+     *
+     * <p>
+     * 这是<b>服务端权威</b>的开关：客户端的 G 键发来的开启请求在这里被拒绝时，
+     * 会收到一个拒绝回包并自动退出俯瞰界面。
+     */
+    public static boolean rtsEnable = true;
+
+    /**
+     * 俯瞰模式的操作半径（方块，以玩家为中心的正方形半边长）。
+     *
+     * <p>
+     * 双重含义：客户端把<b>相机</b>钳在这个范围内（表现层），服务端把所有
+     * 远程动作的<b>目标</b>校验在这个范围内（安全层）。两端各读各自的配置，
+     * 不一致时以服务端的拒绝为准 —— 客户端最多是「多显示了一点、点了没反应」。
+     *
+     * <p>
+     * 默认 128 = 8 个区块。注意客户端的视距（渲染距离）要大于半径 ÷ 16，
+     * 否则相机移到边界附近时远处的方块还没被渲染出来。
+     */
+    public static int rtsMaxActionRadius = 128;
+
+    /** 相机允许低到玩家脚下多少格（防穿到基岩层以下看着难受）。 */
+    public static int rtsHeightMinOffset = -35;
+
+    /** 相机允许高到玩家头顶多少格。 */
+    public static int rtsHeightMaxOffset = 110;
+
+    /** 键盘平移速度（格/tick）。WASD 用，60 格/秒的默认值比跑得快、比飞得慢。 */
+    public static float rtsCameraPanSpeed = 1.5F;
+
+    /**
+     * 光标拾取距离（格）。点不到比这更远的东西。
+     *
+     * <p>
+     * 这个值是纯客户端的（服务端校验的是玩家半径），拾取射线每帧做一次
+     * 128 格的方块 raytrace，和原版准星的开销同级。
+     */
+    public static int rtsPickRange = 128;
+
+    /**
+     * 远程互动的虚拟眼距（格）。服务端把玩家临时放到「命中点往回退这么多」
+     * 的位置上再跑原版交互 —— GT 机器等的距离校验普遍认 4~8 格。
+     */
+    public static double rtsInteractReach = 4.0D;
+
+    /**
+     * 每 tick 每玩家最多几次单块操作（点击互动/放置/破坏共享这个额度）。
+     *
+     * <p>
+     * 防改客户端灌包用。批量操作不占这个额度，由批量引擎自己的每 tick 预算
+     * （{@code rtsBuildBatchBlocksPerTick}）限速。
+     */
+    public static int rtsOpsPerTickPerPlayer = 8;
+
+    /**
+     * 生存模式下远程破坏是否要求工具挖掘等级够。
+     *
+     * <p>
+     * 原版行为是「挖掉了但没有掉落物」—— 俯瞰模式一次拖动扫过一整面墙，
+     * 用这个行为等于毁墙不掉东西，太伤。默认改成拒绝并提示。
+     */
+    public static boolean rtsRequireCorrectToolForBreak = true;
+
+    /**
+     * 批量形状每条边的最大跨度（格）。上限 32 时包围盒最多 32×32×32，
+     * 与 {@code rtsMaxSelectionVolume} 双重限制。
+     */
+    public static int rtsMaxShapeDimension = 32;
+
+    /** 批量形状生成后的最大格数（实心立方体 32³ 正好 32768）。 */
+    public static int rtsMaxSelectionVolume = 32768;
+
+    /**
+     * 批量引擎每 tick 每玩家最多执行多少格。这是「任务多快跑完」和
+     * 「服务器卡不卡」之间唯一的旋钮。
+     */
+    public static int rtsBuildBatchBlocksPerTick = 64;
+
+    /**
+     * 批量建造的材料是否允许从共享背包补（先玩家背包、不足再共享背包）。
+     * 关掉就只用背包，缺料任务会中止。
+     */
+    public static boolean rtsUseSharedStorage = true;
+
+    /** 撤销栈每栈最多几条记录（一次批量任务 = 一条）。 */
+    public static int rtsHistoryMaxEntries = 3;
+
+    /** 撤销记录的保留时长（秒），过期在入栈/出栈时惰性清理。 */
+    public static int rtsHistoryRetentionSeconds = 600;
+
+    /** 键盘升降速度（格/tick）。空格 / 左 Shift 用。 */
+    public static float rtsCameraVerticalSpeed = 1.2F;
+
+    /** Q/E 旋转速度（度/tick）。 */
+    public static float rtsCameraRotateSpeed = 4.0F;
+
+    /** 滚轮推拉速度（格/每格滚轮）。 */
+    public static float rtsCameraZoomSpeed = 3.0F;
+
+    /** 鼠标拖拽旋转灵敏度（度/像素）。中键拖拽用。 */
+    public static float rtsMouseRotateSensitivity = 0.35F;
+
+    /**
+     * 鼠标拖拽平移灵敏度（格/像素，按相机高度再缩放）。右键拖拽用。
+     *
+     * <p>
+     * 拉得越高一格像素代表的世界距离越大（缩放系数 0.5 ~ 6.0，见
+     * {@code RtsCameraController}），这是地图软件的通用手感。
+     */
+    public static float rtsMousePanSensitivity = 0.05F;
+
+    /**
+     * 共享终端界面的排序方式（0=名称 1=数量 2=模组），<b>默认按数量</b>。
+     *
+     * <p>
+     * 这是<b>客户端偏好</b>：点界面上的排序按钮时会写回配置文件（见
+     * {@link #saveClientGuiSort}），下次打开界面/重启游戏都记住。
+     * 存的是整数而不是引用客户端的枚举，保证服务端加载这个类时安全。
+     */
+    public static int guiSortMode = 1;
+
+    // ------------------------------------------------------------------
     // 合成
     // ------------------------------------------------------------------
 
     /** 是否注册共享终端的合成配方。 */
     public static boolean enableRecipe = true;
 
+    /** 配置文件位置，在 {@link #synchronizeConfiguration} 里记下，供运行时回写用。 */
+    private static File configFileRef;
+
     public static void synchronizeConfiguration(File configFile) {
+        configFileRef = configFile;
         Configuration configuration = new Configuration(configFile);
 
         enableDebugLogging = configuration
             .getBoolean("enableDebugLogging", Configuration.CATEGORY_GENERAL, enableDebugLogging, "打开后会输出更多调试日志");
+
+        guiSortMode = configuration.getInt(
+            "guiSortMode",
+            Configuration.CATEGORY_GENERAL,
+            guiSortMode,
+            0,
+            2,
+            "共享终端界面的排序方式（0=名称 1=数量 2=模组）。客户端偏好：界面里点排序按钮会自动改写这一项。");
 
         allowRemoteAccess = configuration.getBoolean(
             "allowRemoteAccess",
@@ -322,6 +461,155 @@ public class Config {
                 + "不碰目标方块本身，也不掉落物品。"
                 + "矿脉大多整个埋在石头里，关掉它传送在矿洞里基本用不了。");
 
+        rtsEnable = configuration.getBoolean(
+            "rtsEnable",
+            Configuration.CATEGORY_GENERAL,
+            rtsEnable,
+            "是否启用俯瞰建筑模式（G 键开关的 RTS 视角 + 远程搭建/互动）。服务端权威：关掉后客户端的开启请求会被拒绝并自动退出。");
+
+        rtsMaxActionRadius = configuration.getInt(
+            "rtsMaxActionRadius",
+            Configuration.CATEGORY_GENERAL,
+            rtsMaxActionRadius,
+            16,
+            512,
+            "俯瞰模式的操作半径（方块，玩家周围正方形的半边长）。客户端用它钳制相机，服务端用它校验所有远程动作的目标。默认 128 = 8 区块，客户端视距需大于半径÷16。");
+
+        rtsHeightMinOffset = configuration.getInt(
+            "rtsHeightMinOffset",
+            Configuration.CATEGORY_GENERAL,
+            rtsHeightMinOffset,
+            -256,
+            0,
+            "相机允许低到玩家脚下多少格。");
+
+        rtsHeightMaxOffset = configuration
+            .getInt("rtsHeightMaxOffset", Configuration.CATEGORY_GENERAL, rtsHeightMaxOffset, 1, 256, "相机允许高到玩家头顶多少格。");
+
+        rtsCameraPanSpeed = configuration.getFloat(
+            "rtsCameraPanSpeed",
+            Configuration.CATEGORY_GENERAL,
+            rtsCameraPanSpeed,
+            0.1F,
+            10.0F,
+            "俯瞰相机键盘平移速度（格/tick），WASD 用。");
+
+        rtsPickRange = configuration.getInt(
+            "rtsPickRange",
+            Configuration.CATEGORY_GENERAL,
+            rtsPickRange,
+            16,
+            512,
+            "俯瞰光标的拾取距离（格）。纯客户端表现，服务端校验的是操作半径。");
+
+        rtsInteractReach = configuration.getFloat(
+            "rtsInteractReach",
+            Configuration.CATEGORY_GENERAL,
+            (float) rtsInteractReach,
+            2.0F,
+            8.0F,
+            "远程互动的虚拟眼距（格）：服务端把玩家临时放到命中点往回退这个距离的位置再跑原版交互。");
+
+        rtsOpsPerTickPerPlayer = configuration.getInt(
+            "rtsOpsPerTickPerPlayer",
+            Configuration.CATEGORY_GENERAL,
+            rtsOpsPerTickPerPlayer,
+            1,
+            64,
+            "俯瞰模式下每 tick 每玩家最多几次单块操作（防改客户端灌包；批量操作另有限速）。");
+
+        rtsRequireCorrectToolForBreak = configuration.getBoolean(
+            "rtsRequireCorrectToolForBreak",
+            Configuration.CATEGORY_GENERAL,
+            rtsRequireCorrectToolForBreak,
+            "生存模式下远程破坏是否要求工具挖掘等级够。原版行为是挖掉了但没有掉落物；开着的话会直接拒绝并提示。");
+
+        rtsMaxShapeDimension = configuration.getInt(
+            "rtsMaxShapeDimension",
+            Configuration.CATEGORY_GENERAL,
+            rtsMaxShapeDimension,
+            1,
+            64,
+            "批量形状每条边的最大跨度（格）。");
+
+        rtsMaxSelectionVolume = configuration.getInt(
+            "rtsMaxSelectionVolume",
+            Configuration.CATEGORY_GENERAL,
+            rtsMaxSelectionVolume,
+            1,
+            1000000,
+            "批量形状生成后的最大格数。");
+
+        rtsBuildBatchBlocksPerTick = configuration.getInt(
+            "rtsBuildBatchBlocksPerTick",
+            Configuration.CATEGORY_GENERAL,
+            rtsBuildBatchBlocksPerTick,
+            1,
+            1024,
+            "批量引擎每 tick 每玩家最多执行多少格（任务速度 vs 服务器负载的唯一旋钮）。");
+
+        rtsUseSharedStorage = configuration.getBoolean(
+            "rtsUseSharedStorage",
+            Configuration.CATEGORY_GENERAL,
+            rtsUseSharedStorage,
+            "批量建造的材料是否允许从共享背包补（先玩家背包、不足再共享背包）。关掉就只用背包，缺料任务会中止。");
+
+        rtsHistoryMaxEntries = configuration.getInt(
+            "rtsHistoryMaxEntries",
+            Configuration.CATEGORY_GENERAL,
+            rtsHistoryMaxEntries,
+            1,
+            20,
+            "撤销栈每栈最多几条记录（一次批量任务 = 一条）。");
+
+        rtsHistoryRetentionSeconds = configuration.getInt(
+            "rtsHistoryRetentionSeconds",
+            Configuration.CATEGORY_GENERAL,
+            rtsHistoryRetentionSeconds,
+            60,
+            86400,
+            "撤销记录的保留时长（秒）。");
+
+        rtsCameraVerticalSpeed = configuration.getFloat(
+            "rtsCameraVerticalSpeed",
+            Configuration.CATEGORY_GENERAL,
+            rtsCameraVerticalSpeed,
+            0.1F,
+            10.0F,
+            "俯瞰相机升降速度（格/tick），空格/左Shift 用。");
+
+        rtsCameraRotateSpeed = configuration.getFloat(
+            "rtsCameraRotateSpeed",
+            Configuration.CATEGORY_GENERAL,
+            rtsCameraRotateSpeed,
+            0.5F,
+            45.0F,
+            "俯瞰相机 Q/E 旋转速度（度/tick）。");
+
+        rtsCameraZoomSpeed = configuration.getFloat(
+            "rtsCameraZoomSpeed",
+            Configuration.CATEGORY_GENERAL,
+            rtsCameraZoomSpeed,
+            0.5F,
+            20.0F,
+            "俯瞰相机滚轮推拉速度（格/每格滚轮）。");
+
+        rtsMouseRotateSensitivity = configuration.getFloat(
+            "rtsMouseRotateSensitivity",
+            Configuration.CATEGORY_GENERAL,
+            rtsMouseRotateSensitivity,
+            0.05F,
+            3.0F,
+            "俯瞰相机中键拖拽旋转灵敏度（度/像素）。");
+
+        rtsMousePanSensitivity = configuration.getFloat(
+            "rtsMousePanSensitivity",
+            Configuration.CATEGORY_GENERAL,
+            rtsMousePanSensitivity,
+            0.005F,
+            0.5F,
+            "俯瞰相机右键拖拽平移灵敏度（格/像素，按相机高度自动缩放）。");
+
         // 上限调到超过服务器安全值时提醒一句。
         //
         // 这个值不是"偏好"，是物理约束：超过去之后飞行速度不是"快一点但有点风险"，
@@ -338,6 +626,27 @@ public class Config {
 
         if (configuration.hasChanged()) {
             configuration.save();
+        }
+    }
+
+    /**
+     * 运行时回写共享终端的排序偏好（点界面排序按钮时调用）。
+     *
+     * <p>
+     * 这是本工程唯一一处「cfg 在 preInit 之外被写」的地方：重新读一遍配置文件、
+     * 只改 guiSortMode 一项再存盘，其余配置项保持原样。写盘在主线程、只点按钮
+     * 才发生，一次几毫秒，无感。
+     */
+    public static void saveClientGuiSort(int mode) {
+        guiSortMode = mode;
+        if (configFileRef == null) return;
+        try {
+            Configuration configuration = new Configuration(configFileRef);
+            configuration.get(Configuration.CATEGORY_GENERAL, "guiSortMode", guiSortMode)
+                .set(Integer.toString(mode));
+            configuration.save();
+        } catch (Throwable t) {
+            FutaGtnhMod.LOG.warn("保存共享终端排序偏好失败（不影响本次使用）", t);
         }
     }
 }
