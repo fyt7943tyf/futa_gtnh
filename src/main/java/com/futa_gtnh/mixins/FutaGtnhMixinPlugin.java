@@ -47,7 +47,12 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
      * 把类名登记进来，否则匠魂缺席的环境里它会被一起跳掉。
      */
     private static final Set<String> VANILLA_TARGET_MIXINS = new HashSet<>(
-        Arrays.asList("MixinEntityPlayer", "MixinEntityPlayerMP", "MixinEntityRenderer"));
+        Arrays.asList(
+            "MixinBlockReed",
+            "MixinEntityPlayer",
+            "MixinEntityPlayerMP",
+            "MixinEntityPlayerSP",
+            "MixinEntityRenderer"));
 
     private static boolean present;
 

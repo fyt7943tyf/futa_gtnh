@@ -21,14 +21,13 @@ import com.futa_gtnh.shared.SharedStorageManager;
  *
  * <p>
  * 除了「右键开界面」，它还把自己伪装成一个<b>无限容量的容器</b>，
- * 让 GT 的管道、泵、流体覆盖板能直接和共享存储对接：
+ * 让物品管道、流体管道和泵能直接和共享存储对接：
  *
  * <ul>
  * <li>{@link IFluidHandler}：管道<b>抽</b>走的是这个终端「当前选中的流体」
  * （在界面里对着流体条目按中键设置）；管道<b>灌</b>进来的流体直接进共享存储。</li>
- * <li>{@link ISidedInventory}：物品管道往里塞的东西会被立刻吸收进共享存储。
- * 只进不出 —— 从方块抽物品需要「抽哪种」的语义，那个交给界面里的搜索来做，
- * 硬塞给管道反而会让人误操作。</li>
+ * <li>{@link ISidedInventory}：物品管道从输入槽放入的东西会立刻进共享存储；
+ * 输出槽则显示界面中键选中的物品，管道抽取时直接扣共享存储。</li>
  * </ul>
  *
  * <p>
@@ -37,10 +36,14 @@ import com.futa_gtnh.shared.SharedStorageManager;
  */
 public class TileEntitySharedTerminal extends TileEntity implements IFluidHandler, ISidedInventory {
 
-    private static final int[] ACCESSIBLE_SLOTS = new int[] { 0 };
+    private static final int INPUT_SLOT = 0;
+    private static final int OUTPUT_SLOT = 1;
+    private static final int[] ACCESSIBLE_SLOTS = new int[] { INPUT_SLOT, OUTPUT_SLOT };
 
     /** 这个终端往外输出的流体。null 表示还没选。 */
     private FluidKey outputFluid;
+    /** 这个终端往外输出的物品。null 表示还没选。 */
+    private ItemKey outputItem;
 
     public FluidKey getOutputFluid() {
         return outputFluid;
@@ -48,6 +51,15 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
     public void setOutputFluid(FluidKey key) {
         this.outputFluid = key;
+        markDirty();
+    }
+
+    public ItemKey getOutputItem() {
+        return outputItem;
+    }
+
+    public void setOutputItem(ItemKey key) {
+        this.outputItem = key;
         markDirty();
     }
 
@@ -152,7 +164,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     }
 
     // ==================================================================
-    // ISidedInventory：只进不出的物品吸收口
+    // ISidedInventory：输入槽吸收物品，输出槽从共享存储提取所选物品
     // ==================================================================
 
     @Override
@@ -162,33 +174,58 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
     @Override
     public boolean canInsertItem(int slot, ItemStack stack, int side) {
-        return stack != null;
+        return slot == INPUT_SLOT && stack != null && stack.getItem() != null && stack.stackSize > 0;
     }
 
     @Override
     public boolean canExtractItem(int slot, ItemStack stack, int side) {
-        return false;
+        if (slot != OUTPUT_SLOT || outputItem == null || stack == null) return false;
+        return outputItem.equals(ItemKey.of(stack)) && SharedStorageManager.getStorage()
+            .getItemAmount(outputItem) > 0L;
     }
 
     @Override
     public int getSizeInventory() {
-        return 1;
+        return 2;
     }
 
-    /** 永远报空：塞进来的东西已经被吸收进共享存储了。 */
+    /** 输入槽永远报空；输出槽显示所选物品在共享存储中的一组数量。 */
     @Override
     public ItemStack getStackInSlot(int slot) {
-        return null;
+        if (slot != OUTPUT_SLOT || outputItem == null) return null;
+
+        long available = SharedStorageManager.getStorage()
+            .getItemAmount(outputItem);
+        if (available <= 0L) return null;
+
+        ItemStack stack = outputItem.prototype();
+        int stackLimit = Math.max(1, stack.getMaxStackSize());
+        stack.stackSize = (int) Math.min(available, stackLimit);
+        return stack;
     }
 
     @Override
     public ItemStack decrStackSize(int slot, int amount) {
-        return null;
+        return slot == OUTPUT_SLOT ? extractOutputItem(amount) : null;
     }
 
     @Override
     public ItemStack getStackInSlotOnClosing(int slot) {
-        return null;
+        return slot == OUTPUT_SLOT ? extractOutputItem(getInventoryStackLimit()) : null;
+    }
+
+    private ItemStack extractOutputItem(int amount) {
+        if (outputItem == null || amount <= 0) return null;
+
+        ItemStack prototype = outputItem.prototype();
+        int stackLimit = Math.max(1, prototype.getMaxStackSize());
+        int requested = Math.min(amount, stackLimit);
+        SharedStorage storage = SharedStorageManager.getStorage();
+        long extracted = storage.extractItem(outputItem, requested);
+        if (extracted <= 0L) return null;
+
+        SharedStorageManager.broadcastItemChange(outputItem);
+        return outputItem.prototype(extracted);
     }
 
     /**
@@ -197,7 +234,8 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
      * <p>
      * 刻意<b>不修改</b>传进来的 {@code stack}：调用方（GT 物品管道、原版漏斗）
      * 都是自己先算好搬多少、再从源容器扣，如果这里也去改它的数量，
-     * 反而会让对方重复扣减。这里只负责「收下」。
+     * 反而会让对方重复扣减。输出槽收到同种物品时也会吸收回共享存储，
+     * 以支持抽取方未能完整接收时把剩余物品放回源库存。
      */
     @Override
     public void setInventorySlotContents(int slot, ItemStack stack) {
@@ -205,6 +243,8 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
         ItemKey key = ItemKey.of(stack);
         if (key == null) return;
+        if (slot == OUTPUT_SLOT && (outputItem == null || !outputItem.equals(key))) return;
+        if (slot != INPUT_SLOT && slot != OUTPUT_SLOT) return;
 
         long stored = SharedStorageManager.getStorage()
             .insertItem(key, stack.stackSize);
@@ -230,7 +270,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
     @Override
     public boolean isItemValidForSlot(int slot, ItemStack stack) {
-        return stack != null;
+        return slot == INPUT_SLOT && stack != null && stack.getItem() != null && stack.stackSize > 0;
     }
 
     @Override
@@ -255,11 +295,15 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         if (outputFluid != null) {
             tag.setTag("outputFluid", outputFluid.writeToNbt());
         }
+        if (outputItem != null) {
+            tag.setTag("outputItem", outputItem.writeToNbt());
+        }
     }
 
     @Override
     public void readFromNBT(NBTTagCompound tag) {
         super.readFromNBT(tag);
         outputFluid = tag.hasKey("outputFluid") ? FluidKey.readFromNbt(tag.getCompoundTag("outputFluid")) : null;
+        outputItem = tag.hasKey("outputItem") ? ItemKey.readFromNbt(tag.getCompoundTag("outputItem")) : null;
     }
 }

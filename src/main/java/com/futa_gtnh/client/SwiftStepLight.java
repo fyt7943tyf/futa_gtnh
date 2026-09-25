@@ -73,12 +73,6 @@ public final class SwiftStepLight {
             return;
         }
 
-        boolean samePlace = placedWorld == world && placedX == x
-            && placedY == y
-            && placedZ == z
-            && placedLevel == level;
-        if (samePlace) return;
-
         // 先找一格能放的位置：脚下优先，站的地方不是空气（草丛、雪、水……）就往上找一格
         int spotY = findAirY(world, x, y, z);
         if (spotY == Integer.MIN_VALUE) {
@@ -87,8 +81,18 @@ public final class SwiftStepLight {
             return;
         }
 
-        // 先放新的再收旧的：中间不会出现「两边都黑」的一帧
         Block light = CommonProxy.swiftLight;
+        boolean samePlace = placedWorld == world && placedX == x
+            && placedY == spotY
+            && placedZ == z
+            && placedLevel == level
+            && world.getBlock(x, spotY, z) == light
+            && (world.getBlockMetadata(x, spotY, z) & 15) == level;
+        // 右键交互等服务端方块更新可能覆盖客户端的临时光源；坐标没变时也要核对实际方块，
+        // 否则缓存会误以为光源还在，直到玩家移动才重新放置。
+        if (samePlace) return;
+
+        // 先放新的再收旧的：中间不会出现「两边都黑」的一帧
         world.setBlock(x, spotY, z, light, level, 3);
         if (placedWorld == world && !(placedX == x && placedY == spotY && placedZ == z)) {
             clearAt(world, placedX, placedY, placedZ);

@@ -3,8 +3,11 @@ package com.futa_gtnh.locator;
 import java.util.UUID;
 
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockChest;
+import net.minecraft.inventory.IInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.IChunkProvider;
@@ -35,7 +38,7 @@ import com.futa_gtnh.FutaGtnhMod;
  * </ol>
  *
  * <p>
- * <b>两种搜索模式：</b>
+ * <b>三种搜索模式：</b>
  *
  * <ul>
  * <li><b>方块模式</b>：认准一个 (Block, 元数据) 组合。</li>
@@ -43,13 +46,18 @@ import com.futa_gtnh.FutaGtnhMod;
  * 方块（GTNH 里石头、花岗岩、深海石头各是一个 {@code GTBlockOre} 实例），
  * 按方块找永远只能找到其中一个石种的那份；按材料找就跨过去了。
  * 顺带还能把 Y 范围收窄到矿脉自己的生成高度，既快又准。</li>
+ * <li><b>物品模式</b>：在已加载的箱子、木桶和板条箱库存中查找目标物品。</li>
  * </ul>
  */
 public final class LocatorScan {
 
     private final UUID playerId;
 
-    /** 方块模式下的目标；矿脉模式下为 null。 */
+    /** 方块模式下的目标；矿脉和物品模式下为 null。 */
+    private final ItemStack blockTarget;
+    /** 箱子物品模式下的目标；其它模式下为 null。 */
+    private final ItemStack itemTarget;
+    private final boolean inventorySearch;
     private final Block block;
     private final int meta;
     /** 矿脉模式下的目标；方块模式下为 null。 */
@@ -116,15 +124,24 @@ public final class LocatorScan {
 
     /** 方块模式：找最近的这个方块。 */
     public LocatorScan(World world, UUID playerId, ItemStack target, int centerX, int centerY, int centerZ) {
+        this(world, playerId, target, centerX, centerY, centerZ, false);
+    }
+
+    /** 箱子物品模式：找最近一个库存里含有目标物品的容器。 */
+    public LocatorScan(World world, UUID playerId, ItemStack target, int centerX, int centerY, int centerZ,
+        boolean inventorySearch) {
         this.world = world;
         this.playerId = playerId;
+        this.blockTarget = inventorySearch || target == null ? null : target.copy();
+        this.itemTarget = inventorySearch && target != null ? target.copy() : null;
+        this.inventorySearch = inventorySearch;
         this.centerX = centerX;
         this.centerY = centerY;
         this.centerZ = centerZ;
         this.maxRadius = Math.max(1, Config.locatorSearchRadius);
         this.vein = null;
 
-        Item item = target == null ? null : target.getItem();
+        Item item = inventorySearch || target == null ? null : target.getItem();
         this.block = item == null ? null : Block.getBlockFromItem(item);
         // ItemStack 的 damage 不一定是方块元数据：ItemBlock 会做一次映射，
         // 标准做法就是过一遍 Item#getMetadata
@@ -140,6 +157,9 @@ public final class LocatorScan {
     public LocatorScan(World world, UUID playerId, OreVeinCatalog.Entry vein, int centerX, int centerY, int centerZ) {
         this.world = world;
         this.playerId = playerId;
+        this.blockTarget = null;
+        this.itemTarget = null;
+        this.inventorySearch = false;
         this.centerX = centerX;
         this.centerY = centerY;
         this.centerZ = centerZ;
@@ -231,9 +251,9 @@ public final class LocatorScan {
         return playerId;
     }
 
-    /** @return 这个目标压根没法搜（选了个纯物品，或者矿脉数据没了），任务直接作废 */
+    /** @return 目标类型不支持，或矿脉数据已失效；任务会直接作废 */
     public boolean isValid() {
-        return vein != null || block != null;
+        return vein != null || block != null || (inventorySearch && itemTarget != null && itemTarget.getItem() != null);
     }
 
     public boolean isDone() {
@@ -273,6 +293,35 @@ public final class LocatorScan {
 
     public int getMeta() {
         return meta;
+    }
+
+    World getWorld() {
+        return world;
+    }
+
+    /** 从玩家的新位置再次搜索同一个目标。 */
+    LocatorScan restartAt(int x, int y, int z) {
+        if (vein != null) return new LocatorScan(world, playerId, vein, x, y, z);
+        if (inventorySearch) return new LocatorScan(world, playerId, itemTarget, x, y, z, true);
+        return new LocatorScan(world, playerId, blockTarget, x, y, z);
+    }
+
+    /**
+     * 检查上次命中的坐标是否仍然是目标。
+     *
+     * <p>
+     * 区块未加载时返回 true：此时无法判断方块是否被破坏，应该等区块重新加载后再检查，
+     * 而不是因此把玩家带去搜另一个目标。
+     */
+    boolean targetStillAt(int x, int y, int z) {
+        if (world == null || y < 0 || y >= world.getHeight()) return false;
+        IChunkProvider provider = world.getChunkProvider();
+        int chunkX = x >> 4;
+        int chunkZ = z >> 4;
+        if (provider == null || !provider.chunkExists(chunkX, chunkZ)) return true;
+
+        Chunk chunk = provider.provideChunk(chunkX, chunkZ);
+        return chunk == null || matches(chunk, x & 15, y, z & 15, x, z);
     }
 
     // ==================================================================
@@ -350,7 +399,7 @@ public final class LocatorScan {
             // 这一列从 yCursor 接着往下扫
             int yEnd = Math.min(scanMaxY, yCursor + Math.max(1, budget / 64));
             for (int y = yCursor; y < yEnd; y++) {
-                if (!matches(chunk, lx, y, lz)) continue;
+                if (!matches(chunk, lx, y, lz, wx, wz)) continue;
 
                 long dx = wx - centerX;
                 long dy = y - centerY;
@@ -385,7 +434,9 @@ public final class LocatorScan {
      * 分支预测和 JIT 内联都指望它长得简单。方法很快会被内联掉，写法上的
      * 那点间接开销在运行期并不存在。
      */
-    private boolean matches(Chunk chunk, int lx, int y, int lz) {
+    private boolean matches(Chunk chunk, int lx, int y, int lz, int worldX, int worldZ) {
+        if (inventorySearch) return inventoryContains(chunk, lx, y, lz, worldX, worldZ);
+
         Block worldBlock = chunk.getBlock(lx, y, lz);
 
         if (vein != null) {
@@ -403,6 +454,50 @@ public final class LocatorScan {
 
         if (worldBlock != block) return false;
         return metaMatches(chunk.getBlockMetadata(lx, y, lz));
+    }
+
+    /** 这个位置的容器库存是否包含目标物品；名称标签等 NBT 不参与匹配。 */
+    private boolean inventoryContains(Chunk chunk, int lx, int y, int lz, int worldX, int worldZ) {
+        TileEntity tile;
+        try {
+            tile = world.getTileEntity(worldX, y, worldZ);
+        } catch (Throwable ignored) {
+            return false;
+        }
+        if (!(tile instanceof IInventory) || itemTarget == null || itemTarget.getItem() == null) return false;
+        if (!isChestLike(chunk.getBlock(lx, y, lz))) return false;
+
+        IInventory inventory = (IInventory) tile;
+        try {
+            int size = inventory.getSizeInventory();
+            for (int slot = 0; slot < size; slot++) {
+                ItemStack stack = inventory.getStackInSlot(slot);
+                if (stack == null || stack.getItem() != itemTarget.getItem()) continue;
+
+                // 有子类型的物品按元数据区分；普通物品、耐久工具按物品种类匹配。
+                if (!itemTarget.getItem()
+                    .getHasSubtypes() || itemTarget.getItemDamage() == 32767
+                    || stack.getItemDamage() == itemTarget.getItemDamage()) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+            // 模组库存的接口实现可能因自身状态抛错，跳过它不影响其它容器。
+        }
+        return false;
+    }
+
+    /** 兼容原版箱子和注册名标为箱子、木桶、板条箱等的模组容器。 */
+    private static boolean isChestLike(Block block) {
+        if (block instanceof BlockChest) return true;
+        Object registryName = Block.blockRegistry.getNameForObject(block);
+        if (registryName == null) return false;
+        String name = registryName.toString()
+            .toLowerCase(java.util.Locale.ROOT);
+        return name.contains("chest") || name.contains("crate")
+            || name.contains("barrel")
+            || name.contains("locker")
+            || name.contains("storage");
     }
 
     /**

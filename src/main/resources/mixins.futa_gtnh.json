@@ -4,6 +4,7 @@
 	"plugin": "com.futa_gtnh.mixins.FutaGtnhMixinPlugin",
 	"required": false,
 	"mixins": [
+		"MixinBlockReed",
 		"MixinContainer",
 		"MixinCraftingStationContainer",
 		"MixinCraftingStationLogic",
@@ -11,6 +12,6 @@
 		"MixinEntityPlayerMP",
 		"MixinSlotCraftingStation"
 	],
-	"client": ["MixinEntityRenderer"],
+	"client": ["MixinEntityRenderer", "MixinEntityPlayerSP"],
 	"server": []
 }

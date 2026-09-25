@@ -10,6 +10,7 @@ import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.attributes.AttributeModifier;
 import net.minecraft.entity.ai.attributes.IAttributeInstance;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -27,7 +28,7 @@ import baubles.api.IBauble;
 import baubles.common.container.InventoryBaubles;
 
 /**
- * 迅步：戴在身上同时提高<b>飞行</b>和<b>移动</b>速度，右键打开界面自己调倍率。
+ * 迅步：戴在身上提高<b>飞行</b>和<b>移动</b>速度，并可开启作物或动物生长光环；右键打开界面配置。
  *
  * <p>
  * 两项速度的<b>实现机制完全不同</b>，因为 1.7.10 里它们本来就走的不是同一条路：
@@ -40,7 +41,8 @@ import baubles.common.container.InventoryBaubles;
  * {@link AttributeModifier} 上去就行 —— 公开 API、服务端权威、还会自动同步给客户端。</li>
  * <li><b>飞行速度</b>没有属性可用，就是 {@code capabilities.flySpeed} 这个私有字段，
  * 而它的 setter 标了 {@code @SideOnly(CLIENT)}（服务端那份类里根本没这个方法）。
- * 所以只能在客户端改，见 {@code SwiftStepClientHandler}。
+ * 所以水平飞行速度只能在客户端改，见 {@code SwiftStepClientHandler}；飞行权限由服务端
+ * 在穿戴迅步时授予，升降加速度则通过 {@code MixinEntityPlayerSP} 按飞行倍率调整。
  * <b>不能</b>用反射去写服务端那个私有字段：生产环境一混淆，字段名就变成 SRG 名，
  * 写死的 {@code "flySpeed"} 会直接找不到。</li>
  * </ul>
@@ -56,6 +58,14 @@ public class ItemSwiftStep extends Item implements IBauble {
     private static final String TAG_FLIGHT = "futa_gtnh.swift_step.flight";
     private static final String TAG_WALK = "futa_gtnh.swift_step.walk";
     private static final String TAG_LIGHT = "futa_gtnh.swift_step.light";
+    private static final String TAG_GROWTH_AURA_ENABLED = "futa_gtnh.swift_step.growth_aura_enabled";
+    private static final String TAG_GROWTH_AURA_RADIUS = "futa_gtnh.swift_step.growth_aura_radius";
+    private static final String TAG_GROWTH_AURA_SPEED = "futa_gtnh.swift_step.growth_aura_speed";
+    private static final String TAG_ANIMAL_AURA_ENABLED = "futa_gtnh.swift_step.animal_aura_enabled";
+    private static final String TAG_HEALTH_RECOVERY_ENABLED = "futa_gtnh.swift_step.health_recovery_enabled";
+    private static final String TAG_FOOD_RECOVERY_ENABLED = "futa_gtnh.swift_step.food_recovery_enabled";
+    private static final String TAG_RECOVERY_SPEED = "futa_gtnh.swift_step.recovery_speed";
+    private static final String TAG_GRANTED_FLIGHT = "futa_gtnh.swift_step.granted_flight";
 
     /**
      * 照明亮度的默认值：<b>0 = 不亮</b>。
@@ -72,6 +82,24 @@ public class ItemSwiftStep extends Item implements IBauble {
     /** 原版火把的亮度，界面里当参照用。 */
     public static final int TORCH_LIGHT = 14;
 
+    /** 生长光环半径的默认值与可调范围（方块）。 */
+    public static final int DEFAULT_GROWTH_AURA_RADIUS = 8;
+    public static final int MIN_GROWTH_AURA_RADIUS = 1;
+    public static final int MAX_GROWTH_AURA_RADIUS = 16;
+
+    /** 生长光环强度表示每次触发时补充的生长刻度次数。 */
+    public static final int DEFAULT_GROWTH_AURA_SPEED = 1;
+    public static final int MIN_GROWTH_AURA_SPEED = 1;
+    public static final int MAX_GROWTH_AURA_SPEED = 100;
+
+    /** 恢复效果默认开启，速度 1 为每 10 秒恢复一次。 */
+    public static final boolean DEFAULT_HEALTH_RECOVERY_ENABLED = true;
+    public static final boolean DEFAULT_FOOD_RECOVERY_ENABLED = true;
+    public static final int DEFAULT_RECOVERY_SPEED = 1;
+    public static final int MIN_RECOVERY_SPEED = 1;
+    public static final int MAX_RECOVERY_SPEED = 10;
+    public static final int RECOVERY_INTERVAL_TICKS = 200;
+
     /** 没调过时的默认倍率（1.0 = 原版速度）。 */
     public static final float DEFAULT_MULTIPLIER = 1.0F;
 
@@ -80,6 +108,12 @@ public class ItemSwiftStep extends Item implements IBauble {
 
     /** 原版飞行速度。飞行倍率是相对它的。 */
     public static final float VANILLA_FLY_SPEED = 0.05F;
+
+    /** 原版飞行时按住跳跃/潜行的竖直加速度。 */
+    public static final double VANILLA_VERTICAL_FLY_ACCELERATION = 0.15D;
+
+    /** 竖直飞行最多放大到 10 倍，避免与水平飞行合成后超过服务端位移校验。 */
+    public static final float MAX_VERTICAL_FLY_MULTIPLIER = 10.0F;
 
     /** 原版移动速度（= {@code PlayerCapabilities.walkSpeed} 的默认值）。 */
     public static final float VANILLA_WALK_SPEED = 0.1F;
@@ -93,6 +127,9 @@ public class ItemSwiftStep extends Item implements IBauble {
      * {@code f2 = 0.91F} 的路，末尾 {@code motionX *= 0.91; motionZ *= 0.91}。
      */
     private static final double FLY_HORIZONTAL_DRAG = 0.91D;
+
+    /** 原版飞行时的竖直阻力。 */
+    private static final double FLY_VERTICAL_DRAG = 0.6D;
 
     /**
      * 飞行终端速度相对 {@code flySpeed} 的倍数 = {@code 1 / (1 - 0.91) ≈ 11.11}。
@@ -137,7 +174,8 @@ public class ItemSwiftStep extends Item implements IBauble {
      * 专用服务器上不会被拉回的最大飞行倍率。
      *
      * <p>
-     * 解 {@code 倍率 × 0.05 × 11.11 ≤ 10} 得 {@code 倍率 ≤ 18.0}。
+     * 水平与竖直同时移动时，服务端检查的是三轴位移平方和。竖直倍率最高为 10，
+     * 所以先给竖直分量留出空间，再由剩余空间计算安全的水平倍率。
      * 这是<b>物理上限，不是偏好</b>：超过它的飞行速度不是「快一点但有点风险」，
      * 而是<b>每 tick 都被服务端拉回原地，等于完全没加速</b>。
      *
@@ -145,7 +183,11 @@ public class ItemSwiftStep extends Item implements IBauble {
      * 所以默认上限取的是比它低一点的 16（留出垂直分量的余量）。
      */
     public static float serverSafeFlyMultiplier() {
-        return (float) (SERVER_MAX_BLOCKS_PER_TICK / (VANILLA_FLY_SPEED * FLY_TERMINAL_FACTOR));
+        double verticalBlocksPerTick = VANILLA_VERTICAL_FLY_ACCELERATION * MAX_VERTICAL_FLY_MULTIPLIER
+            / (1.0D - FLY_VERTICAL_DRAG);
+        double horizontalBlocksPerTick = Math.sqrt(
+            SERVER_MAX_BLOCKS_PER_TICK * SERVER_MAX_BLOCKS_PER_TICK - verticalBlocksPerTick * verticalBlocksPerTick);
+        return (float) (horizontalBlocksPerTick / (VANILLA_FLY_SPEED * FLY_TERMINAL_FACTOR));
     }
 
     /**
@@ -264,6 +306,126 @@ public class ItemSwiftStep extends Item implements IBauble {
             .setInteger(TAG_LIGHT, clampLight(value));
     }
 
+    public static boolean isGrowthAuraEnabled(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return false;
+        NBTTagCompound tag = stack.getTagCompound();
+        return tag != null && tag.getBoolean(TAG_GROWTH_AURA_ENABLED);
+    }
+
+    public static void setGrowthAuraEnabled(ItemStack stack, boolean enabled) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) {
+            stack.setTagCompound(new NBTTagCompound());
+        }
+        stack.getTagCompound()
+            .setBoolean(TAG_GROWTH_AURA_ENABLED, enabled);
+    }
+
+    public static int getGrowthAuraRadius(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return DEFAULT_GROWTH_AURA_RADIUS;
+        NBTTagCompound tag = stack.getTagCompound();
+        if (tag == null || !tag.hasKey(TAG_GROWTH_AURA_RADIUS)) return DEFAULT_GROWTH_AURA_RADIUS;
+        return clampGrowthAuraRadius(tag.getInteger(TAG_GROWTH_AURA_RADIUS));
+    }
+
+    public static void setGrowthAuraRadius(ItemStack stack, int radius) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) {
+            stack.setTagCompound(new NBTTagCompound());
+        }
+        stack.getTagCompound()
+            .setInteger(TAG_GROWTH_AURA_RADIUS, clampGrowthAuraRadius(radius));
+    }
+
+    public static int clampGrowthAuraRadius(int radius) {
+        return Math.max(MIN_GROWTH_AURA_RADIUS, Math.min(radius, MAX_GROWTH_AURA_RADIUS));
+    }
+
+    public static int getGrowthAuraSpeed(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return DEFAULT_GROWTH_AURA_SPEED;
+        NBTTagCompound tag = stack.getTagCompound();
+        if (tag == null || !tag.hasKey(TAG_GROWTH_AURA_SPEED)) return DEFAULT_GROWTH_AURA_SPEED;
+        return clampGrowthAuraSpeed(tag.getInteger(TAG_GROWTH_AURA_SPEED));
+    }
+
+    public static void setGrowthAuraSpeed(ItemStack stack, int speed) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) {
+            stack.setTagCompound(new NBTTagCompound());
+        }
+        stack.getTagCompound()
+            .setInteger(TAG_GROWTH_AURA_SPEED, clampGrowthAuraSpeed(speed));
+    }
+
+    public static int clampGrowthAuraSpeed(int speed) {
+        return Math.max(MIN_GROWTH_AURA_SPEED, Math.min(speed, MAX_GROWTH_AURA_SPEED));
+    }
+
+    public static boolean isAnimalAuraEnabled(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return false;
+        NBTTagCompound tag = stack.getTagCompound();
+        return tag != null && tag.getBoolean(TAG_ANIMAL_AURA_ENABLED);
+    }
+
+    public static void setAnimalAuraEnabled(ItemStack stack, boolean enabled) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) {
+            stack.setTagCompound(new NBTTagCompound());
+        }
+        stack.getTagCompound()
+            .setBoolean(TAG_ANIMAL_AURA_ENABLED, enabled);
+    }
+
+    public static boolean isHealthRecoveryEnabled(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return false;
+        NBTTagCompound tag = stack.getTagCompound();
+        return tag == null || !tag.hasKey(TAG_HEALTH_RECOVERY_ENABLED) ? DEFAULT_HEALTH_RECOVERY_ENABLED
+            : tag.getBoolean(TAG_HEALTH_RECOVERY_ENABLED);
+    }
+
+    public static void setHealthRecoveryEnabled(ItemStack stack, boolean enabled) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) stack.setTagCompound(new NBTTagCompound());
+        stack.getTagCompound()
+            .setBoolean(TAG_HEALTH_RECOVERY_ENABLED, enabled);
+    }
+
+    public static boolean isFoodRecoveryEnabled(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return false;
+        NBTTagCompound tag = stack.getTagCompound();
+        return tag == null || !tag.hasKey(TAG_FOOD_RECOVERY_ENABLED) ? DEFAULT_FOOD_RECOVERY_ENABLED
+            : tag.getBoolean(TAG_FOOD_RECOVERY_ENABLED);
+    }
+
+    public static void setFoodRecoveryEnabled(ItemStack stack, boolean enabled) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) stack.setTagCompound(new NBTTagCompound());
+        stack.getTagCompound()
+            .setBoolean(TAG_FOOD_RECOVERY_ENABLED, enabled);
+    }
+
+    public static int getRecoverySpeed(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return DEFAULT_RECOVERY_SPEED;
+        NBTTagCompound tag = stack.getTagCompound();
+        if (tag == null || !tag.hasKey(TAG_RECOVERY_SPEED)) return DEFAULT_RECOVERY_SPEED;
+        return clampRecoverySpeed(tag.getInteger(TAG_RECOVERY_SPEED));
+    }
+
+    public static void setRecoverySpeed(ItemStack stack, int speed) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) stack.setTagCompound(new NBTTagCompound());
+        stack.getTagCompound()
+            .setInteger(TAG_RECOVERY_SPEED, clampRecoverySpeed(speed));
+    }
+
+    public static int clampRecoverySpeed(int speed) {
+        return Math.max(MIN_RECOVERY_SPEED, Math.min(speed, MAX_RECOVERY_SPEED));
+    }
+
+    public static int getRecoveryIntervalTicks(ItemStack stack) {
+        return Math.max(1, RECOVERY_INTERVAL_TICKS / getRecoverySpeed(stack));
+    }
+
     /**
      * 夹到 0~15。
      *
@@ -345,6 +507,53 @@ public class ItemSwiftStep extends Item implements IBauble {
             }
         }
         return null;
+    }
+
+    /**
+     * 服务端按装备状态授予/收回生存飞行权限，并在能力变化时同步给客户端。
+     * 只撤销由迅步授予的权限，不碰创造模式或其它来源已有的飞行权限。
+     */
+    public static void updateFlightPermission(EntityPlayer player) {
+        if (player == null || player.worldObj.isRemote) return;
+
+        NBTTagCompound playerData = player.getEntityData();
+        boolean grantedBySwiftStep = playerData.getBoolean(TAG_GRANTED_FLIGHT);
+        boolean wearingSwiftStep = findEquipped(player) != null;
+        boolean changed = false;
+
+        if (wearingSwiftStep) {
+            if (!player.capabilities.allowFlying) {
+                player.capabilities.allowFlying = true;
+                if (!player.capabilities.isCreativeMode) {
+                    playerData.setBoolean(TAG_GRANTED_FLIGHT, true);
+                }
+                changed = true;
+            }
+        } else if (grantedBySwiftStep) {
+            playerData.removeTag(TAG_GRANTED_FLIGHT);
+            if (!player.capabilities.isCreativeMode) {
+                changed = player.capabilities.allowFlying || player.capabilities.isFlying;
+                player.capabilities.allowFlying = false;
+                player.capabilities.isFlying = false;
+                player.motionY = 0.0D;
+            }
+        }
+
+        if (changed && player instanceof EntityPlayerMP) {
+            ((EntityPlayerMP) player).sendPlayerAbilities();
+        }
+    }
+
+    /**
+     * 将原版飞行时的跳跃/潜行竖直加速度按迅步飞行倍率放大。
+     * 倍率超过 10 时竖直速度封顶，水平飞行仍可继续按配置提高。
+     */
+    public static double scaleVerticalFlightImpulse(EntityPlayer player, double vanillaImpulse) {
+        if (player == null || !player.capabilities.isFlying) return vanillaImpulse;
+        ItemStack charm = findEquipped(player);
+        if (charm == null) return vanillaImpulse;
+        float multiplier = Math.min(getFlightMultiplier(charm), MAX_VERTICAL_FLY_MULTIPLIER);
+        return vanillaImpulse * multiplier;
     }
 
     // ==================================================================
@@ -536,7 +745,11 @@ public class ItemSwiftStep extends Item implements IBauble {
     public boolean hasEffect(ItemStack stack, int pass) {
         // 附魔光效：一眼能看出这个迅步是「调过的」
         return getFlightMultiplier(stack) > DEFAULT_MULTIPLIER || getWalkMultiplier(stack) > DEFAULT_MULTIPLIER
-            || getLightLevel(stack) > 0;
+            || getLightLevel(stack) > 0
+            || isGrowthAuraEnabled(stack)
+            || isAnimalAuraEnabled(stack)
+            || isHealthRecoveryEnabled(stack)
+            || isFoodRecoveryEnabled(stack);
     }
 
     @Override
@@ -547,12 +760,47 @@ public class ItemSwiftStep extends Item implements IBauble {
                 "item.futa_gtnh.swift_step.tooltip.flight",
                 fixed(getFlightMultiplier(stack), 2)));
         tooltip.add(
+            EnumChatFormatting.GRAY
+                + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.flight_access"));
+        tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.vertical"));
+        tooltip.add(
             EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
                 "item.futa_gtnh.swift_step.tooltip.walk",
                 fixed(getWalkMultiplier(stack), 2)));
         tooltip.add(
             EnumChatFormatting.GRAY + StatCollector
                 .translateToLocalFormatted("item.futa_gtnh.swift_step.tooltip.light", describeLightLocalized(stack)));
+        tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
+                "item.futa_gtnh.swift_step.tooltip.crop_aura",
+                StatCollector.translateToLocal(
+                    isGrowthAuraEnabled(stack) ? "futa_gtnh.swift_step.gui.on" : "futa_gtnh.swift_step.gui.off")));
+        tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
+                "item.futa_gtnh.swift_step.tooltip.animal_aura",
+                StatCollector.translateToLocal(
+                    isAnimalAuraEnabled(stack) ? "futa_gtnh.swift_step.gui.on" : "futa_gtnh.swift_step.gui.off")));
+        tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
+                "item.futa_gtnh.swift_step.tooltip.growth_aura",
+                getGrowthAuraRadius(stack),
+                getGrowthAuraSpeed(stack),
+                getGrowthAuraSpeed(stack)));
+        tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
+                "item.futa_gtnh.swift_step.tooltip.health_recovery",
+                StatCollector.translateToLocal(
+                    isHealthRecoveryEnabled(stack) ? "futa_gtnh.swift_step.gui.on" : "futa_gtnh.swift_step.gui.off")));
+        tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
+                "item.futa_gtnh.swift_step.tooltip.food_recovery",
+                StatCollector.translateToLocal(
+                    isFoodRecoveryEnabled(stack) ? "futa_gtnh.swift_step.gui.on" : "futa_gtnh.swift_step.gui.off")));
+        tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
+                "item.futa_gtnh.swift_step.tooltip.recovery_speed",
+                getRecoverySpeed(stack)));
         tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.air"));
         tooltip.add(

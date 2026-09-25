@@ -1,6 +1,7 @@
 package com.futa_gtnh.client;
 
 import com.futa_gtnh.shared.FluidKey;
+import com.futa_gtnh.shared.ItemKey;
 
 /**
  * 客户端记住的一点点界面状态。
@@ -16,6 +17,8 @@ public final class ClientTerminalState {
 
     /** 当前这个方块终端在往外输出哪种流体（每个终端各自的状态）。 */
     private static FluidKey outputFluid;
+    /** 当前这个方块终端在往外输出哪种物品（每个终端各自的状态）。 */
+    private static ItemKey outputItem;
 
     /** 「拾取自动入库」开关（每个玩家各自的状态）。 */
     private static boolean autoStore;
@@ -28,6 +31,14 @@ public final class ClientTerminalState {
         outputFluid = key;
     }
 
+    public static ItemKey getOutputItem() {
+        return outputItem;
+    }
+
+    public static void setOutputItem(ItemKey key) {
+        outputItem = key;
+    }
+
     public static boolean isAutoStore() {
         return autoStore;
     }
@@ -38,6 +49,7 @@ public final class ClientTerminalState {
 
     public static void clear() {
         outputFluid = null;
+        outputItem = null;
         autoStore = false;
     }
 }

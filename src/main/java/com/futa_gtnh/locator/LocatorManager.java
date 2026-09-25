@@ -44,6 +44,8 @@ public final class LocatorManager {
 
     private static final Map<UUID, Job> JOBS = new HashMap<>();
     private static final Map<UUID, int[]> RESULTS = new HashMap<>();
+    /** 最近一次找到目标的扫描条件，用于目标被挖掉后继续找同类目标。 */
+    private static final Map<UUID, LocatorScan> TRACKING = new HashMap<>();
     /**
      * 哪些玩家的<b>当前这个结果</b>已经用掉过一次传送。
      *
@@ -71,6 +73,7 @@ public final class LocatorManager {
         UUID id = player.getUniqueID();
         JOBS.remove(id);
         RESULTS.remove(id);
+        TRACKING.remove(id);
         TELEPORTED.remove(id);
 
         submit(
@@ -85,6 +88,27 @@ public final class LocatorManager {
                 MathHelper.floor_double(player.posZ)));
     }
 
+    /** 开始在容器库存中搜索某个物品。 */
+    public static void startItem(EntityPlayerMP player, ItemStack target) {
+        UUID id = player.getUniqueID();
+        JOBS.remove(id);
+        RESULTS.remove(id);
+        TRACKING.remove(id);
+        TELEPORTED.remove(id);
+
+        submit(
+            player,
+            id,
+            new LocatorScan(
+                player.worldObj,
+                id,
+                target,
+                MathHelper.floor_double(player.posX),
+                MathHelper.floor_double(player.posY),
+                MathHelper.floor_double(player.posZ),
+                true));
+    }
+
     /**
      * 开始一次新的矿脉搜索。
      *
@@ -96,6 +120,7 @@ public final class LocatorManager {
         UUID id = player.getUniqueID();
         JOBS.remove(id);
         RESULTS.remove(id);
+        TRACKING.remove(id);
         TELEPORTED.remove(id);
 
         OreVeinCatalog.Entry vein = OreVeinCatalog.byKey(veinKey);
@@ -119,7 +144,7 @@ public final class LocatorManager {
 
     private static void submit(EntityPlayerMP player, UUID id, LocatorScan scan) {
         if (!scan.isValid()) {
-            // 选中的东西没法搜（不是方块，或者矿脉数据没了）。
+            // 目标类型不支持或矿脉数据已失效。
             // 理论上界面只列可搜的，但客户端不可信。
             send(player, PacketLocatorResult.notFound(0.0F));
             return;
@@ -133,6 +158,7 @@ public final class LocatorManager {
         UUID id = player.getUniqueID();
         JOBS.remove(id);
         RESULTS.remove(id);
+        TRACKING.remove(id);
         TELEPORTED.remove(id);
         send(player, PacketLocatorResult.cancelled());
     }
@@ -195,6 +221,7 @@ public final class LocatorManager {
     public static void forget(UUID id) {
         JOBS.remove(id);
         RESULTS.remove(id);
+        TRACKING.remove(id);
         TELEPORTED.remove(id);
     }
 
@@ -203,40 +230,85 @@ public final class LocatorManager {
     // ==================================================================
 
     public static void onServerTick() {
-        if (JOBS.isEmpty()) return;
+        if (!JOBS.isEmpty()) {
+            Iterator<Map.Entry<UUID, Job>> iterator = JOBS.entrySet()
+                .iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<UUID, Job> entry = iterator.next();
+                EntityPlayerMP player = findPlayer(entry.getKey());
+                if (player == null) {
+                    iterator.remove();
+                    continue;
+                }
 
-        Iterator<Map.Entry<UUID, Job>> iterator = JOBS.entrySet()
+                Job job = entry.getValue();
+                boolean running = job.scan.tick();
+
+                if (running) {
+                    if (++job.progressTimer >= PROGRESS_INTERVAL) {
+                        job.progressTimer = 0;
+                        send(player, PacketLocatorResult.running(job.scan.getProgress()));
+                    }
+                    continue;
+                }
+
+                // 扫完了
+                if (job.scan.hasResult()) {
+                    int[] position = { job.scan.getBestX(), job.scan.getBestY(), job.scan.getBestZ() };
+                    RESULTS.put(entry.getKey(), position);
+                    TRACKING.put(entry.getKey(), job.scan);
+                    send(
+                        player,
+                        PacketLocatorResult.found(position[0], position[1], position[2], job.scan.getBestDistance()));
+                } else {
+                    TRACKING.remove(entry.getKey());
+                    send(player, PacketLocatorResult.notFound(1.0F));
+                }
+                iterator.remove();
+            }
+        }
+
+        restartDestroyedTargets();
+    }
+
+    /** 上次命中的方块被挖掉后，按相同条件从玩家当前位置继续搜索。 */
+    private static void restartDestroyedTargets() {
+        if (TRACKING.isEmpty()) return;
+
+        Iterator<Map.Entry<UUID, LocatorScan>> iterator = TRACKING.entrySet()
             .iterator();
         while (iterator.hasNext()) {
-            Map.Entry<UUID, Job> entry = iterator.next();
-            EntityPlayerMP player = findPlayer(entry.getKey());
-            if (player == null) {
+            Map.Entry<UUID, LocatorScan> entry = iterator.next();
+            UUID id = entry.getKey();
+            int[] position = RESULTS.get(id);
+            if (position == null) {
                 iterator.remove();
                 continue;
             }
 
-            Job job = entry.getValue();
-            boolean running = job.scan.tick();
-
-            if (running) {
-                if (++job.progressTimer >= PROGRESS_INTERVAL) {
-                    job.progressTimer = 0;
-                    send(player, PacketLocatorResult.running(job.scan.getProgress()));
-                }
+            EntityPlayerMP player = findPlayer(id);
+            if (player == null) {
+                iterator.remove();
+                RESULTS.remove(id);
+                TELEPORTED.remove(id);
                 continue;
             }
 
-            // 扫完了
-            if (job.scan.hasResult()) {
-                int[] position = { job.scan.getBestX(), job.scan.getBestY(), job.scan.getBestZ() };
-                RESULTS.put(entry.getKey(), position);
-                send(
-                    player,
-                    PacketLocatorResult.found(position[0], position[1], position[2], job.scan.getBestDistance()));
-            } else {
-                send(player, PacketLocatorResult.notFound(1.0F));
-            }
+            LocatorScan previousScan = entry.getValue();
+            // 搜索只在原维度有效。玩家去了别的维度时保留结果，回到原维度后再检查。
+            if (player.worldObj != previousScan.getWorld()) continue;
+            if (previousScan.targetStillAt(position[0], position[1], position[2])) continue;
+
             iterator.remove();
+            RESULTS.remove(id);
+            TELEPORTED.remove(id);
+            submit(
+                player,
+                id,
+                previousScan.restartAt(
+                    MathHelper.floor_double(player.posX),
+                    MathHelper.floor_double(player.posY),
+                    MathHelper.floor_double(player.posZ)));
         }
     }
 

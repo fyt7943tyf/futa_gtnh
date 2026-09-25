@@ -31,6 +31,7 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketTerminalFluid.Handler.class, PacketTerminalFluid.class, 4, Side.CLIENT);
         INSTANCE.registerMessage(PacketAutoStoreSync.Handler.class, PacketAutoStoreSync.class, 6, Side.CLIENT);
         INSTANCE.registerMessage(PacketLocatorResult.Handler.class, PacketLocatorResult.class, 8, Side.CLIENT);
+        INSTANCE.registerMessage(PacketTerminalItem.Handler.class, PacketTerminalItem.class, 18, Side.CLIENT);
 
         // 客户端 -> 服务端
         INSTANCE.registerMessage(PacketStorageAction.Handler.class, PacketStorageAction.class, 2, Side.SERVER);

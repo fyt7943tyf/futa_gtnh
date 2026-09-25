@@ -5,15 +5,50 @@ container.futa_gtnh.shared_terminal=全服共享背包
 item.futa_gtnh.swift_step.name=迅步
 
 item.futa_gtnh.swift_step.tooltip.flight=飞行速度：%s 倍
+item.futa_gtnh.swift_step.tooltip.flight_access=佩戴时获得飞行能力：双击空格切换飞行
+item.futa_gtnh.swift_step.tooltip.vertical=上升/下降速度跟随飞行倍率，最高 10 倍
 item.futa_gtnh.swift_step.tooltip.walk=移动速度：%s 倍
 item.futa_gtnh.swift_step.tooltip.air=跳跃/空中前进速度跟随移动速度
-item.futa_gtnh.swift_step.tooltip.gui=右键：调整速度与照明
+item.futa_gtnh.swift_step.tooltip.crop_aura=作物生长光环：%s
+item.futa_gtnh.swift_step.tooltip.animal_aura=动物生长光环：%s（幼年成长、繁殖冷却和羊毛恢复）
+item.futa_gtnh.swift_step.tooltip.growth_aura=光环半径：%s 格，作物刻数 ×%s、动物额外速度 ×%s
+item.futa_gtnh.swift_step.tooltip.gui=右键：调整速度、照明、生长和恢复设置
 item.futa_gtnh.swift_step.tooltip.equip=潜行 + 右键：装备到空的饰品槽
+item.futa_gtnh.swift_step.tooltip.health_recovery=生命恢复：%s
+item.futa_gtnh.swift_step.tooltip.food_recovery=饱食恢复：%s
+item.futa_gtnh.swift_step.tooltip.recovery_speed=恢复速度：×%s
 
-futa_gtnh.swift_step.gui.flight=飞行速度
+futa_gtnh.swift_step.gui.tab.movement=移动
+futa_gtnh.swift_step.gui.tab.growth=生长
+futa_gtnh.swift_step.gui.tab.recovery=恢复
+futa_gtnh.swift_step.gui.flight=飞行速度（含升降）
 futa_gtnh.swift_step.gui.walk=移动速度
+futa_gtnh.swift_step.gui.growth_aura=生长光环（作物 / 动物）
+futa_gtnh.swift_step.gui.growth_aura.status=半径 %s 格 · 作物刻数 ×%s · 动物额外速度 ×%s（上限 100）
+futa_gtnh.swift_step.gui.growth_aura.crop_on=作物：开启
+futa_gtnh.swift_step.gui.growth_aura.crop_off=作物：关闭
+futa_gtnh.swift_step.gui.growth_aura.animal_on=动物：开启
+futa_gtnh.swift_step.gui.growth_aura.animal_off=动物：关闭
+futa_gtnh.swift_step.gui.growth_aura.radius_down=半径 -
+futa_gtnh.swift_step.gui.growth_aura.radius_up=半径 +
+futa_gtnh.swift_step.gui.growth_aura.speed_down=速度 -
+futa_gtnh.swift_step.gui.growth_aura.speed_up=速度 +
+futa_gtnh.swift_step.gui.on=开启
+futa_gtnh.swift_step.gui.off=关闭
 futa_gtnh.swift_step.gui.range=倍率可调范围 1.00 ~ %s（以服务端配置为准）
 futa_gtnh.swift_step.gui.server_clamp=多人服务器上限 %sx，已自动压低（超了会被服务端拉回）
+futa_gtnh.swift_step.gui.recovery.health=生命恢复
+futa_gtnh.swift_step.gui.recovery.health_status=每 %s 秒恢复半颗心
+futa_gtnh.swift_step.gui.recovery.food=饱食度恢复
+futa_gtnh.swift_step.gui.recovery.food_status=每 %s 秒饥饿值 +1、饱和度 +0.5
+futa_gtnh.swift_step.gui.recovery.speed=恢复速度
+futa_gtnh.swift_step.gui.recovery.speed_status=倍率 ×%s（越高恢复越快）
+futa_gtnh.swift_step.gui.recovery.health_on=生命恢复：开启
+futa_gtnh.swift_step.gui.recovery.health_off=生命恢复：关闭
+futa_gtnh.swift_step.gui.recovery.food_on=饱食度恢复：开启
+futa_gtnh.swift_step.gui.recovery.food_off=饱食度恢复：关闭
+futa_gtnh.swift_step.gui.recovery.speed_down=速度 -
+futa_gtnh.swift_step.gui.recovery.speed_up=速度 +
 
 key.categories.futa_gtnh=FutaGTNH
 key.futa_gtnh.shared_terminal=打开共享背包
@@ -49,9 +84,9 @@ futa_gtnh.gui.store.main=主背包
 futa_gtnh.gui.store.drain=倒空容器
 futa_gtnh.msg.no_space=背包里没有空间放下它
 
-futa_gtnh.gui.status.remote=远程访问 —— 放一个共享终端方块才能选输出流体
-futa_gtnh.gui.status.output=终端输出：%s
-futa_gtnh.gui.status.output.none=未设置（对着流体按中键）
+futa_gtnh.gui.status.remote=远程访问 —— 放置共享终端方块才能设置管道输出
+futa_gtnh.gui.status.output=管道输出（中键设置）：%s
+futa_gtnh.gui.status.output.none=未设置
 
 # ---------------------------------------------------------------- 寻物魔杖
 item.futa_gtnh.locator_wand.name=寻物魔杖
@@ -60,14 +95,20 @@ item.futa_gtnh.locator_wand.tip.clear=潜行 + 右键：取消当前追踪
 
 futa_gtnh.gui.locator.title=寻物魔杖
 futa_gtnh.gui.locator.tab.blocks=方块
+futa_gtnh.gui.locator.tab.items=物品
 futa_gtnh.gui.locator.tab.veins=矿脉
 futa_gtnh.gui.locator.search.hint=搜索（中文或拼音，空格分词，@ 按模组）
 futa_gtnh.gui.locator.indexing=正在建立方块索引… %s%%
+futa_gtnh.gui.locator.indexing.items=正在建立物品索引… %s%%
 futa_gtnh.gui.locator.empty=没有匹配的方块
+futa_gtnh.gui.locator.empty.items=没有匹配的物品
 futa_gtnh.gui.locator.empty.veins=没有匹配的矿脉
 futa_gtnh.gui.locator.count=%s / %s 个方块
+futa_gtnh.gui.locator.count.items=%s / %s 个物品
 futa_gtnh.gui.locator.count.veins=%s / %s 条矿脉
 futa_gtnh.gui.locator.pick=从左边选一个
+futa_gtnh.gui.locator.items.target=搜索箱子里的物品
+futa_gtnh.gui.locator.items.tip=左键搜索附近箱子里的这种物品
 futa_gtnh.gui.locator.state.running=搜索中…
 futa_gtnh.gui.locator.state.found=已找到
 futa_gtnh.gui.locator.state.arrived=已传送到目标附近
@@ -77,6 +118,7 @@ futa_gtnh.gui.locator.beam=关掉界面就能看到光束
 futa_gtnh.gui.locator.radius=可以调大搜索半径
 futa_gtnh.gui.locator.wrongdim=结果在另一个维度
 futa_gtnh.gui.locator.hint1=左键条目 = 开始追踪
+futa_gtnh.gui.locator.hint1.items=左键条目 = 搜索箱子里的物品
 futa_gtnh.gui.locator.hint2=滚轮翻页 / 关闭界面不取消追踪
 futa_gtnh.gui.locator.teleport=传送
 futa_gtnh.gui.locator.teleported=已传送

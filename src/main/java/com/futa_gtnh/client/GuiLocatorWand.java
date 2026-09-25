@@ -25,10 +25,11 @@ import com.futa_gtnh.network.PacketLocatorResult;
  * 寻物魔杖的选择界面。
  *
  * <p>
- * 两个页签：
+ * 三个页签：
  *
  * <ul>
  * <li><b>方块</b>：所有方块的网格，选一个就找最近的那一种方块。</li>
+ * <li><b>物品</b>：所有物品的网格，选一个就找附近箱子库存中含有它的箱子。</li>
  * <li><b>矿脉</b>：GT 的矿脉类型列表，选一条就找最近的<b>那条矿脉</b>。</li>
  * </ul>
  *
@@ -67,10 +68,12 @@ public class GuiLocatorWand extends GuiScreen {
     private static final int BTN_TELEPORT = 0;
     private static final int BTN_STOP = 1;
     private static final int BTN_TAB_BLOCKS = 2;
-    private static final int BTN_TAB_VEINS = 3;
+    private static final int BTN_TAB_ITEMS = 3;
+    private static final int BTN_TAB_VEINS = 4;
 
     private static final int TAB_BLOCKS = 0;
-    private static final int TAB_VEINS = 1;
+    private static final int TAB_ITEMS = 1;
+    private static final int TAB_VEINS = 2;
 
     private static final int COLOR_PANEL = 0xC0101010;
     private static final int COLOR_SLOT = 0x40FFFFFF;
@@ -82,6 +85,8 @@ public class GuiLocatorWand extends GuiScreen {
 
     /** 方块页签的过滤结果，就是 {@link BlockIndex} 里那一份。 */
     private final List<ItemStack> blockResults = new ArrayList<>();
+    /** 物品页签的过滤结果，就是 {@link ItemIndex} 里那一份。 */
+    private final List<ItemStack> itemResults = new ArrayList<>();
     /** 矿脉页签的全部候选（已按当前维度过滤）。 */
     private final List<OreVeinCatalog.Entry> allVeins = new ArrayList<>();
     /** 矿脉页签的过滤结果。 */
@@ -95,6 +100,7 @@ public class GuiLocatorWand extends GuiScreen {
     private GuiButton teleportButton;
     private GuiButton stopButton;
     private GuiButton blocksTab;
+    private GuiButton itemsTab;
     private GuiButton veinsTab;
 
     private int tab = TAB_BLOCKS;
@@ -144,19 +150,27 @@ public class GuiLocatorWand extends GuiScreen {
         // 页签按钮放在标题那一行的右端
         blocksTab = new GuiSmallButton(
             BTN_TAB_BLOCKS,
-            guiLeft + GUI_WIDTH - 6 - 100,
+            guiLeft + GUI_WIDTH - 6 - 138,
             guiTop + TITLE_Y,
-            48,
+            44,
             16,
             tr("futa_gtnh.gui.locator.tab.blocks"));
+        itemsTab = new GuiSmallButton(
+            BTN_TAB_ITEMS,
+            guiLeft + GUI_WIDTH - 6 - 92,
+            guiTop + TITLE_Y,
+            44,
+            16,
+            tr("futa_gtnh.gui.locator.tab.items"));
         veinsTab = new GuiSmallButton(
             BTN_TAB_VEINS,
-            guiLeft + GUI_WIDTH - 6 - 50,
+            guiLeft + GUI_WIDTH - 6 - 46,
             guiTop + TITLE_Y,
-            50,
+            40,
             16,
             tr("futa_gtnh.gui.locator.tab.veins"));
         buttonList.add(blocksTab);
+        buttonList.add(itemsTab);
         buttonList.add(veinsTab);
         // 拿不到 GT 的矿脉数据时干脆不显示这个页签，免得点进去一片空白
         veinsTab.enabled = OreVeinCatalog.isAvailable();
@@ -181,6 +195,7 @@ public class GuiLocatorWand extends GuiScreen {
 
         loadVeins();
         BlockIndex.ensureStarted();
+        ItemIndex.ensureStarted();
         viewDirty = true;
     }
 
@@ -232,6 +247,13 @@ public class GuiLocatorWand extends GuiScreen {
                 buildRefreshTimer = 0;
                 viewDirty = true;
             }
+        } else if (tab == TAB_ITEMS) {
+            boolean wasBuilding = ItemIndex.isBuilding();
+            ItemIndex.tick();
+            if (wasBuilding && ++buildRefreshTimer >= BUILD_REFRESH_INTERVAL) {
+                buildRefreshTimer = 0;
+                viewDirty = true;
+            }
         }
 
         if (viewDirty) {
@@ -247,6 +269,8 @@ public class GuiLocatorWand extends GuiScreen {
         String query = searchField == null ? "" : searchField.getText();
         if (tab == TAB_BLOCKS) {
             BlockIndex.filter(query, blockResults);
+        } else if (tab == TAB_ITEMS) {
+            ItemIndex.filter(query, itemResults);
         } else {
             filterVeins(query);
         }
@@ -286,6 +310,7 @@ public class GuiLocatorWand extends GuiScreen {
     private void updateTabLabels() {
         if (blocksTab == null) return;
         blocksTab.enabled = tab != TAB_BLOCKS;
+        itemsTab.enabled = tab != TAB_ITEMS;
         veinsTab.enabled = tab != TAB_VEINS && OreVeinCatalog.isAvailable();
     }
 
@@ -420,17 +445,32 @@ public class GuiLocatorWand extends GuiScreen {
                 guiLeft + GRID_X + 2,
                 bottom + 3,
                 0xFFAA00);
-        } else if (count == 0) {
+        } else if (tab == TAB_ITEMS && ItemIndex.isBuilding()) {
             fontRendererObj.drawStringWithShadow(
-                EnumChatFormatting.GRAY
-                    + tr(tab == TAB_BLOCKS ? "futa_gtnh.gui.locator.empty" : "futa_gtnh.gui.locator.empty.veins"),
+                StatCollector.translateToLocalFormatted(
+                    "futa_gtnh.gui.locator.indexing.items",
+                    (int) (ItemIndex.getProgress() * 100.0F)),
                 guiLeft + GRID_X + 2,
                 bottom + 3,
-                0xFFFFFF);
+                0xFFAA00);
+        } else if (count == 0) {
+            fontRendererObj
+                .drawStringWithShadow(
+                    EnumChatFormatting.GRAY + tr(
+                        tab == TAB_BLOCKS ? "futa_gtnh.gui.locator.empty"
+                            : tab == TAB_ITEMS ? "futa_gtnh.gui.locator.empty.items"
+                                : "futa_gtnh.gui.locator.empty.veins"),
+                    guiLeft + GRID_X + 2,
+                    bottom + 3,
+                    0xFFFFFF);
         } else {
             String text = tab == TAB_BLOCKS
                 ? StatCollector.translateToLocalFormatted("futa_gtnh.gui.locator.count", count, BlockIndex.size())
-                : StatCollector.translateToLocalFormatted("futa_gtnh.gui.locator.count.veins", count, allVeins.size());
+                : tab == TAB_ITEMS
+                    ? StatCollector
+                        .translateToLocalFormatted("futa_gtnh.gui.locator.count.items", count, ItemIndex.size())
+                    : StatCollector
+                        .translateToLocalFormatted("futa_gtnh.gui.locator.count.veins", count, allVeins.size());
             fontRendererObj.drawStringWithShadow(text, guiLeft + GRID_X + 2, bottom + 3, 0xA0A0A0);
         }
 
@@ -573,8 +613,12 @@ public class GuiLocatorWand extends GuiScreen {
     }
 
     private void drawHintLines(int x, int y) {
-        fontRendererObj
-            .drawStringWithShadow(EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.locator.hint1"), x, y, 0xFFFFFF);
+        fontRendererObj.drawStringWithShadow(
+            EnumChatFormatting.DARK_GRAY
+                + tr(tab == TAB_ITEMS ? "futa_gtnh.gui.locator.hint1.items" : "futa_gtnh.gui.locator.hint1"),
+            x,
+            y,
+            0xFFFFFF);
         fontRendererObj.drawStringWithShadow(
             EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.locator.hint2"),
             x,
@@ -601,11 +645,12 @@ public class GuiLocatorWand extends GuiScreen {
     }
 
     // ==================================================================
-    // 结果访问（屏蔽两个页签的差异）
+    // 结果访问（屏蔽三个页签的差异）
     // ==================================================================
 
     private int resultCount() {
-        return tab == TAB_BLOCKS ? blockResults.size() : veinResults.size();
+        if (tab == TAB_BLOCKS) return blockResults.size();
+        return tab == TAB_ITEMS ? itemResults.size() : veinResults.size();
     }
 
     private int totalRows(int count) {
@@ -616,6 +661,7 @@ public class GuiLocatorWand extends GuiScreen {
         if (tab == TAB_BLOCKS) {
             return index < blockResults.size() ? blockResults.get(index) : null;
         }
+        if (tab == TAB_ITEMS) return index < itemResults.size() ? itemResults.get(index) : null;
         if (index >= veinResults.size()) return null;
         return OreVeinCatalog.iconOf(veinResults.get(index));
     }
@@ -624,6 +670,7 @@ public class GuiLocatorWand extends GuiScreen {
         if (tab == TAB_BLOCKS) {
             return index < blockResults.size() && LocatorState.isBlockSelected(blockResults.get(index));
         }
+        if (tab == TAB_ITEMS) return index < itemResults.size() && LocatorState.isItemSelected(itemResults.get(index));
         return index < veinResults.size() && LocatorState.isVeinSelected(
             veinResults.get(index)
                 .getKey());
@@ -638,6 +685,15 @@ public class GuiLocatorWand extends GuiScreen {
             if (index >= blockResults.size()) return null;
             ItemStack stack = blockResults.get(index);
             return stack == null ? null : stack.getTooltip(mc.thePlayer, mc.gameSettings.advancedItemTooltips);
+        }
+
+        if (tab == TAB_ITEMS) {
+            if (index >= itemResults.size()) return null;
+            ItemStack stack = itemResults.get(index);
+            if (stack == null) return null;
+            List<String> lines = new ArrayList<>(stack.getTooltip(mc.thePlayer, mc.gameSettings.advancedItemTooltips));
+            lines.add(EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.locator.items.tip"));
+            return lines;
         }
 
         if (index >= veinResults.size()) return null;
@@ -760,8 +816,10 @@ public class GuiLocatorWand extends GuiScreen {
                 LocatorState.clear();
                 break;
             case BTN_TAB_BLOCKS:
+            case BTN_TAB_ITEMS:
             case BTN_TAB_VEINS:
-                switchTab(button.id == BTN_TAB_BLOCKS ? TAB_BLOCKS : TAB_VEINS);
+                switchTab(
+                    button.id == BTN_TAB_BLOCKS ? TAB_BLOCKS : button.id == BTN_TAB_ITEMS ? TAB_ITEMS : TAB_VEINS);
                 break;
             default:
                 break;
@@ -771,7 +829,7 @@ public class GuiLocatorWand extends GuiScreen {
     private void switchTab(int newTab) {
         if (tab == newTab) return;
         tab = newTab;
-        // 搜索词在两个页签里都保留，切过去照样能用
+        // 搜索词在三个页签里都保留，切过去照样能用
         viewDirty = true;
     }
 
@@ -782,6 +840,11 @@ public class GuiLocatorWand extends GuiScreen {
             // 先更新本地状态让界面立刻有反馈，真结果等服务端推回来
             LocatorState.setBlockTarget(stack);
             NetworkHandler.INSTANCE.sendToServer(PacketLocatorAction.start(stack));
+        } else if (tab == TAB_ITEMS) {
+            ItemStack stack = index < itemResults.size() ? itemResults.get(index) : null;
+            if (stack == null) return;
+            LocatorState.setItemTarget(stack);
+            NetworkHandler.INSTANCE.sendToServer(PacketLocatorAction.startItem(stack));
         } else {
             if (index >= veinResults.size()) return;
             OreVeinCatalog.Entry entry = veinResults.get(index);

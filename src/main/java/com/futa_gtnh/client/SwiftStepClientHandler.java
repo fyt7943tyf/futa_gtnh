@@ -56,7 +56,7 @@ public class SwiftStepClientHandler {
      * 当前生效的飞行倍率是不是被「服务器安全上限」压过。
      *
      * <p>
-     * 给界面用：玩家调了 20 倍却只跑出 18 倍的效果，得让他知道为什么，
+     * 给界面用：玩家设置超过服务器安全上限时会被压低，得让他知道为什么，
      * 否则只会觉得「这东西坏了」。
      */
     private static boolean clampedForServer;
@@ -156,7 +156,7 @@ public class SwiftStepClientHandler {
             // 「isSinglePlayer 且你是房主」的豁免条件，所以单人存档完全不受影响。
             //
             // 压到安全值总比维持一个「每 tick 被拉回」的倍率强 ——
-            // 18 倍能跑，20 倍等于没装。
+            // 超过安全上限会被压低，避免多人服务器把玩家拉回原地。
             float safe = ItemSwiftStep.serverSafeFlyMultiplier();
             clampedForServer = false;
             if (multiplier > safe && !Minecraft.getMinecraft()

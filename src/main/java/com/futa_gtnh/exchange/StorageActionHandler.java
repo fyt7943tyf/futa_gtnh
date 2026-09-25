@@ -16,6 +16,7 @@ import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageAction;
 import com.futa_gtnh.network.PacketStorageDelta;
 import com.futa_gtnh.network.PacketTerminalFluid;
+import com.futa_gtnh.network.PacketTerminalItem;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -183,6 +184,10 @@ public final class StorageActionHandler {
                     handleSetTerminalFluid(player, container, packet.getFluidKey());
                     return;
                 }
+                case PacketStorageAction.SET_TERMINAL_ITEM: {
+                    handleSetTerminalItem(player, container, packet.getItemKey());
+                    return;
+                }
                 case PacketStorageAction.FILL_CRAFT_MATRIX:
                 case PacketStorageAction.AUTOCRAFT: {
                     // NEI 合成联动：布局在 keyTag 里，倍率在 amount 里。
@@ -244,6 +249,22 @@ public final class StorageActionHandler {
         }
         terminal.setOutputFluid(key);
         NetworkHandler.INSTANCE.sendTo(new PacketTerminalFluid(key), player);
+    }
+
+    private static void handleSetTerminalItem(EntityPlayerMP player, ContainerSharedTerminal container, ItemKey key) {
+        TileEntitySharedTerminal terminal = container.getTerminal();
+        if (terminal == null) return;
+
+        ItemKey selected = key;
+        if (key != null && key.equals(terminal.getOutputItem())) {
+            selected = null;
+        } else if (key != null && !SharedStorageManager.getStorage()
+            .hasItem(key)) {
+            return;
+        }
+
+        terminal.setOutputItem(selected);
+        NetworkHandler.INSTANCE.sendTo(new PacketTerminalItem(selected), player);
     }
 
     /** {@code <= 0} 表示「尽可能多」，原样保留；正数则夹到上限。 */

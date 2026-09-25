@@ -12,6 +12,7 @@ import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.PlayerEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
+import cpw.mods.fml.relauncher.Side;
 
 /**
  * 服务端生命周期挂钩。
@@ -70,13 +71,12 @@ public class ModEventHandler {
     }
 
     /**
-     * 每 tick 把迅步的移动速度修饰符调整成该有的样子。
+     * 每 tick 更新迅步的飞行权限、生长光环和移动速度修饰符。
      *
      * <p>
-     * 这里<b>刻意不按端分流</b>：这个事件两端都会触发，而方法本身是幂等的
-     * （倍率没变就什么都不做），所以服务端负责权威、客户端负责即时生效，
-     * 一份代码全包了。而且客户端也需要它 —— 属性的同步毕竟要等一个来回，
-     * 不本地也挂一份的话，戴上迅步要过一小会儿才有感觉。
+     * 飞行权限和生长光环只在服务端处理；移动速度修饰符则两端都要调整：
+     * 服务端负责权威，客户端负责即时生效。客户端也需要本地挂修饰符 ——
+     * 属性同步毕竟要等一个来回，不然戴上迅步要过一小会儿才有感觉。
      *
      * <p>
      * 代价是每 tick 每个玩家要遍历一遍饰品栏（几格）加一次属性查表，
@@ -85,6 +85,11 @@ public class ModEventHandler {
     @SubscribeEvent
     public void onPlayerTick(TickEvent.PlayerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        if (event.side == Side.SERVER) {
+            ItemSwiftStep.updateFlightPermission(event.player);
+            SwiftStepGrowthAura.tick(event.player);
+            SwiftStepRecovery.tick(event.player);
+        }
         ItemSwiftStep.applyWalkSpeedModifier(event.player);
         // 空中前进速度也要跟着放大，否则「走着 5 倍、一跳起来掉回原版」。
         //

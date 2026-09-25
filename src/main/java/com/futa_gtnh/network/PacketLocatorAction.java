@@ -17,7 +17,7 @@ import io.netty.buffer.ByteBuf;
  * 客户端 -&gt; 服务端：寻物魔杖的操作。
  *
  * <p>
- * 四个动作合成一个包，靠 {@link #action} 区分。几条校验，都是「不信客户端」那条原则：
+ * 五个动作合成一个包，靠 {@link #action} 区分。几条校验，都是「不信客户端」那条原则：
  *
  * <ul>
  * <li>玩家必须<b>手持寻物魔杖</b> —— 否则发这个包没有任何意义，
@@ -36,6 +36,7 @@ public class PacketLocatorAction implements IMessage {
     public static final byte TELEPORT = 1;
     public static final byte CANCEL = 2;
     public static final byte START_VEIN = 3;
+    public static final byte START_ITEM = 4;
 
     private byte action;
     private ItemStack target;
@@ -50,6 +51,13 @@ public class PacketLocatorAction implements IMessage {
     /** 搜一个具体的方块。 */
     public static PacketLocatorAction start(ItemStack target) {
         PacketLocatorAction packet = new PacketLocatorAction(START);
+        packet.target = target;
+        return packet;
+    }
+
+    /** 搜索容器里的一种物品。 */
+    public static PacketLocatorAction startItem(ItemStack target) {
+        PacketLocatorAction packet = new PacketLocatorAction(START_ITEM);
         packet.target = target;
         return packet;
     }
@@ -100,6 +108,10 @@ public class PacketLocatorAction implements IMessage {
                 case START_VEIN:
                     if (message.veinKey == null) return null;
                     LocatorManager.startVein(player, message.veinKey);
+                    break;
+                case START_ITEM:
+                    if (message.target == null) return null;
+                    LocatorManager.startItem(player, message.target);
                     break;
                 case TELEPORT:
                     handleTeleport(player);

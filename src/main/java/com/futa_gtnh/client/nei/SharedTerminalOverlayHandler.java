@@ -9,7 +9,9 @@ import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
+import net.minecraft.nbt.NBTTagString;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.oredict.OreDictionary;
 
 import com.futa_gtnh.client.ClientStorageCache;
 import com.futa_gtnh.client.GuiSharedTerminal;
@@ -62,6 +64,9 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
 
     /** 每格最多带多少个候选去服务端（矿辞置换组偶尔很长）。 */
     private static final int MAX_CANDIDATES = 16;
+
+    /** 每格最多带多少个 craftingTool 矿辞名。 */
+    private static final int MAX_TOOL_ORES = 16;
 
     public SharedTerminalOverlayHandler() {
         super(OVERLAY_OFFSET_X, OVERLAY_OFFSET_Y);
@@ -235,16 +240,34 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
                 slot.setInteger("idx", index);
                 slot.setInteger("count", perCraftCount(positioned));
                 NBTTagList candidates = new NBTTagList();
-                int added = 0;
+                List<ItemKey> candidateKeys = new ArrayList<>();
+                List<String> toolOreNames = new ArrayList<>();
                 for (ItemStack candidate : positioned.items) {
-                    if (candidate == null || added >= MAX_CANDIDATES) break;
+                    if (candidate == null) continue;
                     ItemKey key = ItemKey.of(candidate);
                     if (key == null) continue;
-                    candidates.appendTag(key.writeToNbt());
-                    added++;
+
+                    // GT 的 craftingToolSaw 等矿辞可能包含很多材料/NBT 变体，
+                    // 不能只把最前面的少数候选发给服务端。候选列表仍有限长，
+                    // 但工具矿辞会完整记录，服务端可按矿辞匹配实际存放的工具。
+                    collectCraftingToolOreNames(candidate, toolOreNames);
+
+                    if (candidateKeys.size() < MAX_CANDIDATES && !candidateKeys.contains(key)) {
+                        candidateKeys.add(key);
+                    }
                 }
-                if (added == 0) continue;
+                if (candidateKeys.isEmpty() && toolOreNames.isEmpty()) continue;
+                for (ItemKey key : candidateKeys) {
+                    candidates.appendTag(key.writeToNbt());
+                }
                 slot.setTag("cands", candidates);
+                if (!toolOreNames.isEmpty()) {
+                    NBTTagList toolOres = new NBTTagList();
+                    for (String oreName : toolOreNames) {
+                        toolOres.appendTag(new NBTTagString(oreName));
+                    }
+                    slot.setTag("toolOres", toolOres);
+                }
                 perSlot[index] = slot;
             } else {
                 // 同一格位出现第二个材料位（理论上不该有）：取更大的单次用量
@@ -269,5 +292,20 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
     private static int perCraftCount(PositionedStack positioned) {
         int count = positioned.item != null ? positioned.item.stackSize : 0;
         return Math.max(1, Math.min(count, 64));
+    }
+
+    /** 把 GT / Forge craftingTool 矿辞名附在槽位上，供服务端匹配工具的实际 NBT 变体。 */
+    private static void collectCraftingToolOreNames(ItemStack stack, List<String> output) {
+        try {
+            for (int id : OreDictionary.getOreIDs(stack)) {
+                String name = OreDictionary.getOreName(id);
+                if (name != null && name.startsWith("craftingTool") && !output.contains(name)) {
+                    if (output.size() >= MAX_TOOL_ORES) continue;
+                    output.add(name);
+                }
+            }
+        } catch (Throwable ignored) {
+            // 某个模组物品的矿辞查询失败时，仍保留精确候选，不影响其它配方材料。
+        }
     }
 }

@@ -24,6 +24,7 @@ import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketAutoStore;
 import com.futa_gtnh.shared.FluidKey;
+import com.futa_gtnh.shared.ItemKey;
 
 /**
  * 全服共享背包的主界面。
@@ -452,6 +453,11 @@ public class GuiSharedTerminal extends GuiContainer {
                 + (hovered.isFluid() ? " L" : "");
         } else if (container.isRemoteAccess()) {
             status = EnumChatFormatting.GRAY + tr("futa_gtnh.gui.status.remote");
+        } else if (tab == TAB_ITEMS) {
+            ItemKey output = ClientTerminalState.getOutputItem();
+            status = EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
+                "futa_gtnh.gui.status.output",
+                output == null ? tr("futa_gtnh.gui.status.output.none") : safeItemName(output));
         } else {
             FluidKey output = ClientTerminalState.getOutputFluid();
             status = EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
@@ -773,6 +779,15 @@ public class GuiSharedTerminal extends GuiContainer {
 
         int index = scrollRow * ContainerSharedTerminal.COLS + row * ContainerSharedTerminal.COLS + col;
         return index < filtered.size() ? filtered.get(index) : null;
+    }
+
+    private static String safeItemName(ItemKey key) {
+        try {
+            return key.prototype()
+                .getDisplayName();
+        } catch (Throwable t) {
+            return String.valueOf(key);
+        }
     }
 
     private static String safeFluidName(FluidKey key) {
