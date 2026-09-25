@@ -60,6 +60,33 @@ item.futa_gtnh.locator_wand.name=寻物魔杖
 item.futa_gtnh.locator_wand.tip.gui=右键：打开选择界面
 item.futa_gtnh.locator_wand.tip.clear=潜行 + 右键：取消当前追踪
 
+# ---------------------------------------------------------------- 小游戏助手
+item.futa_gtnh.minigame_helper.name=小游戏助手
+item.futa_gtnh.minigame_helper.tip.gui=右键：打开全服共享的地牢清单
+item.futa_gtnh.minigame_helper.tip.mark=点击条目可标记已完成（全服共享）
+
+futa_gtnh.gui.lootassist.title=小游戏地牢
+futa_gtnh.gui.lootassist.search=搜索附近（%s 格）
+futa_gtnh.gui.lootassist.searching=扫描中…
+futa_gtnh.gui.lootassist.filter.hint=按坐标 / 维度 / 标记人过滤
+futa_gtnh.gui.lootassist.entrance=地表入口：
+futa_gtnh.gui.lootassist.underground=地下主方块：
+futa_gtnh.gui.lootassist.done=已完成
+futa_gtnh.gui.lootassist.mark_tip=点击条目切换「已完成」标记
+futa_gtnh.gui.lootassist.pending=待验证
+futa_gtnh.gui.lootassist.pending_tip=种子推算的候选点，尚未实地确认
+futa_gtnh.gui.lootassist.no_lootgames=未检测到 LootGames
+futa_gtnh.gui.lootassist.empty=还没有地牢记录 —— 点「搜索附近」开始扫描
+futa_gtnh.gui.lootassist.count=%s 个地牢
+futa_gtnh.gui.lootassist.progress=扫描中 %s / %s（找到 %s）
+
+futa_gtnh.msg.lootassist.no_lootgames=这台服务器没有安装 LootGames
+futa_gtnh.msg.lootassist.search_busy=已有扫描任务在进行中，请稍候
+futa_gtnh.msg.lootassist.search_nothing=附近没有发现新的地牢候选点
+
+futa_gtnh.msg.lootgames.full_reward=重试次数已达上限，按满奖励结算！
+futa_gtnh.msg.lootgames.level_skip_denied=当前阶段无法跳过
+
 futa_gtnh.gui.locator.title=寻物魔杖
 futa_gtnh.gui.locator.tab.blocks=方块
 futa_gtnh.gui.locator.tab.veins=矿脉

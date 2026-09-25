@@ -64,6 +64,33 @@ item.futa_gtnh.locator_wand.name=Locator Wand
 item.futa_gtnh.locator_wand.tip.gui=Right-click: open the selection screen
 item.futa_gtnh.locator_wand.tip.clear=Sneak + right-click: stop tracking
 
+# ---------------------------------------------------------------- Minigame Helper
+item.futa_gtnh.minigame_helper.name=Minigame Helper
+item.futa_gtnh.minigame_helper.tip.gui=Right-click: open the shared dungeon list
+item.futa_gtnh.minigame_helper.tip.mark=Click an entry to mark it completed (shared with the whole server)
+
+futa_gtnh.gui.lootassist.title=Minigame Dungeons
+futa_gtnh.gui.lootassist.search=Search nearby (%s blocks)
+futa_gtnh.gui.lootassist.searching=Scanning...
+futa_gtnh.gui.lootassist.filter.hint=Filter by coords / dimension / player
+futa_gtnh.gui.lootassist.entrance=Entrance:
+futa_gtnh.gui.lootassist.underground=Underground:
+futa_gtnh.gui.lootassist.done=Completed
+futa_gtnh.gui.lootassist.mark_tip=Click to toggle the completed mark
+futa_gtnh.gui.lootassist.pending=pending scan
+futa_gtnh.gui.lootassist.pending_tip=Candidate from seed math, not yet verified in-world
+futa_gtnh.gui.lootassist.no_lootgames=LootGames is not installed
+futa_gtnh.gui.lootassist.empty=No dungeons known yet - click "Search nearby"
+futa_gtnh.gui.lootassist.count=%s dungeons
+futa_gtnh.gui.lootassist.progress=Scanning %s / %s (found %s)
+
+futa_gtnh.msg.lootassist.no_lootgames=LootGames is not installed on this server
+futa_gtnh.msg.lootassist.search_busy=A scan is already running, please wait
+futa_gtnh.msg.lootassist.search_nothing=No new dungeon candidates nearby
+
+futa_gtnh.msg.lootgames.full_reward=Retry limit reached - settling with FULL rewards!
+futa_gtnh.msg.lootgames.level_skip_denied=This phase cannot be skipped
+
 futa_gtnh.gui.locator.title=Locator Wand
 futa_gtnh.gui.locator.tab.blocks=Blocks
 futa_gtnh.gui.locator.tab.veins=Veins

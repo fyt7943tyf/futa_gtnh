@@ -79,4 +79,18 @@ public class ForgeEventHandler {
 
         SharedStorageManager.broadcastItemChange(key);
     }
+
+    /**
+     * 小游戏助手的「自然发现」：任何区块被加载时顺带验证一次 lootgames 候选点
+     * （见 {@code LootassistManager#onChunkLoad}）。
+     *
+     * <p>
+     * {@code ChunkEvent.Load} 两端都会触发，方法内部第一件事就是按 {@code isRemote}
+     * 分流，客户端直接返回。验证的第一步是纯数学的候选判定（一次取模哈希），
+     * 不是候选区块的开销只有这点判断。
+     */
+    @SubscribeEvent
+    public void onChunkLoad(net.minecraftforge.event.world.ChunkEvent.Load event) {
+        com.futa_gtnh.lootassist.LootassistManager.onChunkLoad(event.getChunk());
+    }
 }
