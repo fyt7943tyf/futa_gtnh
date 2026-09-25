@@ -7,7 +7,6 @@ import java.util.Random;
 import net.minecraft.block.Block;
 import net.minecraft.util.MathHelper;
 import net.minecraft.world.World;
-import net.minecraft.world.WorldServer;
 
 import eu.usrv.legacylootgames.StructureGenerator;
 import ru.timeconqueror.lootgames.common.config.LGConfigs;
@@ -46,10 +45,10 @@ public final class LootgameFinder {
      * 入口/房间几何常量直接引用 LootGames 的 {@link StructureGenerator}（public 常量），
      * 不再手抄数字 —— 那边改了这边自动跟。
      */
-    private static final int MASTER_TE_OFFSET = StructureGenerator.PUZZLEROOM_MASTER_TE_OFFSET;
-    private static final int CENTER_TO_BORDER = StructureGenerator.PUZZLEROOM_CENTER_TO_BORDER;
+    public static final int MASTER_TE_OFFSET = StructureGenerator.PUZZLEROOM_MASTER_TE_OFFSET;
+    public static final int CENTER_TO_BORDER = StructureGenerator.PUZZLEROOM_CENTER_TO_BORDER;
     /** 入口阶梯最多挖 15 格（原版 {@code StructureGenerator} 的硬上限）。 */
-    private static final int ENTRANCE_MAX_RUN = 15;
+    public static final int ENTRANCE_MAX_RUN = 15;
 
     /** 与原版相同的共享 Random：isCandidateChunk 每次调用都先 setSeed，复用无副作用。 */
     private static final Random RNG = new Random();
@@ -110,6 +109,10 @@ public final class LootgameFinder {
      * 所以扫描 14..125 就能覆盖全部可能。只查一列（x/z 是精确已知的），
      * 一次一百来次 {@code getBlock}，微秒级。
      *
+     * <p>
+     * <b>调用方必须先用 {@link #isChunkLoaded} 确认区块已加载</b>：
+     * {@code getBlock} 对未加载区块会同步生成它（见 {@link #findEntrance} 的红线说明）。
+     *
      * @return 主方块 y；这个区块里没有地牢时返回 -1
      */
     public static int findMasterY(World world, int x, int z) {
@@ -130,14 +133,26 @@ public final class LootgameFinder {
      * 找到第一个满足的 d 就是出口位置（和原版 do-while 的退出条件一致，
      * 上限同为 15）。只需要查 15 列的地表高度，同样微秒级。
      *
+     * <p>
+     * <b>红线：绝不触碰未加载的区块。</b>探测列在房间南侧 11..25 格，
+     * 几乎必然跨到相邻区块 —— 而 1.7.10 的 {@code World#getBlock} 对未加载区块会
+     * <b>同步生成整个区块</b>，生成的区块又触发新的加载事件，可能级联下去，
+     * 在服务端主线程上一次冻结好几秒（这正是初版「共享背包/俯瞰视角打不开」的根因：
+     * 服务端卡死，所有依赖服务端往返的界面全部超时）。所以任何一列的区块还没加载时
+     * 直接放弃本次推算（返回 -1），等那个区块被正常加载时由自然发现逻辑补算。
+     *
      * @param masterY 已验证的主方块 y
-     * @return {@code {x, 站立y, z}}；推不出来时 y/z 为 -1（地牢本身仍然有效）
+     * @return {@code {x, 站立y, z}}；推不出来（探测列未加载 / 15 格内没有出口）时 y/z 为 -1
      */
     public static int[] findEntrance(World world, int x, int z, int masterY) {
         int bottom = masterY - MASTER_TE_OFFSET;
 
         for (int d = 1; d <= ENTRANCE_MAX_RUN; d++) {
             int entranceZ = z + CENTER_TO_BORDER + d;
+            if (!isChunkLoaded(world, x >> 4, entranceZ >> 4)) {
+                // 探测列还没加载：无法判断，也绝不能去生成它 —— 留给自然发现补算
+                return new int[] { x, -1, -1 };
+            }
             int ground = groundY(world, x, entranceZ);
             if (ground < 0) continue;
             if (bottom + 4 + d >= ground) {
@@ -201,8 +216,12 @@ public final class LootgameFinder {
         return dx * dx + dz * dz;
     }
 
-    /** @return 该区块当前是否已在内存里（不会触发生成/读盘） */
-    public static boolean isChunkLoaded(WorldServer world, int chunkX, int chunkZ) {
+    /**
+     * @return 该区块当前是否已在内存里（不会触发生成/读盘）。
+     *         这是「只读已加载区块」红线的关键闸门 —— 1.7.10 的
+     *         {@code World#getBlock} 对未加载区块会同步生成它，任何扫描前必须先过这道检查。
+     */
+    public static boolean isChunkLoaded(World world, int chunkX, int chunkZ) {
         return world.getChunkProvider()
             .chunkExists(chunkX, chunkZ);
     }
