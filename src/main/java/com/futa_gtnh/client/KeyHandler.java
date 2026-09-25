@@ -36,10 +36,12 @@ public final class KeyHandler {
     public static final String KEY_OPEN_TERMINAL = "key.futa_gtnh.shared_terminal";
     public static final String KEY_DUNGEON_MAP = "key.futa_gtnh.dungeon_map";
     public static final String KEY_DUNGEON_MINIMAP = "key.futa_gtnh.dungeon_minimap";
+    public static final String KEY_RTS_TOGGLE = "key.futa_gtnh.rts_toggle";
 
     private static KeyBinding openTerminal;
     private static KeyBinding dungeonMap;
     private static KeyBinding dungeonMiniMap;
+    private static KeyBinding rtsToggle;
 
     public static void register() {
         openTerminal = new KeyBinding(KEY_OPEN_TERMINAL, Keyboard.KEY_B, KEY_CATEGORY);
@@ -48,9 +50,20 @@ public final class KeyHandler {
         ClientRegistry.registerKeyBinding(openTerminal);
         ClientRegistry.registerKeyBinding(dungeonMap);
         ClientRegistry.registerKeyBinding(dungeonMiniMap);
+        rtsToggle = new KeyBinding(KEY_RTS_TOGGLE, Keyboard.KEY_G, KEY_CATEGORY);
+        ClientRegistry.registerKeyBinding(rtsToggle);
         FMLCommonHandler.instance()
             .bus()
             .register(new Listener());
+    }
+
+    /**
+     * 俯瞰模式开关键的键码。俯瞰 HUD 开着时 KeyBinding 不会再触发
+     * （键盘事件全被 GuiScreen 截走），HUD 需要拿键码自己比对 keyTyped，
+     * 这样「界面里再按一次 G 退出」和键位设置里改的键始终是同一个。
+     */
+    public static int getRtsToggleKeyCode() {
+        return rtsToggle == null ? Keyboard.KEY_G : rtsToggle.getKeyCode();
     }
 
     public static final class Listener {
@@ -71,7 +84,14 @@ public final class KeyHandler {
             // 已经开着别的界面（聊天、背包、容器）时不要抢按键
             if (minecraft.thePlayer == null || minecraft.currentScreen != null) return;
 
-            NetworkHandler.INSTANCE.sendToServer(new PacketOpenGui());
+            if (openTerminal != null && openTerminal.isPressed()) {
+                NetworkHandler.INSTANCE.sendToServer(new PacketOpenGui());
+            }
+
+            // 俯瞰 HUD 开着时 G 键由 HUD 自己处理（keyTyped），这里只管「没开界面」的进入
+            if (rtsToggle != null && rtsToggle.isPressed()) {
+                com.futa_gtnh.rts.client.RtsClientState.enter();
+            }
         }
     }
 }

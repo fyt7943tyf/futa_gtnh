@@ -1,5 +1,7 @@
 package com.futa_gtnh.mixins;
 
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -35,6 +37,17 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     /** 匠魂里最能代表「这个模组在」的一个类。 */
     private static final String TCONSTRUCT_PROBE = "tconstruct.tools.logic.CraftingStationLogic";
+
+    /**
+     * 目标是原版类、任何时候都该生效的 mixin。
+     *
+     * <p>
+     * 其余的 mixin 都针对可选依赖（匠魂），缺席时要整组跳过 —— 见
+     * {@link #shouldApplyMixin} 的分流逻辑。新加原版目标的 mixin 记得
+     * 把类名登记进来，否则匠魂缺席的环境里它会被一起跳掉。
+     */
+    private static final Set<String> VANILLA_TARGET_MIXINS = new HashSet<>(
+        Arrays.asList("MixinEntityPlayer", "MixinEntityPlayerMP", "MixinEntityRenderer"));
 
     private static boolean present;
 
@@ -73,7 +86,10 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-        // 本配置里的 mixin 全都只针对匠魂；匠魂不在就没有任何东西可混入
+        // 原版目标的 mixin（俯瞰远程 GUI 的距离校验放宽等）无条件生效
+        String simpleName = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
+        if (VANILLA_TARGET_MIXINS.contains(simpleName)) return true;
+        // 其余的只针对匠魂；匠魂不在就没有任何东西可混入
         return tinkersPresent();
     }
 

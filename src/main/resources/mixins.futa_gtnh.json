@@ -7,8 +7,10 @@
 		"MixinContainer",
 		"MixinCraftingStationContainer",
 		"MixinCraftingStationLogic",
+		"MixinEntityPlayer",
+		"MixinEntityPlayerMP",
 		"MixinSlotCraftingStation"
 	],
-	"client": [],
+	"client": ["MixinEntityRenderer"],
 	"server": []
 }

@@ -73,6 +73,14 @@ public final class StorageSort {
         return (mode + 1) % MODE_COUNT;
     }
 
+    /**
+     * 把配置文件里存的整数钳位成合法的排序方式，越界回退到「按数量」
+     * （1.3.2 起的默认值）。
+     */
+    public static int fromIndex(int index) {
+        return index >= 0 && index < MODE_COUNT ? index : BY_AMOUNT;
+    }
+
     /** 语言文件里的键。 */
     public static String translationKey(int mode) {
         switch (mode) {
