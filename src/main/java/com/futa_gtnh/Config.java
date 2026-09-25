@@ -171,6 +171,16 @@ public class Config {
     public static boolean hideNeiPanelInTerminalGui = true;
 
     // ------------------------------------------------------------------
+    // Roguelike 地牢地图（客户端）
+    // ------------------------------------------------------------------
+
+    /** 是否启用 Roguelike Dungeons 地图快捷键和悬浮小地图。 */
+    public static boolean enableRoguelikeMap = true;
+
+    /** 每次扫描当前楼层时向四周读取的方块半径。只读取已经加载的区块。 */
+    public static int roguelikeMapScanRadius = 72;
+
+    // ------------------------------------------------------------------
     // 匠魂工作站自动补料（服务端行为）
     // ------------------------------------------------------------------
 
@@ -376,6 +386,20 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             hideNeiPanelInTerminalGui,
             "打开共享终端界面时暂时收起 NEI 的物品面板（终端界面较宽，面板会叠在合成栏上）。客户端行为，各端读各自的配置。");
+
+        enableRoguelikeMap = configuration.getBoolean(
+            "enableRoguelikeMap",
+            Configuration.CATEGORY_GENERAL,
+            enableRoguelikeMap,
+            "是否启用 Roguelike Dungeons 地图快捷键和悬浮小地图。客户端行为，各端读取自己的配置。");
+
+        roguelikeMapScanRadius = configuration.getInt(
+            "roguelikeMapScanRadius",
+            Configuration.CATEGORY_GENERAL,
+            roguelikeMapScanRadius,
+            24,
+            128,
+            "地牢地图每次扫描当前楼层的半径。只读取已经加载的区块；半径越大，地图建立越完整但扫描开销越高。");
 
         enableRecipe = configuration
             .getBoolean("enableRecipe", Configuration.CATEGORY_GENERAL, enableRecipe, "是否注册共享终端的合成配方。");
