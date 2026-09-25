@@ -162,7 +162,12 @@ public class CommonProxy {
     private void registerLocatorWand() {
         if (!Config.enableLocatorWand) return;
 
-        locatorWand = new ItemLocatorWand();
+        if (Loader.isModLoaded("Baubles|Expanded") || Loader.isModLoaded("Baubles")) {
+            locatorWand = new com.futa_gtnh.item.ItemLocatorWandBauble();
+            FutaGtnhMod.LOG.info("检测到 Baubles，寻物魔杖可装备到饰品槽");
+        } else {
+            locatorWand = new ItemLocatorWand();
+        }
         GameRegistry.registerItem(locatorWand, ItemLocatorWand.NAME);
         FutaGtnhMod.locatorWand = locatorWand;
         FutaGtnhMod.LOG.info("已注册寻物魔杖");

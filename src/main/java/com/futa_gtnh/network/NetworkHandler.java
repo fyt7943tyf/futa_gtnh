@@ -38,6 +38,8 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketOpenGui.Handler.class, PacketOpenGui.class, 3, Side.SERVER);
         INSTANCE.registerMessage(PacketAutoStore.Handler.class, PacketAutoStore.class, 5, Side.SERVER);
         INSTANCE.registerMessage(PacketSetSwiftStep.Handler.class, PacketSetSwiftStep.class, 7, Side.SERVER);
+        INSTANCE
+            .registerMessage(PacketSetSwiftStepMagnet.Handler.class, PacketSetSwiftStepMagnet.class, 23, Side.SERVER);
         INSTANCE.registerMessage(PacketLocatorAction.Handler.class, PacketLocatorAction.class, 9, Side.SERVER);
         // 匠魂合成站旁边那块共享存储区：客户端算好「这一页显示哪些东西」推给服务端
         INSTANCE.registerMessage(PacketStationView.Handler.class, PacketStationView.class, 10, Side.SERVER);

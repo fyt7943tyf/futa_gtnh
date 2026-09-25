@@ -12,11 +12,12 @@ item.futa_gtnh.swift_step.tooltip.air=跳跃/空中前进速度跟随移动速�
 item.futa_gtnh.swift_step.tooltip.crop_aura=作物生长光环：%s
 item.futa_gtnh.swift_step.tooltip.animal_aura=动物生长光环：%s（幼年成长、繁殖冷却和羊毛恢复）
 item.futa_gtnh.swift_step.tooltip.growth_aura=光环半径：%s 格，作物刻数 ×%s、动物额外速度 ×%s
-item.futa_gtnh.swift_step.tooltip.gui=右键：调整速度、照明、生长和恢复设置
+item.futa_gtnh.swift_step.tooltip.gui=右键：调整速度、照明、生长、恢复和吸物设置
 item.futa_gtnh.swift_step.tooltip.equip=潜行 + 右键：装备到空的饰品槽
 item.futa_gtnh.swift_step.tooltip.health_recovery=生命恢复：%s
 item.futa_gtnh.swift_step.tooltip.food_recovery=饱食恢复：%s
 item.futa_gtnh.swift_step.tooltip.recovery_speed=恢复速度：×%s
+item.futa_gtnh.swift_step.tooltip.item_magnet=掉落物吸附：%s，范围 %s 格
 
 futa_gtnh.swift_step.gui.tab.movement=移动
 futa_gtnh.swift_step.gui.tab.growth=生长
@@ -33,6 +34,10 @@ futa_gtnh.swift_step.gui.growth_aura.radius_down=半径 -
 futa_gtnh.swift_step.gui.growth_aura.radius_up=半径 +
 futa_gtnh.swift_step.gui.growth_aura.speed_down=速度 -
 futa_gtnh.swift_step.gui.growth_aura.speed_up=速度 +
+futa_gtnh.swift_step.gui.item_magnet=掉落物吸附
+futa_gtnh.swift_step.gui.item_magnet.status=吸附范围 %s 格（上限 1000）
+futa_gtnh.swift_step.gui.item_magnet.on=吸物：开启
+futa_gtnh.swift_step.gui.item_magnet.off=吸物：关闭
 futa_gtnh.swift_step.gui.on=开启
 futa_gtnh.swift_step.gui.off=关闭
 futa_gtnh.swift_step.gui.range=倍率可调范围 1.00 ~ %s（以服务端配置为准）
@@ -94,6 +99,7 @@ futa_gtnh.gui.status.output.none=未设置
 item.futa_gtnh.locator_wand.name=寻物魔杖
 item.futa_gtnh.locator_wand.tip.gui=右键：打开选择界面
 item.futa_gtnh.locator_wand.tip.clear=潜行 + 右键：取消当前追踪
+item.futa_gtnh.locator_wand.tip.bauble=装有 Baubles 时可佩戴；佩戴后持续显示当前追踪光线
 
 # ---------------------------------------------------------------- 小游戏助手
 item.futa_gtnh.minigame_helper.name=小游戏助手

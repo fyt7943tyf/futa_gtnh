@@ -6,6 +6,7 @@
 	"required": false,
 	"mixins": [
 		"MixinBlockReed",
+		"MixinEntityItem",
 		"MixinContainer",
 		"MixinCraftingStationContainer",
 		"MixinCraftingStationLogic",

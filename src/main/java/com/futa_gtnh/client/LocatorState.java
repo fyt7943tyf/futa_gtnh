@@ -1,7 +1,10 @@
 package com.futa_gtnh.client;
 
+import java.lang.reflect.Method;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
 
 import com.futa_gtnh.item.ItemLocatorWand;
@@ -21,8 +24,7 @@ import com.futa_gtnh.network.PacketLocatorResult;
  * 「这一格是不是当前选中的那个」。
  *
  * <p>
- * 光束<b>只在手持魔杖时才画</b>：不这么做的话，换到别的物品之后那道光还在天上飘，
- * 既碍眼又没意义。判断放在渲染器里做。
+ * 光束只在手持或佩戴魔杖时画；不然换下魔杖后光线还会留在天上。
  */
 public final class LocatorState {
 
@@ -58,6 +60,13 @@ public final class LocatorState {
      * 指的却是另一个世界的同一个数字。渲染器和传送按钮都靠这个字段判断结果还能不能用。
      */
     private static int resultDimension;
+
+    /** Baubles 是可选依赖；用反射探测，避免未安装时客户端加载寻物状态就崩溃。 */
+    private static Method getBaublesInventory;
+    private static boolean baublesApiResolved;
+    private static EntityPlayer accessoryCheckPlayer;
+    private static int accessoryCheckTick = Integer.MIN_VALUE;
+    private static boolean accessoryHasWand;
 
     // ==================================================================
     // 读写
@@ -223,17 +232,50 @@ public final class LocatorState {
     // 辅助
     // ==================================================================
 
-    /**
-     * @return 玩家是不是正拿着寻物魔杖
-     *
-     *         <p>
-     *         <b>只看主手。</b>副手（GTNH 的 Backhand 模组）也拿着魔杖时该不该画，
-     *         属于模棱两可的事，索性不算 —— 免得玩家把魔杖放副手之后那道光
-     *         莫名其妙一直在。
-     */
+    /** @return 玩家是否手持或佩戴寻物魔杖。 */
     public static boolean isHoldingWand(EntityPlayer player) {
         if (player == null) return false;
         ItemStack held = player.getCurrentEquippedItem();
-        return held != null && held.getItem() instanceof ItemLocatorWand;
+        if (held != null && held.getItem() instanceof ItemLocatorWand) return true;
+
+        // 渲染器每帧都会问一次；饰品栏每个玩家 tick 查一次就够了。
+        if (player != accessoryCheckPlayer || player.ticksExisted != accessoryCheckTick) {
+            accessoryCheckPlayer = player;
+            accessoryCheckTick = player.ticksExisted;
+            accessoryHasWand = hasWandInBaubles(player);
+        }
+        return accessoryHasWand;
+    }
+
+    private static boolean hasWandInBaubles(EntityPlayer player) {
+        Method getter = getBaublesInventoryMethod();
+        if (getter == null) return false;
+
+        try {
+            Object result = getter.invoke(null, player);
+            if (!(result instanceof IInventory)) return false;
+
+            IInventory baubles = (IInventory) result;
+            for (int slot = 0; slot < baubles.getSizeInventory(); slot++) {
+                ItemStack stack = baubles.getStackInSlot(slot);
+                if (stack != null && stack.getItem() instanceof ItemLocatorWand) return true;
+            }
+        } catch (Throwable ignored) {
+            // 饰品 API 在不同 Baubles 分支中的异常不应影响渲染或游戏运行。
+        }
+        return false;
+    }
+
+    private static Method getBaublesInventoryMethod() {
+        if (baublesApiResolved) return getBaublesInventory;
+        baublesApiResolved = true;
+
+        try {
+            Class<?> api = Class.forName("baubles.api.BaublesApi");
+            getBaublesInventory = api.getMethod("getBaubles", EntityPlayer.class);
+        } catch (Throwable ignored) {
+            // Baubles 是可选依赖；没有它时只有手持模式。
+        }
+        return getBaublesInventory;
     }
 }

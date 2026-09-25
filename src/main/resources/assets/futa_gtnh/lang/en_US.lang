@@ -15,11 +15,12 @@ item.futa_gtnh.swift_step.tooltip.air=Jump / mid-air speed follows movement spee
 item.futa_gtnh.swift_step.tooltip.crop_aura=Crop growth aura: %s
 item.futa_gtnh.swift_step.tooltip.animal_aura=Animal growth aura: %s (baby growth, breeding cooldown, and wool regrowth)
 item.futa_gtnh.swift_step.tooltip.growth_aura=Aura radius: %s, crop ticks x%s, extra animal speed x%s
-item.futa_gtnh.swift_step.tooltip.gui=Right-click: adjust speed, light, growth, and recovery
+item.futa_gtnh.swift_step.tooltip.gui=Right-click: adjust speed, light, growth, recovery, and magnet
 item.futa_gtnh.swift_step.tooltip.equip=Sneak + right-click: equip to a free bauble slot
 item.futa_gtnh.swift_step.tooltip.health_recovery=Health recovery: %s
 item.futa_gtnh.swift_step.tooltip.food_recovery=Food recovery: %s
 item.futa_gtnh.swift_step.tooltip.recovery_speed=Recovery speed: x%s
+item.futa_gtnh.swift_step.tooltip.item_magnet=Item magnet: %s, range %s blocks
 
 futa_gtnh.swift_step.gui.tab.movement=Move
 futa_gtnh.swift_step.gui.tab.growth=Growth
@@ -36,6 +37,10 @@ futa_gtnh.swift_step.gui.growth_aura.radius_down=Radius -
 futa_gtnh.swift_step.gui.growth_aura.radius_up=Radius +
 futa_gtnh.swift_step.gui.growth_aura.speed_down=Speed -
 futa_gtnh.swift_step.gui.growth_aura.speed_up=Speed +
+futa_gtnh.swift_step.gui.item_magnet=Item magnet
+futa_gtnh.swift_step.gui.item_magnet.status=Attraction range %s blocks (max 1000)
+futa_gtnh.swift_step.gui.item_magnet.on=Magnet: ON
+futa_gtnh.swift_step.gui.item_magnet.off=Magnet: OFF
 futa_gtnh.swift_step.gui.on=ON
 futa_gtnh.swift_step.gui.off=OFF
 futa_gtnh.swift_step.gui.range=Multiplier range 1.00 ~ %s (server config wins)
@@ -98,6 +103,7 @@ futa_gtnh.gui.status.output.none=not set
 item.futa_gtnh.locator_wand.name=Locator Wand
 item.futa_gtnh.locator_wand.tip.gui=Right-click: open the selection screen
 item.futa_gtnh.locator_wand.tip.clear=Sneak + right-click: stop tracking
+item.futa_gtnh.locator_wand.tip.bauble=Can be equipped in Baubles; keeps the current locator beam visible
 
 # ---------------------------------------------------------------- Minigame Helper
 item.futa_gtnh.minigame_helper.name=Minigame Helper

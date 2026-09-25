@@ -28,7 +28,7 @@ import baubles.api.IBauble;
 import baubles.common.container.InventoryBaubles;
 
 /**
- * 迅步：戴在身上提高<b>飞行</b>和<b>移动</b>速度，并可开启作物或动物生长光环；右键打开界面配置。
+ * 迅步：戴在身上提高<b>飞行</b>和<b>移动</b>速度，并可开启生长光环、掉落物吸附等能力；右键打开界面配置。
  *
  * <p>
  * 两项速度的<b>实现机制完全不同</b>，因为 1.7.10 里它们本来就走的不是同一条路：
@@ -65,6 +65,8 @@ public class ItemSwiftStep extends Item implements IBauble {
     private static final String TAG_HEALTH_RECOVERY_ENABLED = "futa_gtnh.swift_step.health_recovery_enabled";
     private static final String TAG_FOOD_RECOVERY_ENABLED = "futa_gtnh.swift_step.food_recovery_enabled";
     private static final String TAG_RECOVERY_SPEED = "futa_gtnh.swift_step.recovery_speed";
+    private static final String TAG_ITEM_MAGNET_ENABLED = "futa_gtnh.swift_step.item_magnet_enabled";
+    private static final String TAG_ITEM_MAGNET_RADIUS = "futa_gtnh.swift_step.item_magnet_radius";
     private static final String TAG_GRANTED_FLIGHT = "futa_gtnh.swift_step.granted_flight";
 
     /**
@@ -99,6 +101,12 @@ public class ItemSwiftStep extends Item implements IBauble {
     public static final int MIN_RECOVERY_SPEED = 1;
     public static final int MAX_RECOVERY_SPEED = 10;
     public static final int RECOVERY_INTERVAL_TICKS = 200;
+
+    /** 掉落物吸附默认关闭，半径范围为 1~1000 格。 */
+    public static final boolean DEFAULT_ITEM_MAGNET_ENABLED = false;
+    public static final int DEFAULT_ITEM_MAGNET_RADIUS = 8;
+    public static final int MIN_ITEM_MAGNET_RADIUS = 1;
+    public static final int MAX_ITEM_MAGNET_RADIUS = 1000;
 
     /** 没调过时的默认倍率（1.0 = 原版速度）。 */
     public static final float DEFAULT_MULTIPLIER = 1.0F;
@@ -420,6 +428,38 @@ public class ItemSwiftStep extends Item implements IBauble {
 
     public static int clampRecoverySpeed(int speed) {
         return Math.max(MIN_RECOVERY_SPEED, Math.min(speed, MAX_RECOVERY_SPEED));
+    }
+
+    public static boolean isItemMagnetEnabled(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return DEFAULT_ITEM_MAGNET_ENABLED;
+        NBTTagCompound tag = stack.getTagCompound();
+        return tag == null || !tag.hasKey(TAG_ITEM_MAGNET_ENABLED) ? DEFAULT_ITEM_MAGNET_ENABLED
+            : tag.getBoolean(TAG_ITEM_MAGNET_ENABLED);
+    }
+
+    public static void setItemMagnetEnabled(ItemStack stack, boolean enabled) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) stack.setTagCompound(new NBTTagCompound());
+        stack.getTagCompound()
+            .setBoolean(TAG_ITEM_MAGNET_ENABLED, enabled);
+    }
+
+    public static int getItemMagnetRadius(ItemStack stack) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return DEFAULT_ITEM_MAGNET_RADIUS;
+        NBTTagCompound tag = stack.getTagCompound();
+        if (tag == null || !tag.hasKey(TAG_ITEM_MAGNET_RADIUS)) return DEFAULT_ITEM_MAGNET_RADIUS;
+        return clampItemMagnetRadius(tag.getInteger(TAG_ITEM_MAGNET_RADIUS));
+    }
+
+    public static void setItemMagnetRadius(ItemStack stack, int radius) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (stack.getTagCompound() == null) stack.setTagCompound(new NBTTagCompound());
+        stack.getTagCompound()
+            .setInteger(TAG_ITEM_MAGNET_RADIUS, clampItemMagnetRadius(radius));
+    }
+
+    public static int clampItemMagnetRadius(int radius) {
+        return Math.max(MIN_ITEM_MAGNET_RADIUS, Math.min(radius, MAX_ITEM_MAGNET_RADIUS));
     }
 
     public static int getRecoveryIntervalTicks(ItemStack stack) {
@@ -749,7 +789,8 @@ public class ItemSwiftStep extends Item implements IBauble {
             || isGrowthAuraEnabled(stack)
             || isAnimalAuraEnabled(stack)
             || isHealthRecoveryEnabled(stack)
-            || isFoodRecoveryEnabled(stack);
+            || isFoodRecoveryEnabled(stack)
+            || isItemMagnetEnabled(stack);
     }
 
     @Override
@@ -801,6 +842,12 @@ public class ItemSwiftStep extends Item implements IBauble {
             EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
                 "item.futa_gtnh.swift_step.tooltip.recovery_speed",
                 getRecoverySpeed(stack)));
+        tooltip.add(
+            EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
+                "item.futa_gtnh.swift_step.tooltip.item_magnet",
+                StatCollector.translateToLocal(
+                    isItemMagnetEnabled(stack) ? "futa_gtnh.swift_step.gui.on" : "futa_gtnh.swift_step.gui.off"),
+                getItemMagnetRadius(stack)));
         tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.swift_step.tooltip.air"));
         tooltip.add(
