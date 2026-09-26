@@ -3,6 +3,7 @@ package com.futa_gtnh;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.futa_gtnh.block.BlockLootMachine;
 import com.futa_gtnh.block.BlockSharedTerminal;
 import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.shared.SharedStorageManager;
@@ -47,7 +48,10 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // after:lootgames 是软依赖排序：小游戏助手要读它的世界生成配置、
     // preInit 里还要覆写它已加载的尝试次数配置（见 lootassist.LootgamesCompat），
     // 没装 lootgames 时这条排序没有副作用。
-    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:NotEnoughItems;after:lootgames")
+    // after:enhancedlootbags / after:vendingmachine 同理：自选抽奖机要复用
+    // ELB 已加载完的战利品组配置；VendingMachine 的团队钱包数据也是初始化好
+    // 之后再读更稳妥。都是软依赖，缺席时只是不注册/不可用。
+    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";
@@ -66,6 +70,9 @@ public class FutaGtnhMod {
     /** 共享终端方块。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockSharedTerminal blockSharedTerminal;
 
+    /** 自选抽奖机方块。没装 Enhanced LootBags 时为 null。 */
+    public static BlockLootMachine blockLootMachine;
+
     /** 迅步。没装 Baubles 时为 null。 */
     public static ItemSwiftStep swiftStep;
 
@@ -74,6 +81,9 @@ public class FutaGtnhMod {
 
     /** 小游戏助手。 */
     public static com.futa_gtnh.item.ItemMinigameHelper minigameHelper;
+
+    /** 太阳能除钙剂。 */
+    public static com.futa_gtnh.item.ItemSolarDescaler solarDescaler;
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
