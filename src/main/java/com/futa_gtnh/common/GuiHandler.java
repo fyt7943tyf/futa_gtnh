@@ -3,9 +3,12 @@ package com.futa_gtnh.common;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.world.World;
 
+import com.futa_gtnh.block.TileEntityLootMachine;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
+import com.futa_gtnh.client.GuiLootMachine;
 import com.futa_gtnh.client.GuiSharedTerminal;
 import com.futa_gtnh.exchange.AutoStore;
+import com.futa_gtnh.inventory.ContainerLootMachine;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketAutoStoreSync;
@@ -26,10 +29,23 @@ import cpw.mods.fml.common.network.IGuiHandler;
 public class GuiHandler implements IGuiHandler {
 
     public static final int GUI_SHARED_TERMINAL = 0;
+    public static final int GUI_LOOT_MACHINE = 1;
 
     @Override
     public Object getServerGuiElement(int id, net.minecraft.entity.player.EntityPlayer player, World world, int x,
         int y, int z) {
+        if (id == GUI_LOOT_MACHINE) {
+            TileEntityLootMachine machine = resolveLootMachine(world, x, y, z);
+            if (machine == null) return null;
+
+            ContainerLootMachine container = new ContainerLootMachine(player.inventory, machine);
+            if (player instanceof EntityPlayerMP) {
+                // 开界面先推一份全量状态（模拟结果 / 剩余次数 / 代币余额），界面全靠它画
+                container.syncTo((EntityPlayerMP) player);
+            }
+            return container;
+        }
+
         if (id != GUI_SHARED_TERMINAL) return null;
 
         TileEntitySharedTerminal terminal = resolve(world, x, y, z);
@@ -59,6 +75,12 @@ public class GuiHandler implements IGuiHandler {
     @Override
     public Object getClientGuiElement(int id, net.minecraft.entity.player.EntityPlayer player, World world, int x,
         int y, int z) {
+        if (id == GUI_LOOT_MACHINE) {
+            TileEntityLootMachine machine = resolveLootMachine(world, x, y, z);
+            if (machine == null) return null;
+            return new GuiLootMachine(player.inventory, machine);
+        }
+
         if (id != GUI_SHARED_TERMINAL) return null;
         // 这里引用了只在客户端存在的 GuiSharedTerminal。方法体在服务端永远不会执行，
         // JVM 又是惰性解析符号引用的，所以服务端加载这个类不会出问题。
@@ -79,5 +101,11 @@ public class GuiHandler implements IGuiHandler {
         if (world == null) return null;
         net.minecraft.tileentity.TileEntity tile = world.getTileEntity(x, y, z);
         return tile instanceof TileEntitySharedTerminal ? (TileEntitySharedTerminal) tile : null;
+    }
+
+    private static TileEntityLootMachine resolveLootMachine(World world, int x, int y, int z) {
+        if (world == null) return null;
+        net.minecraft.tileentity.TileEntity tile = world.getTileEntity(x, y, z);
+        return tile instanceof TileEntityLootMachine ? (TileEntityLootMachine) tile : null;
     }
 }

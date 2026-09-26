@@ -58,5 +58,8 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketLootassistDelta.Handler.class, PacketLootassistDelta.class, 20, Side.CLIENT);
         INSTANCE
             .registerMessage(PacketLootassistProgress.Handler.class, PacketLootassistProgress.class, 21, Side.CLIENT);
+        // 自选抽奖机（EnhancedLootBags 联动）：按钮动作（C2S）/ 状态回执（S2C）
+        INSTANCE.registerMessage(PacketLootMachineAction.Handler.class, PacketLootMachineAction.class, 24, Side.SERVER);
+        INSTANCE.registerMessage(PacketLootMachineResult.Handler.class, PacketLootMachineResult.class, 25, Side.CLIENT);
     }
 }

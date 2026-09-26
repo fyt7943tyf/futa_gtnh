@@ -1,14 +1,17 @@
 package com.futa_gtnh;
 
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.init.Blocks;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.world.World;
 import net.minecraftforge.oredict.ShapedOreRecipe;
 
+import com.futa_gtnh.block.BlockLootMachine;
 import com.futa_gtnh.block.BlockSharedTerminal;
 import com.futa_gtnh.block.BlockSwiftLight;
+import com.futa_gtnh.block.TileEntityLootMachine;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
 import com.futa_gtnh.command.CommandSharedStorage;
 import com.futa_gtnh.common.ForgeEventHandler;
@@ -16,6 +19,7 @@ import com.futa_gtnh.common.GuiHandler;
 import com.futa_gtnh.common.ModEventHandler;
 import com.futa_gtnh.item.ItemLocatorWand;
 import com.futa_gtnh.item.ItemMinigameHelper;
+import com.futa_gtnh.item.ItemSolarDescaler;
 import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.shared.SharedStorageManager;
@@ -34,8 +38,11 @@ import cpw.mods.fml.common.registry.GameRegistry;
  */
 public class CommonProxy {
 
-    /** 注册用的方块实例，{@code FutaGtnhMod} 里也持有同一个引用。 */
+    /** 共享终端方块。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockSharedTerminal blockSharedTerminal;
+
+    /** 自选抽奖机方块。没装 Enhanced LootBags 时为 null。 */
+    public static BlockLootMachine blockLootMachine;
 
     /** 迅步。没装 Baubles 时为 null。 */
     public static ItemSwiftStep swiftStep;
@@ -45,6 +52,9 @@ public class CommonProxy {
 
     /** 小游戏助手。 */
     public static ItemMinigameHelper minigameHelper;
+
+    /** 太阳能除钙剂。 */
+    public static ItemSolarDescaler solarDescaler;
 
     /**
      * 迅步照明用的隐形光源方块。
@@ -69,6 +79,8 @@ public class CommonProxy {
         registerSwiftStep();
         registerLocatorWand();
         registerMinigameHelper();
+        registerLootMachine();
+        registerSolarDescaler();
         registerRecipes();
 
         // lootgames 联动的服务端行为覆写（重试上限等）。
@@ -190,6 +202,40 @@ public class CommonProxy {
     }
 
     /**
+     * 注册自选抽奖机。
+     *
+     * <p>
+     * 玩法完全建立在 Enhanced LootBags 的开袋算法上，没装 ELB 时不注册
+     * （用 {@code Loader.isModLoaded} 守卫而不是 {@code @Mod} 依赖声明，
+     * 和迅步/Baubles 同一个理由：保持软联动）。VendingMachine（技术员代币）
+     * 只是「重置次数」按钮的可选付费途径，缺席时那个按钮禁用，其余照常。
+     */
+    private void registerLootMachine() {
+        if (!Config.enableLootMachine) return;
+
+        if (!com.futa_gtnh.lootbag.EnhancedLootBagsCompat.isAvailable()) {
+            FutaGtnhMod.LOG.info("没有检测到 Enhanced LootBags，跳过自选抽奖机的注册");
+            return;
+        }
+
+        blockLootMachine = new BlockLootMachine();
+        GameRegistry.registerBlock(blockLootMachine, BlockLootMachine.NAME);
+        GameRegistry.registerTileEntity(TileEntityLootMachine.class, FutaGtnhMod.MODID + ":" + BlockLootMachine.NAME);
+        FutaGtnhMod.blockLootMachine = blockLootMachine;
+        FutaGtnhMod.LOG.info("已注册自选抽奖机（Enhanced LootBags 已加载）");
+    }
+
+    /** 注册太阳能除钙剂。只依赖 GT（硬依赖），无额外守卫。 */
+    private void registerSolarDescaler() {
+        if (!Config.enableSolarDescaler) return;
+
+        solarDescaler = new ItemSolarDescaler();
+        GameRegistry.registerItem(solarDescaler, ItemSolarDescaler.NAME);
+        FutaGtnhMod.solarDescaler = solarDescaler;
+        FutaGtnhMod.LOG.info("已注册太阳能除钙剂");
+    }
+
+    /**
      * 共享终端的合成配方。
      *
      * <p>
@@ -242,6 +288,28 @@ public class CommonProxy {
                 new ShapedOreRecipe(
                     new ItemStack(minigameHelper, 1),
                     new Object[] { "PPP", "PCP", "PPP", 'P', Items.paper, 'C', Items.compass }));
+        }
+
+        // 自选抽奖机：铁锭×3 + 金锭×2 + 发射器 + 漏斗×2 + 红石比较器。
+        // 「发射器」对应随机出货，「漏斗」对应收袋，「比较器」对应挑结果。
+        // 发射器/漏斗的方块物品走 Blocks（这套映射的 Items 里没有这两个字段）；
+        // 比较器用原版物品（矿物词典名没人保证注册）。
+        if (blockLootMachine != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(blockLootMachine, 1),
+                    new Object[] { "III", "GDG", "HCH", 'I', "ingotIron", 'G', "ingotGold", 'D',
+                        new ItemStack(Blocks.dispenser, 1), 'H', new ItemStack(Blocks.hopper, 1), 'C',
+                        Items.comparator }));
+        }
+
+        // 太阳能除钙剂：骨粉×4 + 铁锭。
+        // 「骨粉」对应除垢，「铁锭」对应工具本体。骨粉用 damage=15 的染料（原版没有词典名保证）。
+        if (solarDescaler != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(solarDescaler, 1),
+                    new Object[] { " B ", "BIB", " B ", 'B', new ItemStack(Items.dye, 1, 15), 'I', "ingotIron" }));
         }
     }
 
