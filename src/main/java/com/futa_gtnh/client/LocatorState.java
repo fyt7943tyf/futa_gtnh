@@ -37,6 +37,8 @@ public final class LocatorState {
     private static ItemStack targetStack;
     /** 矿脉模式下的内部名；方块模式下为 null。 */
     private static String veinKey;
+    /** 生物群系模式下的目标 ID；其它模式下为 -1。 */
+    private static int biomeId = -1;
     /** 当前目标是箱子库存中的物品，而不是世界方块。 */
     private static boolean inventoryTarget;
 
@@ -90,6 +92,10 @@ public final class LocatorState {
         return veinKey != null && veinKey.equals(key);
     }
 
+    public static boolean isBiomeSelected(int id) {
+        return biomeId == id;
+    }
+
     /** @return 当前选的是不是这个方块 */
     public static boolean isBlockSelected(ItemStack stack) {
         if (inventoryTarget || targetStack == null || stack == null) return false;
@@ -135,6 +141,7 @@ public final class LocatorState {
     public static void setBlockTarget(ItemStack stack) {
         targetStack = stack;
         veinKey = null;
+        biomeId = -1;
         inventoryTarget = false;
         icon = stack;
         title = stack == null ? "" : stack.getDisplayName();
@@ -148,6 +155,7 @@ public final class LocatorState {
     public static void setItemTarget(ItemStack stack) {
         targetStack = stack;
         veinKey = null;
+        biomeId = -1;
         inventoryTarget = true;
         icon = stack;
         title = stack == null ? "" : stack.getDisplayName();
@@ -161,6 +169,7 @@ public final class LocatorState {
     public static void setVeinTarget(String key, String veinTitle, String materials, ItemStack veinIcon) {
         targetStack = null;
         veinKey = key;
+        biomeId = -1;
         inventoryTarget = false;
         icon = veinIcon;
         title = veinTitle == null ? "" : veinTitle;
@@ -170,10 +179,24 @@ public final class LocatorState {
         distance = -1.0D;
     }
 
+    /** 玩家选了一个生物群系，等结果中。 */
+    public static void setBiomeTarget(int id, String biomeTitle, ItemStack biomeIcon) {
+        targetStack = null;
+        veinKey = null;
+        biomeId = id;
+        inventoryTarget = false;
+        icon = biomeIcon;
+        title = biomeTitle == null ? "" : biomeTitle;
+        subtitle = net.minecraft.util.StatCollector.translateToLocal("futa_gtnh.gui.locator.biomes.target");
+        state = PacketLocatorResult.STATE_RUNNING;
+        progress = 0.0F;
+        distance = -1.0D;
+    }
+
     /** 服务端回包。 */
     public static void applyResult(byte newState, float newProgress, int x, int y, int z, double newDistance) {
         // 界面已经清掉目标了（比如玩家关了界面又收到迟到的回包），忽略
-        if (newState != PacketLocatorResult.STATE_CANCELLED && targetStack == null && veinKey == null) {
+        if (newState != PacketLocatorResult.STATE_CANCELLED && targetStack == null && veinKey == null && biomeId < 0) {
             return;
         }
 
@@ -199,6 +222,7 @@ public final class LocatorState {
     public static void clear() {
         targetStack = null;
         veinKey = null;
+        biomeId = -1;
         inventoryTarget = false;
         icon = null;
         title = "";

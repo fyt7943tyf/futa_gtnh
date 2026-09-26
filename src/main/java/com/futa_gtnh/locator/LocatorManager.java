@@ -11,6 +11,7 @@ import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.MathHelper;
+import net.minecraft.world.biome.BiomeGenBase;
 
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketLocatorResult;
@@ -142,6 +143,32 @@ public final class LocatorManager {
                 MathHelper.floor_double(player.posZ)));
     }
 
+    /** 开始搜索当前维度中的指定生物群系。 */
+    public static void startBiome(EntityPlayerMP player, int biomeId) {
+        UUID id = player.getUniqueID();
+        JOBS.remove(id);
+        RESULTS.remove(id);
+        TRACKING.remove(id);
+        TELEPORTED.remove(id);
+
+        BiomeGenBase[] biomes = BiomeGenBase.getBiomeGenArray();
+        if (biomeId < 0 || biomeId >= biomes.length || biomes[biomeId] == null) {
+            send(player, PacketLocatorResult.notFound(0.0F));
+            return;
+        }
+
+        submit(
+            player,
+            id,
+            new LocatorScan(
+                player.worldObj,
+                id,
+                biomes[biomeId],
+                MathHelper.floor_double(player.posX),
+                MathHelper.floor_double(player.posY),
+                MathHelper.floor_double(player.posZ)));
+    }
+
     private static void submit(EntityPlayerMP player, UUID id, LocatorScan scan) {
         if (!scan.isValid()) {
             // 目标类型不支持或矿脉数据已失效。
@@ -180,8 +207,16 @@ public final class LocatorManager {
         if (target == null) return TeleportResult.NO_RESULT;
         if (TELEPORTED.contains(id)) return TeleportResult.ALREADY_USED;
 
+        int targetY = target[1];
+        LocatorScan scan = TRACKING.get(id);
+        if (scan != null && scan.isBiomeSearch()) {
+            if (scan.getWorld() != player.worldObj) return TeleportResult.NO_RESULT;
+            targetY = scan.prepareBiomeTeleportY(target[0], target[2]);
+            if (targetY < 0) return TeleportResult.NO_SAFE_SPOT;
+        }
+
         TeleportResult result;
-        switch (TeleportHelper.teleportNear(player, target[0], target[1], target[2])) {
+        switch (TeleportHelper.teleportNear(player, target[0], targetY, target[2])) {
             case NATURAL:
                 result = TeleportResult.OK;
                 break;

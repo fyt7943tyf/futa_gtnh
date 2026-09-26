@@ -1,5 +1,6 @@
 package com.futa_gtnh.locator;
 
+import java.util.PriorityQueue;
 import java.util.UUID;
 
 import net.minecraft.block.Block;
@@ -9,6 +10,8 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.world.World;
+import net.minecraft.world.biome.BiomeGenBase;
+import net.minecraft.world.biome.WorldChunkManager;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.IChunkProvider;
 
@@ -16,7 +19,7 @@ import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 
 /**
- * 一次搜索任务：找最近的「某个方块」或者「某条矿脉」。
+ * 一次搜索任务：找方块、矿脉、容器里的物品或生物群系。
  *
  * <p>
  * 设计成<b>可中断的增量任务</b>而不是一次性扫完：一个半径 128 的区域
@@ -24,7 +27,7 @@ import com.futa_gtnh.FutaGtnhMod;
  * 这里每 tick 只花固定的预算，扫不完就留到下一 tick。
  *
  * <p>
- * 三个关键优化：
+ * 普通方块、矿脉和物品扫描的关键优化：
  *
  * <ol>
  * <li><b>按水平环由近到远推进。</b>先用切比雪夫距离一圈圈往外扫，
@@ -38,7 +41,7 @@ import com.futa_gtnh.FutaGtnhMod;
  * </ol>
  *
  * <p>
- * <b>三种搜索模式：</b>
+ * <b>搜索模式：</b>
  *
  * <ul>
  * <li><b>方块模式</b>：认准一个 (Block, 元数据) 组合。</li>
@@ -47,9 +50,37 @@ import com.futa_gtnh.FutaGtnhMod;
  * 按方块找永远只能找到其中一个石种的那份；按材料找就跨过去了。
  * 顺带还能把 Y 范围收窄到矿脉自己的生成高度，既快又准。</li>
  * <li><b>物品模式</b>：在已加载的箱子、木桶和板条箱库存中查找目标物品。</li>
+ * <li><b>生物群系模式</b>：按二维生物群系数据分区增量查询；不扫描高度，也不加载区块。</li>
  * </ul>
  */
 public final class LocatorScan {
+
+    private static final int BIOME_REGION_SIZE = 128;
+
+    private static final class BiomeScanRegion implements Comparable<BiomeScanRegion> {
+
+        final int minX;
+        final int minZ;
+        final int width;
+        final int depth;
+        final long minDistanceSq;
+
+        BiomeScanRegion(int minX, int minZ, int width, int depth, long minDistanceSq) {
+            this.minX = minX;
+            this.minZ = minZ;
+            this.width = width;
+            this.depth = depth;
+            this.minDistanceSq = minDistanceSq;
+        }
+
+        @Override
+        public int compareTo(BiomeScanRegion other) {
+            int distanceOrder = Long.compare(minDistanceSq, other.minDistanceSq);
+            if (distanceOrder != 0) return distanceOrder;
+            int xOrder = Integer.compare(minX, other.minX);
+            return xOrder != 0 ? xOrder : Integer.compare(minZ, other.minZ);
+        }
+    }
 
     private final UUID playerId;
 
@@ -62,6 +93,8 @@ public final class LocatorScan {
     private final int meta;
     /** 矿脉模式下的目标；方块模式下为 null。 */
     private final OreVeinCatalog.Entry vein;
+    /** 生物群系模式下的目标；其它模式下为 null。 */
+    private final BiomeGenBase biome;
 
     /**
      * 目标是不是 GT 的矿石方块（仅方块模式有意义）。
@@ -88,6 +121,16 @@ public final class LocatorScan {
     private final int centerZ;
     private final int maxRadius;
     private final World world;
+    private final WorldChunkManager biomeManager;
+    private final int biomeRadius;
+    private final long biomeRadiusSq;
+    private final PriorityQueue<BiomeScanRegion> biomeRegions;
+    private final int totalBiomeRegions;
+
+    private BiomeScanRegion currentBiomeRegion;
+    private BiomeGenBase[] biomeBuffer;
+    private int biomeCellCursor;
+    private int scannedBiomeRegions;
 
     /** 要扫的 Y 范围。方块模式是整个世界高度；矿脉模式收窄到矿脉的生成高度。 */
     private final int scanMinY;
@@ -140,6 +183,12 @@ public final class LocatorScan {
         this.centerZ = centerZ;
         this.maxRadius = Math.max(1, Config.locatorSearchRadius);
         this.vein = null;
+        this.biome = null;
+        this.biomeManager = null;
+        this.biomeRadius = 0;
+        this.biomeRadiusSq = 0L;
+        this.biomeRegions = null;
+        this.totalBiomeRegions = 0;
 
         Item item = inventorySearch || target == null ? null : target.getItem();
         this.block = item == null ? null : Block.getBlockFromItem(item);
@@ -165,6 +214,12 @@ public final class LocatorScan {
         this.centerZ = centerZ;
         this.maxRadius = Math.max(1, Config.locatorSearchRadius);
         this.vein = vein;
+        this.biome = null;
+        this.biomeManager = null;
+        this.biomeRadius = 0;
+        this.biomeRadiusSq = 0L;
+        this.biomeRegions = null;
+        this.totalBiomeRegions = 0;
 
         this.block = null;
         this.meta = 0;
@@ -186,6 +241,76 @@ public final class LocatorScan {
             this.scanMaxY = worldHeight;
         }
         this.yCursor = scanMinY;
+    }
+
+    /** 生物群系模式：在本维度的生物群系数据中找最近的位置，不加载区块。 */
+    public LocatorScan(World world, UUID playerId, BiomeGenBase biome, int centerX, int centerY, int centerZ) {
+        this.world = world;
+        this.playerId = playerId;
+        this.blockTarget = null;
+        this.itemTarget = null;
+        this.inventorySearch = false;
+        this.centerX = centerX;
+        this.centerY = centerY;
+        this.centerZ = centerZ;
+        this.maxRadius = Math.max(1, Config.locatorBiomeSearchRadius);
+        this.vein = null;
+        this.biome = biome;
+        this.block = null;
+        this.meta = 0;
+        this.gtOre = false;
+        this.biomeManager = world == null ? null : world.getWorldChunkManager();
+        this.biomeRadius = Math.max(1, Config.locatorBiomeSearchRadius);
+        this.biomeRadiusSq = (long) biomeRadius * biomeRadius;
+        this.biomeRegions = new PriorityQueue<>();
+        this.totalBiomeRegions = buildBiomeRegions();
+        this.scanMinY = 0;
+        this.scanMaxY = 1;
+        this.yCursor = 0;
+    }
+
+    private int buildBiomeRegions() {
+        int minWorldX = centerX - biomeRadius;
+        int maxWorldX = centerX + biomeRadius;
+        int minWorldZ = centerZ - biomeRadius;
+        int maxWorldZ = centerZ + biomeRadius;
+        int firstRegionX = Math.floorDiv(minWorldX, BIOME_REGION_SIZE);
+        int lastRegionX = Math.floorDiv(maxWorldX, BIOME_REGION_SIZE);
+        int firstRegionZ = Math.floorDiv(minWorldZ, BIOME_REGION_SIZE);
+        int lastRegionZ = Math.floorDiv(maxWorldZ, BIOME_REGION_SIZE);
+        int count = 0;
+
+        for (int regionX = firstRegionX; regionX <= lastRegionX; regionX++) {
+            int regionStartX = regionX * BIOME_REGION_SIZE;
+            int regionMinX = Math.max(minWorldX, regionStartX);
+            int regionMaxX = Math.min(maxWorldX, regionStartX + BIOME_REGION_SIZE - 1);
+            long dx = distanceToRange(centerX, regionMinX, regionMaxX);
+
+            for (int regionZ = firstRegionZ; regionZ <= lastRegionZ; regionZ++) {
+                int regionStartZ = regionZ * BIOME_REGION_SIZE;
+                int regionMinZ = Math.max(minWorldZ, regionStartZ);
+                int regionMaxZ = Math.min(maxWorldZ, regionStartZ + BIOME_REGION_SIZE - 1);
+                long dz = distanceToRange(centerZ, regionMinZ, regionMaxZ);
+                long minDistanceSq = dx * dx + dz * dz;
+                if (minDistanceSq > biomeRadiusSq) continue;
+
+                biomeRegions.add(
+                    new BiomeScanRegion(
+                        regionMinX,
+                        regionMinZ,
+                        regionMaxX - regionMinX + 1,
+                        regionMaxZ - regionMinZ + 1,
+                        minDistanceSq));
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static long distanceToRange(int value, int min, int max) {
+        if (value < min) return (long) min - value;
+        if (value > max) return (long) value - max;
+        return 0L;
     }
 
     /**
@@ -253,7 +378,9 @@ public final class LocatorScan {
 
     /** @return 目标类型不支持，或矿脉数据已失效；任务会直接作废 */
     public boolean isValid() {
-        return vein != null || block != null || (inventorySearch && itemTarget != null && itemTarget.getItem() != null);
+        return biome != null || vein != null
+            || block != null
+            || (inventorySearch && itemTarget != null && itemTarget.getItem() != null);
     }
 
     public boolean isDone() {
@@ -283,8 +410,34 @@ public final class LocatorScan {
     /** @return 0.0 ~ 1.0 的粗略进度，用来给界面画进度条 */
     public float getProgress() {
         if (done) return 1.0F;
+        if (biome != null) {
+            return totalBiomeRegions == 0 ? 1.0F : Math.min(1.0F, (float) scannedBiomeRegions / totalBiomeRegions);
+        }
         if (maxRadius <= 0) return 1.0F;
         return Math.min(1.0F, (float) ring / (float) maxRadius);
+    }
+
+    public int getBiomeId() {
+        return biome == null ? -1 : biome.biomeID;
+    }
+
+    public boolean isBiomeSearch() {
+        return biome != null;
+    }
+
+    /** 传送时才生成目标区块，并据地表高度寻找安全落点。 */
+    int prepareBiomeTeleportY(int x, int z) {
+        if (biome == null || world == null) return centerY;
+        IChunkProvider provider = world.getChunkProvider();
+        if (provider == null) return -1;
+
+        try {
+            Chunk chunk = provider.provideChunk(x >> 4, z >> 4);
+            return chunk == null ? -1 : chunk.getHeightValue(x & 15, z & 15);
+        } catch (Throwable t) {
+            FutaGtnhMod.LOG.warn("寻物魔杖：生成生物群系目标区块失败，无法传送", t);
+            return -1;
+        }
     }
 
     public Block getBlock() {
@@ -301,6 +454,7 @@ public final class LocatorScan {
 
     /** 从玩家的新位置再次搜索同一个目标。 */
     LocatorScan restartAt(int x, int y, int z) {
+        if (biome != null) return new LocatorScan(world, playerId, biome, x, y, z);
         if (vein != null) return new LocatorScan(world, playerId, vein, x, y, z);
         if (inventorySearch) return new LocatorScan(world, playerId, itemTarget, x, y, z, true);
         return new LocatorScan(world, playerId, blockTarget, x, y, z);
@@ -314,6 +468,9 @@ public final class LocatorScan {
      * 而不是因此把玩家带去搜另一个目标。
      */
     boolean targetStillAt(int x, int y, int z) {
+        if (biome != null) {
+            return world != null && biomeManager != null && biomeManager.getBiomeGenAt(x, z) == biome;
+        }
         if (world == null || y < 0 || y >= world.getHeight()) return false;
         IChunkProvider provider = world.getChunkProvider();
         int chunkX = x >> 4;
@@ -340,10 +497,13 @@ public final class LocatorScan {
             return false;
         }
 
-        if (++ticks > Math.max(20, Config.locatorScanTimeoutTicks)) {
+        int timeout = biome == null ? Config.locatorScanTimeoutTicks : Config.locatorBiomeScanTimeoutTicks;
+        if (++ticks > Math.max(20, timeout)) {
             done = true;
             return false;
         }
+
+        if (biome != null) return tickBiomes();
 
         int budget = Math.max(1000, Config.locatorBlocksPerTick);
         // 一列要扫多少格。矿脉模式下这个数会比世界高度小得多。
@@ -420,6 +580,70 @@ public final class LocatorScan {
             if (yCursor >= scanMaxY) {
                 ringCursor++;
                 yCursor = scanMinY;
+            }
+        }
+
+        return !done;
+    }
+
+    /** 批量读取实际生物群系图层；不访问方块，也不会加载搜索范围里的区块。 */
+    private boolean tickBiomes() {
+        if (biomeManager == null) {
+            done = true;
+            return false;
+        }
+
+        int budget = Math.max(1000, Config.locatorBiomeSamplesPerTick);
+        while (budget > 0 && !done) {
+            if (currentBiomeRegion == null) {
+                if (biomeRegions.isEmpty()) {
+                    done = true;
+                    break;
+                }
+
+                BiomeScanRegion next = biomeRegions.peek();
+                if (foundAnything && next.minDistanceSq > bestDistanceSq) {
+                    done = true;
+                    break;
+                }
+
+                currentBiomeRegion = biomeRegions.poll();
+                biomeBuffer = biomeManager.getBiomeGenAt(
+                    biomeBuffer,
+                    currentBiomeRegion.minX,
+                    currentBiomeRegion.minZ,
+                    currentBiomeRegion.width,
+                    currentBiomeRegion.depth,
+                    false);
+                biomeCellCursor = 0;
+            }
+
+            int regionCellCount = currentBiomeRegion.width * currentBiomeRegion.depth;
+            int end = Math.min(regionCellCount, biomeCellCursor + budget);
+            for (int index = biomeCellCursor; index < end; index++) {
+                if (biomeBuffer[index] != biome) continue;
+
+                int x = currentBiomeRegion.minX + index % currentBiomeRegion.width;
+                int z = currentBiomeRegion.minZ + index / currentBiomeRegion.width;
+                long dx = (long) x - centerX;
+                long dz = (long) z - centerZ;
+                long distanceSq = dx * dx + dz * dz;
+                if (distanceSq > biomeRadiusSq || distanceSq >= bestDistanceSq) continue;
+
+                bestDistanceSq = distanceSq;
+                bestX = x;
+                // A biome covers the full vertical column; use the player's original altitude for the beam.
+                bestY = centerY;
+                bestZ = z;
+                foundAnything = true;
+            }
+
+            int scanned = end - biomeCellCursor;
+            biomeCellCursor = end;
+            budget -= scanned;
+            if (biomeCellCursor >= regionCellCount) {
+                currentBiomeRegion = null;
+                scannedBiomeRegions++;
             }
         }
 
