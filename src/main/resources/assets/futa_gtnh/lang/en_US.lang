@@ -260,3 +260,35 @@ futa_gtnh.rts.msg.need_mode=Switch to build/destroy mode (V or topbar button) be
 futa_gtnh.rts.msg.no_session=RTS session expired, please re-enter (press G)
 futa_gtnh.rts.msg.rate_limited=Too fast, wait a moment
 futa_gtnh.rts.msg.out_of_range=Target beyond action radius
+
+# ---- Loot Machine ----
+tile.futa_gtnh.loot_machine.name=Loot Machine
+container.futa_gtnh.loot_machine=Loot Machine
+futa_gtnh.loot_machine.gui.fortune=Fortune: %s
+futa_gtnh.loot_machine.gui.rolls=Rolls left: %s/%s
+futa_gtnh.loot_machine.gui.open=Open
+futa_gtnh.loot_machine.gui.refresh=Reroll (%s)
+futa_gtnh.loot_machine.gui.claim=Claim
+futa_gtnh.loot_machine.gui.reset=Reset rolls
+futa_gtnh.loot_machine.gui.round=Roll %s
+futa_gtnh.loot_machine.gui.token=Technician coins: %s
+futa_gtnh.loot_machine.gui.token_cost=(reset costs %s)
+futa_gtnh.loot_machine.gui.token_unavailable=(VendingMachine not loaded, reset disabled)
+futa_gtnh.loot_machine.gui.truncated=...and %s more
+futa_gtnh.loot_machine.gui.drop_chance=Drop chance: %s%%
+futa_gtnh.loot_machine.msg.need_bag=Put a loot bag in first
+futa_gtnh.loot_machine.msg.no_chances=No rolls left; spend technician coins to reset
+futa_gtnh.loot_machine.msg.charges_left=You still have rolls left, no reset needed
+futa_gtnh.loot_machine.msg.charged=Spent %s technician coins, rolls reset
+futa_gtnh.loot_machine.msg.insufficient=Not enough technician coins (need %s)
+futa_gtnh.loot_machine.msg.token_unavailable=VendingMachine not loaded, cannot reset with coins
+futa_gtnh.loot_machine.msg.claimed=Reward claimed
+futa_gtnh.loot_machine.msg.try_again=The bag rolled nothing this time, try again (roll not consumed)
+futa_gtnh.loot_machine.msg.nothing=Nothing to claim yet, press Open first
+
+# ---- Solar Descaler ----
+item.futa_gtnh.solar_descaler.name=Solar Descaler
+item.futa_gtnh.solar_descaler.tip.use=Right-click a solar steam boiler to reset its calcification (infinite uses)
+futa_gtnh.solar_descaler.msg.descaled=Calcification reset, output restored %s -> %s L/s
+futa_gtnh.solar_descaler.msg.clean=This boiler is not calcified, nothing to do
+futa_gtnh.solar_descaler.msg.broken=Descaler unavailable (field access failed, see log)

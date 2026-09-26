@@ -256,3 +256,35 @@ futa_gtnh.rts.msg.need_mode=先切换到建造/破坏模式（V 或顶栏按钮�
 futa_gtnh.rts.msg.no_session=俯瞰会话已失效，请重新进入（按 G）
 futa_gtnh.rts.msg.rate_limited=操作太快，稍等一下
 futa_gtnh.rts.msg.out_of_range=目标超出操作半径
+
+# ---- 自选抽奖机 ----
+tile.futa_gtnh.loot_machine.name=自选抽奖机
+container.futa_gtnh.loot_machine=自选抽奖机
+futa_gtnh.loot_machine.gui.fortune=时运等级: %s
+futa_gtnh.loot_machine.gui.rolls=剩余机会: %s/%s
+futa_gtnh.loot_machine.gui.open=打开
+futa_gtnh.loot_machine.gui.refresh=刷新 (%s)
+futa_gtnh.loot_machine.gui.claim=领取
+futa_gtnh.loot_machine.gui.reset=重置次数
+futa_gtnh.loot_machine.gui.round=第%s轮
+futa_gtnh.loot_machine.gui.token=技术员代币: %s
+futa_gtnh.loot_machine.gui.token_cost=（重置费用 %s）
+futa_gtnh.loot_machine.gui.token_unavailable=（VendingMachine 未加载，无法重置次数）
+futa_gtnh.loot_machine.gui.truncated=…还有 %s 组
+futa_gtnh.loot_machine.gui.drop_chance=掉率: %s%%
+futa_gtnh.loot_machine.msg.need_bag=需要先放入一个战利品袋
+futa_gtnh.loot_machine.msg.no_chances=机会已用完，可消耗技术员代币重置后继续
+futa_gtnh.loot_machine.msg.charges_left=还有剩余机会，不需要重置
+futa_gtnh.loot_machine.msg.charged=已消耗 %s 技术员代币，机会已重置
+futa_gtnh.loot_machine.msg.insufficient=技术员代币不足（需要 %s）
+futa_gtnh.loot_machine.msg.token_unavailable=VendingMachine 未加载，无法用代币重置次数
+futa_gtnh.loot_machine.msg.claimed=已领取奖励
+futa_gtnh.loot_machine.msg.try_again=这次没开出任何东西，请再试一次（未消耗机会）
+futa_gtnh.loot_machine.msg.nothing=还没有可领取的结果，先点「打开」
+
+# ---- 太阳能除钙剂 ----
+item.futa_gtnh.solar_descaler.name=太阳能除钙剂
+item.futa_gtnh.solar_descaler.tip.use=右键蒸汽太阳能锅炉：重置其钙化进度（可无限使用）
+futa_gtnh.solar_descaler.msg.descaled=钙化进度已重置，产出恢复 %s → %s L/s
+futa_gtnh.solar_descaler.msg.clean=这台锅炉没有钙化，无需处理
+futa_gtnh.solar_descaler.msg.broken=除钙功能不可用（字段访问失败，详见日志）

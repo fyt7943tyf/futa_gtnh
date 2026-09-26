@@ -194,6 +194,32 @@ public class Config {
     public static int lootassistSearchRadius = 1000;
 
     // ------------------------------------------------------------------
+    // 自选抽奖机（EnhancedLootBags + VendingMachine 联动）
+    // ------------------------------------------------------------------
+
+    /**
+     * 是否注册自选抽奖机方块。它整个玩法都建立在 Enhanced LootBags 的开袋算法上，
+     * 没装 ELB 时即使开着这项也不会注册（界面上那个袋子槽没有东西可放）。
+     */
+    public static boolean enableLootMachine = true;
+
+    /**
+     * 重置 roll 次数时扣哪个钱包里的技术员代币。
+     *
+     * <p>
+     * {@code true} = 团队钱包（默认，和 VendingMachine 的团队模式一致，全队共享）；
+     * {@code false} = 个人钱包。判定和扣款都在服务端。
+     */
+    public static boolean lootMachineTeamWallet = true;
+
+    // ------------------------------------------------------------------
+    // 太阳能除钙剂
+    // ------------------------------------------------------------------
+
+    /** 是否注册太阳能除钙剂（右键蒸汽太阳能锅炉重置钙化进度的永久工具）。 */
+    public static boolean enableSolarDescaler = true;
+
+    // ------------------------------------------------------------------
     // 界面（客户端行为）
     // ------------------------------------------------------------------
 
@@ -440,6 +466,24 @@ public class Config {
 
         enableRecipe = configuration
             .getBoolean("enableRecipe", Configuration.CATEGORY_GENERAL, enableRecipe, "是否注册共享终端的合成配方。");
+
+        enableLootMachine = configuration.getBoolean(
+            "enableLootMachine",
+            Configuration.CATEGORY_GENERAL,
+            enableLootMachine,
+            "是否注册自选抽奖机方块（需要装了 Enhanced LootBags；放入战利品袋+时运附魔书，模拟开袋最多 roll 三次，可花技术员代币重置次数）。");
+
+        lootMachineTeamWallet = configuration.getBoolean(
+            "lootMachineTeamWallet",
+            Configuration.CATEGORY_GENERAL,
+            lootMachineTeamWallet,
+            "抽奖机重置 roll 次数时，扣技术员代币的哪个钱包：true=团队钱包（与 VendingMachine 团队模式一致），false=个人钱包。服务端行为。");
+
+        enableSolarDescaler = configuration.getBoolean(
+            "enableSolarDescaler",
+            Configuration.CATEGORY_GENERAL,
+            enableSolarDescaler,
+            "是否注册太阳能除钙剂（右键蒸汽太阳能锅炉，重置其钙化进度；永久工具不消耗）。");
 
         tinkersAutoFill = configuration.getBoolean(
             "tinkersAutoFill",
