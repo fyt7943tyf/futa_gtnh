@@ -108,7 +108,7 @@ public class GuiSharedTerminal extends GuiContainer {
      * （{@link MouseTweaksCompat.Gui}）：那里面实现 MouseTweaks 的
      * {@code IMTModGuiContainer} 接口，把「滚轮 tweak」在这个界面上关掉 ——
      * 否则滚轮每滚一格，MouseTweaks 就会替玩家点一下鼠标下的格子，
-     * 而共享存储的格子是「点一下 = 取一个」，于是翻页变成往外掏东西。
+     * 而共享存储是虚拟槽位，应该只接受本界面明确处理的快捷动作。
      *
      * <p>
      * 子类只在装了 MouseTweaks 时才被加载（{@code instanceof} 检查要求接口真的存在，
@@ -544,6 +544,11 @@ public class GuiSharedTerminal extends GuiContainer {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) {
+        // Inventory Bogo Sorter 的 Ctrl / Alt / Space 快捷键最终也是在这里落地。
+        // 共享网格是虚拟槽位，不能让它继续走 Bogo 的本地 putStack 路径；先转换成
+        // 我们自己的服务端权威动作，普通点击仍交给 GuiContainer。
+        if (handleShortcutClick(mouseX, mouseY, mouseButton)) return;
+
         super.mouseClicked(mouseX, mouseY, mouseButton);
         if (searchField != null) {
             boolean before = searchField.isFocused();
@@ -553,6 +558,78 @@ public class GuiSharedTerminal extends GuiContainer {
             searchField.mouseClicked(mouseX, mouseY, mouseButton);
             if (before != searchField.isFocused()) viewDirty = true;
         }
+    }
+
+    /**
+     * 把 Bogo Sorter 的三种搬运快捷键映射成共享存储动作。
+     *
+     * <p>
+     * 物品页的空格按 Bogo 语义把共享物品尽量转入玩家背包，Alt 只转当前同类；
+     * 流体页则保留当前流体条目的填装语义。
+     */
+    private boolean handleShortcutClick(int mouseX, int mouseY, int mouseButton) {
+        if (mouseButton != 0 && mouseButton != 1) return false;
+        if (!isCtrlDown() && !isAltDown() && !isSpaceDown()) return false;
+        if (mc.thePlayer.inventory.getItemStack() != null) return false;
+
+        StorageViewEntry entry = getHoveredEntry(mouseX, mouseY);
+        if (entry != null) {
+            int index = hoveredGhostIndex(mouseX, mouseY);
+            if ((isSpaceDown() || isAltDown()) && mouseButton != 0) return false;
+            if (isSpaceDown()) {
+                if (entry.isFluid()) container.requestWithdrawFromDisplay(index, 0L);
+                else container.sendWithdrawAllItems();
+                return true;
+            }
+            if (isCtrlDown()) {
+                if (mouseButton == 1 && !entry.isFluid()) container.requestWithdrawFromDisplayToEmpty(index);
+                else container.requestWithdrawFromDisplay(index, entry.isFluid() ? Config.fluidClickAmount : 1L);
+                return true;
+            }
+            if (isAltDown()) {
+                container.requestWithdrawFromDisplay(index, 0L);
+                return true;
+            }
+        }
+
+        Slot slot = hoveredContainerSlot(mouseX, mouseY);
+        if (!isTransferSlot(slot) || slot.getStack() == null) return false;
+
+        if (isSpaceDown()) {
+            container.sendDepositAll(InventoryExchange.SCOPE_ALL);
+            return true;
+        }
+        if (isAltDown() && isPlayerInventorySlot(slot)) {
+            container.requestDepositMatching(slot.getStack(), 0L);
+            return true;
+        }
+        if (isCtrlDown()) {
+            container.sendDepositFromSlot(slot.slotNumber, 1L);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isTransferSlot(Slot slot) {
+        return slot != null && slot.slotNumber >= ContainerSharedTerminal.MAIN_START
+            && slot.slotNumber < ContainerSharedTerminal.CRAFT_END;
+    }
+
+    private boolean isPlayerInventorySlot(Slot slot) {
+        return slot != null && slot.slotNumber >= ContainerSharedTerminal.MAIN_START
+            && slot.slotNumber < ContainerSharedTerminal.ARMOR_END;
+    }
+
+    private boolean isCtrlDown() {
+        return Keyboard.isKeyDown(Keyboard.KEY_LCONTROL) || Keyboard.isKeyDown(Keyboard.KEY_RCONTROL);
+    }
+
+    private boolean isAltDown() {
+        return Keyboard.isKeyDown(Keyboard.KEY_LMENU) || Keyboard.isKeyDown(Keyboard.KEY_RMENU);
+    }
+
+    private boolean isSpaceDown() {
+        return Keyboard.isKeyDown(Keyboard.KEY_SPACE);
     }
 
     @Override
@@ -565,11 +642,9 @@ public class GuiSharedTerminal extends GuiContainer {
         int mouseX = Mouse.getEventX() * width / mc.displayWidth;
         int mouseY = height - Mouse.getEventY() * height / mc.displayHeight - 1;
 
-        // Shift + 滚轮 = 快速存取（不分方向，见 handleQuickWheel），不滚动列表
+        // Shift + 滚轮 = 单个物品快速存取，不滚动列表。
         if (isShiftKeyDown()) {
-            if (isInsideScrollRegion(mouseX, mouseY)) {
-                handleQuickWheel(mouseX, mouseY);
-            }
+            handleQuickWheel(mouseX, mouseY, delta);
             return;
         }
 
@@ -584,27 +659,44 @@ public class GuiSharedTerminal extends GuiContainer {
     }
 
     /**
-     * Shift + 滚轮快速存取（<b>不分方向</b>）：
-     * <ul>
-     * <li>悬停共享存储条目 → 取出一组该物品进背包（数量 = 该物品的堆叠上限）；</li>
-     * <li>悬停自己背包格 → 该格整叠存入共享背包。</li>
-     * </ul>
-     * 语义对齐 InvTweaks 的快速搬移，方向不参与含义（上下都一样）。
+     * Shift + 滚轮快速存取：向下从共享存储拿一个，向上向共享存储放一个。
+     *
+     * <p>
+     * 一个 LWJGL 滚轮刻度对应一个物品；旧版 LWJGL2 的 ±120 在这里先折算成刻度数。
+     * 流体页签仍以毫巴/容器为单位，避免把「一个流体显示条目」误发送成 1 mB。
      */
-    private void handleQuickWheel(int mouseX, int mouseY) {
+    private void handleQuickWheel(int mouseX, int mouseY, int delta) {
+        int notches = Math.abs(delta) >= 120 ? delta / 120 : delta;
+        if (notches == 0) return;
+
         StorageViewEntry entry = getHoveredEntry(mouseX, mouseY);
-        if (entry != null) {
-            ItemStack display = entry.getDisplay();
-            int amount = display == null ? 1 : Math.max(1, display.getMaxStackSize());
-            container.requestWithdrawFromDisplay(hoveredGhostIndex(mouseX, mouseY), amount);
+        if (entry != null && notches < 0) {
+            int index = hoveredGhostIndex(mouseX, mouseY);
+            long amount = entry.isFluid() ? Config.fluidClickAmount : 1L;
+            for (int i = 0; i < -notches; i++) {
+                container.requestWithdrawFromDisplay(index, amount);
+            }
             return;
         }
 
-        // 不在共享网格上：看是不是自己的背包格（只认主背包区，护甲/合成栏不参与滚轮）
+        if (entry != null && notches > 0) {
+            // 流体条目不是一个可拆分的物品堆，向上滚轮不伪造「存入 1 个显示物品」。
+            // 物品条目则按 Bogo/InvTweaks 的单个物品语义，从玩家背包找一个同类存入。
+            if (!entry.isFluid()) {
+                ItemStack display = entry.getDisplay();
+                for (int i = 0; i < notches; i++) {
+                    container.requestDepositMatching(display, 1L);
+                }
+            }
+            return;
+        }
+
+        // 向上滚轮悬停自己的真实槽位时，也表示放入一个；向下不从真实槽位反向拿取。
         Slot slot = hoveredContainerSlot(mouseX, mouseY);
-        if (slot != null && slot.slotNumber >= ContainerSharedTerminal.MAIN_START
-            && slot.slotNumber < ContainerSharedTerminal.ARMOR_START) {
-            container.sendDepositFromSlot(slot.slotNumber, 0L);
+        if (notches > 0 && isTransferSlot(slot)) {
+            for (int i = 0; i < notches; i++) {
+                container.sendDepositFromSlot(slot.slotNumber, 1L);
+            }
         }
     }
 
@@ -643,6 +735,16 @@ public class GuiSharedTerminal extends GuiContainer {
             viewDirty = true;
             pendingResort = true;
             return;
+        }
+        if (keyCode == Keyboard.KEY_Q && (isSpaceDown() || isAltDown())) {
+            int mouseX = Mouse.getX() * width / mc.displayWidth;
+            int mouseY = height - Mouse.getY() * height / mc.displayHeight - 1;
+            StorageViewEntry entry = getHoveredEntry(mouseX, mouseY);
+            if (entry != null && !entry.isFluid()) {
+                if (isSpaceDown()) container.sendDropAllItems();
+                else container.sendDropMatching(entry.getItemKey());
+                return;
+            }
         }
         if (keyCode == Keyboard.KEY_PRIOR) { // PageUp / PageDown 按屏滚动
             scrollBy(-ContainerSharedTerminal.ROWS);
