@@ -1,6 +1,7 @@
 package com.futa_gtnh.exchange;
 
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
@@ -272,6 +273,211 @@ public final class InventoryExchange {
         return total;
     }
 
+    /**
+     * 从共享存储取一个物品堆到光标上，语义和原版容器左键点击一致。
+     *
+     * <p>
+     * 光标不为空时必须是同一种物品；数量由光标自身的堆叠上限封顶，不能因为客户端
+     * 传了一个大数字就把光标撑爆。
+     */
+    public static long withdrawToCursor(EntityPlayer player, ItemKey key, long requested, SharedStorage storage,
+        DeltaRecorder recorder) {
+        if (player == null || key == null) return 0L;
+
+        InventoryPlayer inv = player.inventory;
+        ItemStack cursor = inv.getItemStack();
+        if (cursor != null && !key.equals(ItemKey.of(cursor))) return 0L;
+
+        int limit = maxStackSize(cursor == null ? key.prototype() : cursor);
+        long space = limit - (cursor == null ? 0L : cursor.stackSize);
+        if (space <= 0L) return 0L;
+
+        long want = requested <= 0L ? space : Math.min(requested, space);
+        long taken = storage.extractItem(key, want);
+        if (taken <= 0L) return 0L;
+
+        if (cursor == null) {
+            inv.setItemStack(key.prototype((int) taken));
+        } else {
+            cursor.stackSize += (int) taken;
+        }
+        inv.markDirty();
+        updateHeldItem(player);
+        recorder.item(key);
+        return taken;
+    }
+
+    /**
+     * 原版「双击收集」的服务端实现。
+     *
+     * <p>
+     * 先收集玩家背包和当前容器的合成栏，再用共享存储补足光标。这样双击不会在客户端
+     * 直接修改虚拟槽位，也不会因为虚拟槽位返回的是临时 {@link ItemStack} 而刷出物品。
+     */
+    public static long collectToCursor(EntityPlayer player, IInventory extraInventory, ItemKey key, long requested,
+        SharedStorage storage, DeltaRecorder recorder) {
+        if (player == null || key == null) return 0L;
+
+        InventoryPlayer inv = player.inventory;
+        ItemStack cursor = inv.getItemStack();
+        if (cursor != null && !key.equals(ItemKey.of(cursor))) return 0L;
+
+        int limit = maxStackSize(cursor == null ? key.prototype() : cursor);
+        long space = limit - (cursor == null ? 0L : cursor.stackSize);
+        if (space <= 0L) return 0L;
+
+        long want = requested <= 0L ? space : Math.min(requested, space);
+        long moved = 0L;
+
+        for (int i = 0; i < INV_SIZE && moved < want; i++) {
+            ItemStack source = inv.mainInventory[i];
+            long got = collectFromStack(inv, source, key, want - moved);
+            if (got > 0L) {
+                if (source.stackSize <= 0) inv.mainInventory[i] = null;
+                moved += got;
+            }
+        }
+
+        for (int i = 0; i < ARMOR_SIZE && moved < want; i++) {
+            ItemStack source = inv.armorInventory[i];
+            long got = collectFromStack(inv, source, key, want - moved);
+            if (got > 0L) {
+                if (source.stackSize <= 0) inv.armorInventory[i] = null;
+                moved += got;
+            }
+        }
+
+        if (extraInventory != null) {
+            for (int i = 0; i < extraInventory.getSizeInventory() && moved < want; i++) {
+                ItemStack source = extraInventory.getStackInSlot(i);
+                long got = collectFromStack(inv, source, key, want - moved);
+                if (got > 0L) {
+                    if (source.stackSize <= 0) extraInventory.setInventorySlotContents(i, null);
+                    extraInventory.markDirty();
+                    moved += got;
+                }
+            }
+        }
+
+        long fromStorage = 0L;
+        if (moved < want) {
+            fromStorage = storage.extractItem(key, want - moved);
+            if (fromStorage > 0L) {
+                cursor = inv.getItemStack();
+                if (cursor == null) inv.setItemStack(key.prototype((int) fromStorage));
+                else cursor.stackSize += (int) fromStorage;
+                moved += fromStorage;
+                recorder.item(key);
+            }
+        }
+
+        if (moved > 0L) {
+            inv.markDirty();
+            updateHeldItem(player);
+        }
+        return moved;
+    }
+
+    /** 把一个真实槽里的同种物品并入光标，返回实际移动数。 */
+    private static long collectFromStack(InventoryPlayer inv, ItemStack source, ItemKey key, long requested) {
+        if (source == null || source.getItem() == null || requested <= 0L) return 0L;
+        if (!key.equals(ItemKey.of(source))) return 0L;
+
+        ItemStack cursor = inv.getItemStack();
+        int limit = maxStackSize(cursor == null ? key.prototype() : cursor);
+        long space = limit - (cursor == null ? 0L : cursor.stackSize);
+        if (space <= 0L) return 0L;
+
+        int moved = (int) Math.min(Math.min(space, requested), source.stackSize);
+        if (moved <= 0) return 0L;
+
+        if (cursor == null) {
+            inv.setItemStack(source.copy());
+            inv.getItemStack().stackSize = moved;
+        } else {
+            cursor.stackSize += moved;
+        }
+        source.stackSize -= moved;
+        return moved;
+    }
+
+    /**
+     * 数字键快捷交换：把共享存储里的一个堆放入快捷栏指定格，原来的堆存回共享存储。
+     * 虚拟槽位不能交给原版 mode=2 直接交换，因此整个动作在服务端原子完成。
+     */
+    public static long swapHotbarItem(EntityPlayer player, int hotbarSlot, ItemKey key, long requested,
+        SharedStorage storage, DeltaRecorder recorder) {
+        if (player == null || key == null || hotbarSlot < 0 || hotbarSlot >= HOTBAR_SIZE) return 0L;
+
+        ItemStack prototype = key.prototype();
+        int limit = maxStackSize(prototype);
+        long want = requested <= 0L ? limit : Math.min(requested, limit);
+        if (want <= 0L) return 0L;
+
+        InventoryPlayer inv = player.inventory;
+        ItemStack old = inv.mainInventory[hotbarSlot];
+        ItemKey oldKey = old == null ? null : ItemKey.of(old);
+        long oldStored = 0L;
+
+        if (old != null) {
+            if (oldKey == null) return 0L;
+            oldStored = storage.insertItem(oldKey, old.stackSize);
+            if (oldStored < old.stackSize) {
+                if (oldStored > 0L) storage.extractItem(oldKey, oldStored);
+                return 0L;
+            }
+        }
+
+        long taken = storage.extractItem(key, want);
+        if (taken <= 0L) {
+            if (oldStored > 0L) storage.extractItem(oldKey, oldStored);
+            return 0L;
+        }
+
+        inv.mainInventory[hotbarSlot] = key.prototype((int) taken);
+        inv.markDirty();
+        recorder.item(key);
+        if (oldKey != null) recorder.item(oldKey);
+        return taken;
+    }
+
+    /** 从共享存储取出物品并丢到世界，供共享虚拟槽位的 Q / Ctrl+Q 使用。 */
+    public static long dropItem(EntityPlayer player, ItemKey key, long requested, SharedStorage storage,
+        DeltaRecorder recorder) {
+        if (player == null || key == null) return 0L;
+
+        long want = requested <= 0L ? storage.getItemAmount(key) : requested;
+        if (want <= 0L) return 0L;
+
+        long taken = storage.extractItem(key, want);
+        if (taken <= 0L) return 0L;
+
+        int stackLimit = maxStackSize(key.prototype());
+        long remaining = taken;
+        while (remaining > 0L) {
+            int size = (int) Math.min(remaining, stackLimit);
+            ItemStack dropped = key.prototype(size);
+            if (dropped == null) {
+                storage.insertItem(key, remaining);
+                return 0L;
+            }
+            player.dropPlayerItemWithRandomChoice(dropped, true);
+            remaining -= size;
+        }
+
+        recorder.item(key);
+        return taken;
+    }
+
+    /** 丢弃共享存储中的全部物品；背包空间不参与这个动作。 */
+    public static long dropAllItems(EntityPlayer player, SharedStorage storage, DeltaRecorder recorder) {
+        long total = 0L;
+        for (java.util.Map.Entry<ItemKey, Long> entry : storage.snapshotItems()) {
+            total += dropItem(player, entry.getKey(), 0L, storage, recorder);
+        }
+        return total;
+    }
+
     // ==================================================================
     // 取出：共享存储 -> 个人背包
     // ==================================================================
@@ -288,6 +494,37 @@ public final class InventoryExchange {
      */
     public static long withdrawItem(EntityPlayer player, ItemKey key, long requested, SharedStorage storage,
         DeltaRecorder recorder) {
+        return withdrawItem(player, key, requested, false, storage, recorder);
+    }
+
+    /**
+     * 取物品到玩家的空槽位；不会往已有同类堆叠里合并。
+     *
+     * <p>
+     * 这是 Inventory Bogo Sorter 的 Ctrl+右键语义。共享存储没有有限的虚拟槽位，
+     * 因此这里的「空槽」指玩家背包里的空槽。
+     */
+    public static long withdrawItemToEmptySlot(EntityPlayer player, ItemKey key, long requested, SharedStorage storage,
+        DeltaRecorder recorder) {
+        return withdrawItem(player, key, requested, true, storage, recorder);
+    }
+
+    /**
+     * 把共享存储中的物品尽量全部转移到玩家背包。
+     *
+     * <p>
+     * 逐个键处理，而不是先把存储表清空；玩家背包装满后，剩余条目仍留在共享存储里。
+     */
+    public static long withdrawAllItems(EntityPlayer player, SharedStorage storage, DeltaRecorder recorder) {
+        long total = 0L;
+        for (java.util.Map.Entry<ItemKey, Long> entry : storage.snapshotItems()) {
+            total += withdrawItem(player, entry.getKey(), 0L, storage, recorder);
+        }
+        return total;
+    }
+
+    private static long withdrawItem(EntityPlayer player, ItemKey key, long requested, boolean emptyOnly,
+        SharedStorage storage, DeltaRecorder recorder) {
         if (key == null) return 0L;
 
         InventoryPlayer inv = player.inventory;
@@ -312,18 +549,20 @@ public final class InventoryExchange {
         int[] plan = new int[INV_SIZE];
         long planned = 0L;
 
-        // 先往背包里已有的同类堆叠上补，避免把半叠的补成一整叠却占掉空格
-        for (int i = 0; i < INV_SIZE && planned < want; i++) {
-            ItemStack existing = inv.mainInventory[i];
-            if (existing == null || existing.getItem() == null) continue;
-            if (!key.equals(ItemKey.of(existing))) continue;
+        if (!emptyOnly) {
+            // 先往背包里已有的同类堆叠上补，避免把半叠的补成一整叠却占掉空格
+            for (int i = 0; i < INV_SIZE && planned < want; i++) {
+                ItemStack existing = inv.mainInventory[i];
+                if (existing == null || existing.getItem() == null) continue;
+                if (!key.equals(ItemKey.of(existing))) continue;
 
-            int space = maxStackSize(existing) - existing.stackSize;
-            if (space <= 0) continue;
+                int space = maxStackSize(existing) - existing.stackSize;
+                if (space <= 0) continue;
 
-            int give = (int) Math.min(space, want - planned);
-            plan[i] = give;
-            planned += give;
+                int give = (int) Math.min(space, want - planned);
+                plan[i] = give;
+                planned += give;
+            }
         }
 
         // 再用空格子。原型栈只造一次 —— 这里每格都调一次 getMaxStackSize()，
@@ -626,6 +865,13 @@ public final class InventoryExchange {
         ItemStack copy = stack.copy();
         copy.stackSize = 1;
         return copy;
+    }
+
+    /** {@code updateHeldItem} 是服务端玩家实体的方法，客户端/通用类型不能直接调用。 */
+    private static void updateHeldItem(EntityPlayer player) {
+        if (player instanceof EntityPlayerMP) {
+            ((EntityPlayerMP) player).updateHeldItem();
+        }
     }
 
     /**
