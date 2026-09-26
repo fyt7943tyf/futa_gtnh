@@ -1,6 +1,7 @@
 package com.futa_gtnh.client;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -9,9 +10,12 @@ import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.entity.RenderItem;
+import net.minecraft.init.Blocks;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.StatCollector;
+import net.minecraft.world.biome.BiomeGenBase;
 
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
@@ -25,12 +29,13 @@ import com.futa_gtnh.network.PacketLocatorResult;
  * 寻物魔杖的选择界面。
  *
  * <p>
- * 三个页签：
+ * 四个页签：
  *
  * <ul>
  * <li><b>方块</b>：所有方块的网格，选一个就找最近的那一种方块。</li>
  * <li><b>物品</b>：所有物品的网格，选一个就找附近箱子库存中含有它的箱子。</li>
  * <li><b>矿脉</b>：GT 的矿脉类型列表，选一条就找最近的<b>那条矿脉</b>。</li>
+ * <li><b>生物群系</b>：选一个当前维度的生物群系，按地图数据搜索最近位置。</li>
  * </ul>
  *
  * <p>
@@ -70,10 +75,12 @@ public class GuiLocatorWand extends GuiScreen {
     private static final int BTN_TAB_BLOCKS = 2;
     private static final int BTN_TAB_ITEMS = 3;
     private static final int BTN_TAB_VEINS = 4;
+    private static final int BTN_TAB_BIOMES = 5;
 
     private static final int TAB_BLOCKS = 0;
     private static final int TAB_ITEMS = 1;
     private static final int TAB_VEINS = 2;
+    private static final int TAB_BIOMES = 3;
 
     private static final int COLOR_PANEL = 0xC0101010;
     private static final int COLOR_SLOT = 0x40FFFFFF;
@@ -93,6 +100,10 @@ public class GuiLocatorWand extends GuiScreen {
     private final List<OreVeinCatalog.Entry> veinResults = new ArrayList<>();
     /** 与 {@link #allVeins} 一一对应的搜索文本（标题 + 材料 + 拼音）。 */
     private final List<String> veinSearch = new ArrayList<>();
+    /** 所有已注册的生物群系及当前搜索结果。 */
+    private final List<BiomeGenBase> allBiomes = new ArrayList<>();
+    private final List<BiomeGenBase> biomeResults = new ArrayList<>();
+    private final List<String> biomeSearch = new ArrayList<>();
 
     private int guiLeft;
     private int guiTop;
@@ -102,6 +113,7 @@ public class GuiLocatorWand extends GuiScreen {
     private GuiButton blocksTab;
     private GuiButton itemsTab;
     private GuiButton veinsTab;
+    private GuiButton biomesTab;
 
     private int tab = TAB_BLOCKS;
     /** 当前页第一个结果所在的行。 */
@@ -148,6 +160,13 @@ public class GuiLocatorWand extends GuiScreen {
         buttonList.clear();
 
         // 页签按钮放在标题那一行的右端
+        biomesTab = new GuiSmallButton(
+            BTN_TAB_BIOMES,
+            guiLeft + GUI_WIDTH - 6 - 184,
+            guiTop + TITLE_Y,
+            44,
+            16,
+            tr("futa_gtnh.gui.locator.tab.biomes"));
         blocksTab = new GuiSmallButton(
             BTN_TAB_BLOCKS,
             guiLeft + GUI_WIDTH - 6 - 138,
@@ -169,6 +188,7 @@ public class GuiLocatorWand extends GuiScreen {
             40,
             16,
             tr("futa_gtnh.gui.locator.tab.veins"));
+        buttonList.add(biomesTab);
         buttonList.add(blocksTab);
         buttonList.add(itemsTab);
         buttonList.add(veinsTab);
@@ -194,6 +214,7 @@ public class GuiLocatorWand extends GuiScreen {
         buttonList.add(stopButton);
 
         loadVeins();
+        loadBiomes();
         BlockIndex.ensureStarted();
         ItemIndex.ensureStarted();
         viewDirty = true;
@@ -220,6 +241,61 @@ public class GuiLocatorWand extends GuiScreen {
             veinSearch.add(
                 (entry.getTitle() + ' ' + entry.getMaterials()).toLowerCase(Locale.ROOT)
                     + Pinyin.searchSuffix(entry.getTitle()));
+        }
+    }
+
+    /** 生物群系已由游戏注册，不需要扫描区块来建立候选列表。 */
+    private void loadBiomes() {
+        allBiomes.clear();
+        biomeSearch.clear();
+        biomeResults.clear();
+
+        for (BiomeGenBase biome : BiomeGenBase.getBiomeGenArray()) {
+            if (biome != null && biome.biomeName != null && !biome.biomeName.isEmpty()) allBiomes.add(biome);
+        }
+        allBiomes.sort(Comparator.comparing(GuiLocatorWand::biomeTitle, String.CASE_INSENSITIVE_ORDER));
+
+        for (BiomeGenBase biome : allBiomes) {
+            String title = biomeTitle(biome);
+            biomeSearch.add(
+                (title + ' ' + biome.biomeName + ' ' + biome.biomeID).toLowerCase(Locale.ROOT)
+                    + Pinyin.searchSuffix(title));
+        }
+    }
+
+    private static String biomeTitle(BiomeGenBase biome) {
+        return biome == null ? "" : biome.biomeName;
+    }
+
+    private static ItemStack biomeIcon(BiomeGenBase biome) {
+        if (biome == null || biome.topBlock == null) return new ItemStack(Blocks.grass);
+        Item item = Item.getItemFromBlock(biome.topBlock);
+        return item == null ? new ItemStack(Blocks.grass) : new ItemStack(item, 1, 0);
+    }
+
+    private void filterBiomes(String query) {
+        biomeResults.clear();
+        if (query == null || query.trim()
+            .isEmpty()) {
+            biomeResults.addAll(allBiomes);
+            return;
+        }
+
+        String[] words = query.trim()
+            .toLowerCase(Locale.ROOT)
+            .split("\\s+");
+        for (int i = 0; i < allBiomes.size(); i++) {
+            String haystack = biomeSearch.get(i);
+            boolean matches = true;
+            for (String word : words) {
+                String needle = word.startsWith("@") ? word.substring(1) : word;
+                if (needle.isEmpty()) continue;
+                if (!haystack.contains(needle) && !NecharBridge.matches(biomeTitle(allBiomes.get(i)), needle)) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) biomeResults.add(allBiomes.get(i));
         }
     }
 
@@ -271,8 +347,10 @@ public class GuiLocatorWand extends GuiScreen {
             BlockIndex.filter(query, blockResults);
         } else if (tab == TAB_ITEMS) {
             ItemIndex.filter(query, itemResults);
-        } else {
+        } else if (tab == TAB_VEINS) {
             filterVeins(query);
+        } else {
+            filterBiomes(query);
         }
         scrollRow = 0;
     }
@@ -309,6 +387,7 @@ public class GuiLocatorWand extends GuiScreen {
     /** 当前页签选中的那个按钮要显示成「按下」的样子。 */
     private void updateTabLabels() {
         if (blocksTab == null) return;
+        biomesTab.enabled = tab != TAB_BIOMES;
         blocksTab.enabled = tab != TAB_BLOCKS;
         itemsTab.enabled = tab != TAB_ITEMS;
         veinsTab.enabled = tab != TAB_VEINS && OreVeinCatalog.isAvailable();
@@ -454,23 +533,26 @@ public class GuiLocatorWand extends GuiScreen {
                 bottom + 3,
                 0xFFAA00);
         } else if (count == 0) {
-            fontRendererObj
-                .drawStringWithShadow(
-                    EnumChatFormatting.GRAY + tr(
-                        tab == TAB_BLOCKS ? "futa_gtnh.gui.locator.empty"
-                            : tab == TAB_ITEMS ? "futa_gtnh.gui.locator.empty.items"
-                                : "futa_gtnh.gui.locator.empty.veins"),
-                    guiLeft + GRID_X + 2,
-                    bottom + 3,
-                    0xFFFFFF);
+            fontRendererObj.drawStringWithShadow(
+                EnumChatFormatting.GRAY + tr(
+                    tab == TAB_BLOCKS ? "futa_gtnh.gui.locator.empty"
+                        : tab == TAB_ITEMS ? "futa_gtnh.gui.locator.empty.items"
+                            : tab == TAB_VEINS ? "futa_gtnh.gui.locator.empty.veins"
+                                : "futa_gtnh.gui.locator.empty.biomes"),
+                guiLeft + GRID_X + 2,
+                bottom + 3,
+                0xFFFFFF);
         } else {
             String text = tab == TAB_BLOCKS
                 ? StatCollector.translateToLocalFormatted("futa_gtnh.gui.locator.count", count, BlockIndex.size())
                 : tab == TAB_ITEMS
                     ? StatCollector
                         .translateToLocalFormatted("futa_gtnh.gui.locator.count.items", count, ItemIndex.size())
-                    : StatCollector
-                        .translateToLocalFormatted("futa_gtnh.gui.locator.count.veins", count, allVeins.size());
+                    : tab == TAB_VEINS
+                        ? StatCollector
+                            .translateToLocalFormatted("futa_gtnh.gui.locator.count.veins", count, allVeins.size())
+                        : StatCollector
+                            .translateToLocalFormatted("futa_gtnh.gui.locator.count.biomes", count, allBiomes.size());
             fontRendererObj.drawStringWithShadow(text, guiLeft + GRID_X + 2, bottom + 3, 0xA0A0A0);
         }
 
@@ -614,8 +696,9 @@ public class GuiLocatorWand extends GuiScreen {
 
     private void drawHintLines(int x, int y) {
         fontRendererObj.drawStringWithShadow(
-            EnumChatFormatting.DARK_GRAY
-                + tr(tab == TAB_ITEMS ? "futa_gtnh.gui.locator.hint1.items" : "futa_gtnh.gui.locator.hint1"),
+            EnumChatFormatting.DARK_GRAY + tr(
+                tab == TAB_ITEMS ? "futa_gtnh.gui.locator.hint1.items"
+                    : tab == TAB_BIOMES ? "futa_gtnh.gui.locator.hint1.biomes" : "futa_gtnh.gui.locator.hint1"),
             x,
             y,
             0xFFFFFF);
@@ -650,7 +733,9 @@ public class GuiLocatorWand extends GuiScreen {
 
     private int resultCount() {
         if (tab == TAB_BLOCKS) return blockResults.size();
-        return tab == TAB_ITEMS ? itemResults.size() : veinResults.size();
+        if (tab == TAB_ITEMS) return itemResults.size();
+        if (tab == TAB_VEINS) return veinResults.size();
+        return biomeResults.size();
     }
 
     private int totalRows(int count) {
@@ -662,8 +747,11 @@ public class GuiLocatorWand extends GuiScreen {
             return index < blockResults.size() ? blockResults.get(index) : null;
         }
         if (tab == TAB_ITEMS) return index < itemResults.size() ? itemResults.get(index) : null;
-        if (index >= veinResults.size()) return null;
-        return OreVeinCatalog.iconOf(veinResults.get(index));
+        if (tab == TAB_VEINS) {
+            if (index >= veinResults.size()) return null;
+            return OreVeinCatalog.iconOf(veinResults.get(index));
+        }
+        return index < biomeResults.size() ? biomeIcon(biomeResults.get(index)) : null;
     }
 
     private boolean isSelectedAt(int index) {
@@ -671,9 +759,12 @@ public class GuiLocatorWand extends GuiScreen {
             return index < blockResults.size() && LocatorState.isBlockSelected(blockResults.get(index));
         }
         if (tab == TAB_ITEMS) return index < itemResults.size() && LocatorState.isItemSelected(itemResults.get(index));
-        return index < veinResults.size() && LocatorState.isVeinSelected(
-            veinResults.get(index)
-                .getKey());
+        if (tab == TAB_VEINS) {
+            return index < veinResults.size() && LocatorState.isVeinSelected(
+                veinResults.get(index)
+                    .getKey());
+        }
+        return index < biomeResults.size() && LocatorState.isBiomeSelected(biomeResults.get(index).biomeID);
     }
 
     /** @return 鼠标指着的那个格子的提示文字；不在格子上或格子里没东西时返回 null */
@@ -693,6 +784,18 @@ public class GuiLocatorWand extends GuiScreen {
             if (stack == null) return null;
             List<String> lines = new ArrayList<>(stack.getTooltip(mc.thePlayer, mc.gameSettings.advancedItemTooltips));
             lines.add(EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.locator.items.tip"));
+            return lines;
+        }
+
+        if (tab == TAB_BIOMES) {
+            if (index >= biomeResults.size()) return null;
+            BiomeGenBase biome = biomeResults.get(index);
+            List<String> lines = new ArrayList<>();
+            lines.add(EnumChatFormatting.GOLD + biomeTitle(biome));
+            lines.add(
+                EnumChatFormatting.GRAY
+                    + StatCollector.translateToLocalFormatted("futa_gtnh.gui.locator.biomes.id", biome.biomeID));
+            lines.add(EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.locator.biomes.tip"));
             return lines;
         }
 
@@ -818,8 +921,10 @@ public class GuiLocatorWand extends GuiScreen {
             case BTN_TAB_BLOCKS:
             case BTN_TAB_ITEMS:
             case BTN_TAB_VEINS:
+            case BTN_TAB_BIOMES:
                 switchTab(
-                    button.id == BTN_TAB_BLOCKS ? TAB_BLOCKS : button.id == BTN_TAB_ITEMS ? TAB_ITEMS : TAB_VEINS);
+                    button.id == BTN_TAB_BLOCKS ? TAB_BLOCKS
+                        : button.id == BTN_TAB_ITEMS ? TAB_ITEMS : button.id == BTN_TAB_VEINS ? TAB_VEINS : TAB_BIOMES);
                 break;
             default:
                 break;
@@ -829,7 +934,7 @@ public class GuiLocatorWand extends GuiScreen {
     private void switchTab(int newTab) {
         if (tab == newTab) return;
         tab = newTab;
-        // 搜索词在三个页签里都保留，切过去照样能用
+        // 搜索词在所有页签里都保留，切过去照样能用
         viewDirty = true;
     }
 
@@ -845,12 +950,17 @@ public class GuiLocatorWand extends GuiScreen {
             if (stack == null) return;
             LocatorState.setItemTarget(stack);
             NetworkHandler.INSTANCE.sendToServer(PacketLocatorAction.startItem(stack));
-        } else {
+        } else if (tab == TAB_VEINS) {
             if (index >= veinResults.size()) return;
             OreVeinCatalog.Entry entry = veinResults.get(index);
             LocatorState
                 .setVeinTarget(entry.getKey(), entry.getTitle(), entry.getMaterials(), OreVeinCatalog.iconOf(entry));
             NetworkHandler.INSTANCE.sendToServer(PacketLocatorAction.startVein(entry.getKey()));
+        } else {
+            if (index >= biomeResults.size()) return;
+            BiomeGenBase biome = biomeResults.get(index);
+            LocatorState.setBiomeTarget(biome.biomeID, biomeTitle(biome), biomeIcon(biome));
+            NetworkHandler.INSTANCE.sendToServer(PacketLocatorAction.startBiome(biome.biomeID));
         }
         refreshButtons();
     }

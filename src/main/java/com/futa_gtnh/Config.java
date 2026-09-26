@@ -119,6 +119,15 @@ public class Config {
      */
     public static int locatorSearchRadius = 128;
 
+    /** 生物群系搜索半径（方块）；使用专用的二维扫描，不受普通寻物半径影响。 */
+    public static int locatorBiomeSearchRadius = 8192;
+
+    /** 生物群系搜索每 tick 扫描的方块位置预算。 */
+    public static int locatorBiomeSamplesPerTick = 250000;
+
+    /** 生物群系搜索的最长运行时间；范围更大时可提高预算或延长超时。 */
+    public static int locatorBiomeScanTimeoutTicks = 1800;
+
     /**
      * 寻物扫描每 tick 最多检查多少个方块位置。
      *
@@ -465,6 +474,30 @@ public class Config {
             16,
             512,
             "寻物魔杖的搜索半径（方块）。扫描量按半径三次方增长，256 以上会明显变慢。");
+
+        locatorBiomeSearchRadius = configuration.getInt(
+            "locatorBiomeSearchRadius",
+            Configuration.CATEGORY_GENERAL,
+            locatorBiomeSearchRadius,
+            512,
+            8192,
+            "寻物魔杖的生物群系搜索半径（方块）。此搜索只查询二维生物群系数据，不加载搜索范围内的区块。");
+
+        locatorBiomeSamplesPerTick = configuration.getInt(
+            "locatorBiomeSamplesPerTick",
+            Configuration.CATEGORY_GENERAL,
+            locatorBiomeSamplesPerTick,
+            10000,
+            2000000,
+            "生物群系搜索每 tick 检查多少个位置。调大结果更快，但会占用更多服务器 tick 时间。");
+
+        locatorBiomeScanTimeoutTicks = configuration.getInt(
+            "locatorBiomeScanTimeoutTicks",
+            Configuration.CATEGORY_GENERAL,
+            locatorBiomeScanTimeoutTicks,
+            100,
+            72000,
+            "一次生物群系搜索的最长时间（tick）；范围很大或目标很远时可提高。");
 
         locatorBlocksPerTick = configuration.getInt(
             "locatorBlocksPerTick",

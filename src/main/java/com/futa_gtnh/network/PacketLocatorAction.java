@@ -17,7 +17,7 @@ import io.netty.buffer.ByteBuf;
  * 客户端 -&gt; 服务端：寻物魔杖的操作。
  *
  * <p>
- * 五个动作合成一个包，靠 {@link #action} 区分。几条校验，都是「不信客户端」那条原则：
+ * 六个动作合成一个包，靠 {@link #action} 区分。几条校验，都是「不信客户端」那条原则：
  *
  * <ul>
  * <li>玩家必须<b>手持寻物魔杖</b> —— 否则发这个包没有任何意义，
@@ -26,6 +26,7 @@ import io.netty.buffer.ByteBuf;
  * Block + 元数据，不信任客户端给的方块 id。</li>
  * <li>{@link #START_VEIN} 只传矿脉的<b>名字</b>，服务端自己去 GT 的目录里查。
  * 客户端连「这条脉是什么材料」都说不上话，更别说伪造一条不存在的脉。</li>
+ * <li>{@link #START_BIOME} 只传生物群系 ID，服务端会从自己的注册表重新确认。</li>
  * <li>{@link #TELEPORT} 用的是服务端<b>自己记下的</b>上次结果，
  * 客户端连坐标都传不了 —— 所以伪造包最多只能传送到自己刚扫出来的地方。</li>
  * </ul>
@@ -37,10 +38,12 @@ public class PacketLocatorAction implements IMessage {
     public static final byte CANCEL = 2;
     public static final byte START_VEIN = 3;
     public static final byte START_ITEM = 4;
+    public static final byte START_BIOME = 5;
 
     private byte action;
     private ItemStack target;
     private String veinKey;
+    private int biomeId = -1;
 
     public PacketLocatorAction() {}
 
@@ -69,11 +72,19 @@ public class PacketLocatorAction implements IMessage {
         return packet;
     }
 
+    /** 搜索一个生物群系；服务端会重新验证 ID。 */
+    public static PacketLocatorAction startBiome(int biomeId) {
+        PacketLocatorAction packet = new PacketLocatorAction(START_BIOME);
+        packet.biomeId = biomeId;
+        return packet;
+    }
+
     @Override
     public void fromBytes(ByteBuf buf) {
         action = buf.readByte();
         target = buf.readBoolean() ? ByteBufUtils.readItemStack(buf) : null;
         veinKey = buf.readBoolean() ? ByteBufUtils.readUTF8String(buf) : null;
+        biomeId = buf.readInt();
     }
 
     @Override
@@ -87,6 +98,7 @@ public class PacketLocatorAction implements IMessage {
         if (veinKey != null) {
             ByteBufUtils.writeUTF8String(buf, veinKey);
         }
+        buf.writeInt(biomeId);
     }
 
     public static class Handler implements IMessageHandler<PacketLocatorAction, IMessage> {
@@ -112,6 +124,9 @@ public class PacketLocatorAction implements IMessage {
                 case START_ITEM:
                     if (message.target == null) return null;
                     LocatorManager.startItem(player, message.target);
+                    break;
+                case START_BIOME:
+                    LocatorManager.startBiome(player, message.biomeId);
                     break;
                 case TELEPORT:
                     handleTeleport(player);
