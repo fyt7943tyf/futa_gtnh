@@ -108,6 +108,30 @@ dependencies {
     compileOnly("com.github.GTNewHorizons:LootGames:${lootGamesVersion}:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:LootGames:${lootGamesVersion}:dev")
 
+    // ---- Enhanced LootBags（可选联动：自选抽奖机）----
+    //
+    // 抽奖机的开袋模拟完全复刻 ELB 的算法（getMergedGroupFromID / 权重抽取 /
+    // calcPercentageFromWeight 掉率提示），类型引用全部隔离在
+    // com.futa_gtnh.lootbag.EnhancedLootBagsCompat 一个类里，缺席时不加载。
+    // jar 来自本地源码仓库 D:/DevJava/EnhancedLootBags-master（先 gradlew build）；
+    // Yamcl 是它的运行时依赖（ELB 用 eu.usrv.yamcore 的工具类）。
+    compileOnly(files("D:/DevJava/EnhancedLootBags-master/build/libs/EnhancedLootBags-1.0.0-local-dev.jar"))
+    runtimeOnlyNonPublishable(files("D:/DevJava/EnhancedLootBags-master/build/libs/EnhancedLootBags-1.0.0-local-dev.jar"))
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Yamcl:0.7.4:dev")
+
+    // ELB 用 javax.xml.bind（JAXB）读写 LootBags.xml；JDK 11 起已从 JDK 移除，
+    // dev 环境是 Java 17+（runClient17/runServer17），必须补一份 JAXB 运行时。
+    // 只进 dev classpath，不随模组发布 —— 真实服务器环境由整合包自行满足。
+    runtimeOnlyNonPublishable("org.glassfish.jaxb:jaxb-runtime:2.3.9")
+
+    // ---- VendingMachine（可选联动：技术员代币钱包）----
+    //
+    // 抽奖机「重置次数」的花费从 VM 的团队钱包（gtnhlib 团队数据里的 VMTeamData）
+    // 扣技术员代币；类型引用全部隔离在 com.futa_gtnh.lootbag.TokenWallet。
+    // jar 来自本地源码仓库 D:/DevJava/VendingMachine-master（先 gradlew build）。
+    compileOnly(files("D:/DevJava/VendingMachine-master/build/libs/vendingmachine-0.4.82-local-dev.jar"))
+    runtimeOnlyNonPublishable(files("D:/DevJava/VendingMachine-master/build/libs/vendingmachine-0.4.82-local-dev.jar"))
+
     // ---- runClient / runServer 里真正要加载的模组 ----
     //
     // ★ 这几行是必需的，不是可选的。
