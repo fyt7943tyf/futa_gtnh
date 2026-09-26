@@ -78,19 +78,23 @@ GTNH 到中后期，仓库管理会变成主要负担：几十个箱子、抽屉
 
 | 操作 | 效果 |
 | --- | --- |
-| 左键 | 取 1 个 |
-| 右键 | 取半叠 |
-| Shift + 左键 | 取一整叠（数量由配置 `shiftClickWithdrawAmount` 决定，默认 64） |
+| 左键 | 取一整叠到鼠标光标 |
+| 右键 | 取半叠到鼠标光标（奇数向上取整） |
+| Shift + 左键 | 取一组直接进背包（数量由配置 `shiftClickWithdrawAmount` 决定，默认 64） |
 | Shift + 右键 | 尽量塞满背包 |
 | 中键 | 取一整叠 |
 | 光标拿着东西时左键 | 把光标那一叠存进去 |
 | 光标拿着东西时右键 | 从光标那一叠存 1 个 |
+| 数字键 1–9 | 把该条目的一组交换进对应快捷栏格，原格物品存回共享存储 |
+| Q / Ctrl + Q | 丢弃当前条目 1 个 / 一整组 |
+| 光标拿着同种物品时双击条目 | 收集玩家背包、合成栏和共享存储中的同种物品到光标 |
 | **Shift + 左键点自己背包里的格子** | 把那一格存进去 |
 | **Shift + 双击自己背包里的格子** | 把背包里所有**同种**物品一次全存进去 |
 | 滚轮（终端区域内） | 逐行滚动列表（一格格滑，触发热区比网格大一圈） |
 | PageUp / PageDown | 按屏滚动 |
-| **Shift + 滚轮悬停共享条目** | 取出一组该物品进背包（不分滚轮方向） |
-| **Shift + 滚轮悬停自己背包格** | 该格整叠存入共享背包（不分滚轮方向） |
+| **Shift + 滚轮向下悬停共享条目** | 取出 1 个该物品进背包 |
+| **Shift + 滚轮向上悬停共享条目** | 从玩家背包存入 1 个同种物品 |
+| **Shift + 滚轮向上悬停自己背包格** | 把该格的 1 个物品存入共享背包 |
 
 > **普通滚轮只滚动列表，任何时候都不会取出物品。** 整合包里有**两个**模组都会做「滚轮滚过格子就把
 > 物品在两边搬一次」：**NEI** 的「滚轮转移物品」（`config/NEI/client.cfg` 的
@@ -101,8 +105,30 @@ GTNH 到中后期，仓库管理会变成主要负担：几十个箱子、抽屉
 > `IMTModGuiContainer` 并让 `isWheelTweakDisabled()` 返回 true。
 > 详见下面「为什么滚轮以前会掏出物品」。
 >
-> **Shift + 滚轮是例外**：它是显式的快速存取手势（对齐 InvTweaks 的搬移体验），
-> 悬停共享条目取一组、悬停自己背包格存入该格，上下方向含义相同。
+> **Shift + 滚轮是例外**：它是显式的快速存取手势。向下从共享条目拿 1 个，
+> 向上向共享存储放 1 个；悬停玩家背包格时只有向上存入 1 个，向下不反向取出。
+> 流体页签仍按流体单位处理：向下执行一次默认流体点击（通常为 1000 mB），
+> 向上不会伪造「1 个流体显示物品」。
+
+### Inventory Bogo Sorter 快捷键
+
+终端对齐 GTNH 的 Inventory Bogo Sorter 习惯：
+
+| 操作 | 效果 |
+| --- | --- |
+| Ctrl + 左键 | 从鼠标下的来源侧转移 1 个 |
+| Ctrl + 右键 | 转移 1 个，并优先寻找空槽 |
+| 空格 + 左键 | 转移来源侧的全部库存；在玩家背包上等同「全部存入」 |
+| Alt + 左键 | 转移鼠标下物品的全部同类 |
+| 空格 + Q | 丢弃来源侧的全部物品 |
+| Alt + Q | 丢弃来源侧鼠标下物品的全部同类 |
+
+共享网格是服务端权威的虚拟槽位，因此这些动作不会让 Bogo Sorter 直接改写
+客户端槽位，而是转成服务端请求后同步结果。
+
+> 注意：共享网格代表的是全服共享存储。把鼠标放在共享条目上使用「空格+Q」会丢弃
+> 共享存储中的全部物品；「Alt+Q」只丢弃鼠标下条目的全部同类。两者都属于明确的
+> 破坏性操作，请不要把它们当成普通的单组 Q 丢弃。
 
 > **[全部] / [快捷栏] 会跳过你当前手持的那一格** —— 一键倒空背包太容易手滑，
 > 而「工具留在手上」是最不容易出事的默认值。真想把正拿着的东西也存进去，
@@ -1027,7 +1053,7 @@ GTNH 里方块条目有几万条（GT 的某个元数据方块自己就能贡献
 | --- | --- | --- |
 | `allowRemoteAccess` | `true` | 是否允许用按键随时随地打开。关掉后只能用方块访问。 |
 | `autosaveIntervalSeconds` | `300` | 自动保存间隔（秒）。**只有内容有改动时才会真的写盘。** |
-| `shiftClickWithdrawAmount` | `64` | Shift + 左键取多少个。 |
+| `shiftClickWithdrawAmount` | `64` | Shift + 左键直接进背包时每次最多取多少个。 |
 | `fluidClickAmount` | `1000` | 点击流体条目默认操作多少毫巴。 |
 | `displayItemBecomesFluid` | `true` | 把 GT 流体显示物品存进去时自动转成流体。 |
 | `hideNeiPanelInTerminalGui` | `true` | 打开终端界面时收起 NEI 物品面板（避免叠在右侧合成栏上）。客户端行为。 |
@@ -1306,7 +1332,7 @@ GT 那边如果截断或拒收就把差额还回存储。
 | FML 的 `TickEvent` / `InputEvent` / `PlayerEvent` 在 `FMLCommonHandler.instance().bus()` 上，不在 `MinecraftForge.EVENT_BUS` | 注册到正确的 bus（注册错了会**静默失效**） |
 | 1.7.10 的 `SimpleNetworkWrapper` 直接调用 `onMessage`，不切主线程 | 依赖原版 `NetworkManager` 把包排队到主线程处理 |
 | `Container.transferStackInSlot` 基类实现会无限递归 | 覆写并统一返回 `null`（产物格除外） |
-| 原版「双击收集」会遍历所有槽位并直接改大光标堆叠数 | 在光标非空时直接不处理，等服务端纠正 |
+| 原版「双击收集」会遍历所有槽位并直接改大光标堆叠数 | 改成服务端权威的 `COLLECT_TO_CURSOR`，收集真实背包、合成栏，再按光标剩余空间从共享存储补足 |
 | 原版 `ContainerPlayer` 在背包装不下整份产物时仍会扣掉全部材料，多余产物蒸发 | 先确认整份产物放得下才合成 |
 | `ItemStack.getMaxStackSize()` 返回异常值 | 退回 64，避免 0/负数导致死循环 |
 | 容器槽位下标 ≠ `mainInventory` 下标（槽位 45 对应 `mainInventory[9]`） | 一律用 `Slot.getSlotIndex()` 换算，并校验 `slot.inventory` |
@@ -1314,7 +1340,7 @@ GT 那边如果截断或拒收就把差额还回存储。
 | 原版 `GuiButton` 高度 ≠ 20px 时按钮贴图底边被裁掉，按钮看起来和背景边框「长在一起」 | 自绘按钮（`client/GuiSmallButton.java`）：上下两半分别对齐贴图区段顶部/底部采样，任意高度都有完整边框 |
 | lwjgl3ify（LWJGL3/新 Java）下 IME 字符事件 keyState 恒为真，旧的「>255 字符注入」会失效或重复 | `client/ImeCompat.java` 探测 lwjgl3ify 的 `TextFieldHandler` 在不在：在 → 走它对 GuiTextField 的自动注入；不在 → 保留旧路径（InputFix 场景） |
 | NEI 的配方转移只认玩家背包且靠模拟点击，无法从共享存储取料 | 自己的 overlay handler 把布局打包发给服务端直填合成栏（`exchange/CraftFiller.java`），不模拟点击 |
-| MouseTweaks 的「滚轮 tweak」会**替玩家合成点击**打在鼠标下的格子上，共享格「点一下 = 取一个」，于是滚轮滚一格就掉一个物品 | 终端界面实现 MouseTweaks 的 `IMTModGuiContainer` 接口并让 `isWheelTweakDisabled()` 返回 true（`client/MouseTweaksCompat.java`） |
+| MouseTweaks 的「滚轮 tweak」会**替玩家合成点击**打在鼠标下的格子上；共享格是虚拟槽位，不应接受这种未带方向的外部点击 | 终端界面实现 MouseTweaks 的 `IMTModGuiContainer` 接口并让 `isWheelTweakDisabled()` 返回 true（`client/MouseTweaksCompat.java`） |
 | **NEI 也有一个「滚轮转移物品」**（`inventory.disableMouseScrollTransfer`），而且装了 NEI 时 MouseTweaks 会让位给它 —— 所以真正在掏东西的是 NEI（`NEIController.mouseScrolled` → `FastTransferManager`） | 把终端界面登记进 NEI 的 `GuiInfo.customSlotGuis`（`NeiIntegration.register()`）：`hasCustomSlots` 是 `mouseScrolled` 的第一道判断，且全 NEI 只有这一处用到它 |
 | Mixin 注解里的方法名默认会被当成**原版成员**去查混淆表，而匠魂的 `getGuiContainer` / `mergeItemStackRefill` 原版里没有 | 会编译失败（`Unable to locate obfuscation mapping`）。匠魂自己的成员一律 `remap = false`；真正覆写原版的（`slotClick` / `transferStackInSlot` / `mergeItemStack`）保持默认，让 refmap 翻成 `func_75144_a` 之类 |
 | `@Shadow` 一个**继承自原版**的字段（如 `Container.inventorySlots`）时，注解处理器不会把它写进 refmap | 正式包里名字对不上，mixin 静默失效。改成让 mixin 类 `extends Container`，用普通继承调用取（`this.getSlot(i)`），根本不进混淆表 |
@@ -1357,8 +1383,8 @@ GuiContainerManager.handleMouseWheel            ← 读 Mouse.getEventDWheel()
 ```
 
 `transferItem` / `retrieveItem` 会去点槽位，最终走到
-`ContainerSharedTerminal.slotClick`。而共享格在那里的语义是「左键点一下 = 取 1 个」，
-于是**滚一格就掉出来一个物品**（数量恰好是 1，因为那是按「个」合成的一次左键点击）。
+`ContainerSharedTerminal.slotClick`。这会绕过终端自己定义的「普通点击、Shift+滚轮方向、
+Bogo 快捷键」分流，因此不能让 NEI 替它发这种没有明确方向的通用点击。
 
 **处理办法**：NEI 的 `GuiInfo.hasCustomSlots(GuiContainer)` 就是给这种「槽位语义自己说了算」
 的界面准备的逃生门 —— 它只做一件事：`customSlotGuis.contains(gui.getClass())`。
