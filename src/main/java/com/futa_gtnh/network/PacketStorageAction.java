@@ -86,11 +86,35 @@ public class PacketStorageAction implements IMessage {
      */
     public static final byte WITHDRAW_TO_CURSOR = 17;
 
+    /**
+     * 按原版「双击收集」把同种物品补到光标上。除了共享存储，也会收集玩家背包和
+     * 当前容器的合成栏，避免客户端自己改光标造成幽灵物品。
+     */
+    public static final byte COLLECT_TO_CURSOR = 18;
+
+    /** 按数字键把共享存储里的一个物品堆放进指定快捷栏格，并把原物品存回去。 */
+    public static final byte HOTBAR_SWAP = 19;
+
+    /** 取出一个物品，并且只放进玩家的空槽位（Inventory Bogo Sorter 的 Ctrl+右键）。 */
+    public static final byte WITHDRAW_ITEM_EMPTY = 23;
+
+    /** 把共享存储中的物品尽量全部转移到玩家背包（Inventory Bogo Sorter 的空格+左键）。 */
+    public static final byte WITHDRAW_ALL = 24;
+
     // ---- 终端 ----
     /** 设置方块终端往相邻管道/流体罐输出的流体。 */
     public static final byte SET_TERMINAL_FLUID = 20;
     /** 设置方块终端往物品管道输出的物品。 */
     public static final byte SET_TERMINAL_ITEM = 21;
+
+    /** 从共享存储取出物品并丢到世界中（Q / Ctrl+Q）。 */
+    public static final byte DROP_ITEM = 22;
+
+    /** 丢弃共享存储中的全部物品（Inventory Bogo Sorter 的空格+Q）。 */
+    public static final byte DROP_ALL_ITEMS = 25;
+
+    /** 丢弃共享存储中鼠标下物品的全部同类（Inventory Bogo Sorter 的 Alt+Q）。 */
+    public static final byte DROP_MATCHING_ITEMS = 26;
 
     // ---- NEI 合成联动 ----
     /**
@@ -143,6 +167,14 @@ public class PacketStorageAction implements IMessage {
         return packet;
     }
 
+    /** 物品动作同时携带一个快捷栏/背包槽位下标。 */
+    public static PacketStorageAction itemSlot(byte action, com.futa_gtnh.shared.ItemKey key, int invSlot,
+        long amount) {
+        PacketStorageAction packet = item(action, key, amount);
+        packet.invSlot = invSlot;
+        return packet;
+    }
+
     public static PacketStorageAction scope(byte action, int scope) {
         PacketStorageAction packet = new PacketStorageAction(action);
         packet.invSlot = scope;
@@ -152,6 +184,12 @@ public class PacketStorageAction implements IMessage {
     /** 链式设置数量，方便在构造之后补充参数。 */
     public PacketStorageAction withAmount(long amount) {
         this.amount = amount;
+        return this;
+    }
+
+    /** 链式设置槽位下标，供 {@link #itemSlot} 的调用方构造复合动作。 */
+    public PacketStorageAction withInvSlot(int invSlot) {
+        this.invSlot = invSlot;
         return this;
     }
 

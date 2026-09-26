@@ -397,10 +397,12 @@ public class ContainerSharedTerminal extends Container {
                 }
                 return null;
             }
-            if (mode == 6 && player.inventory.getItemStack() != null) {
-                // 原版「双击收集」会遍历所有槽位（含共享槽位）并把光标堆叠数直接改大，
-                // 客户端于是会多出一个服务端并不存在的幽灵物品。这里直接不处理，
-                // 服务端下一个 tick 会把光标状态纠正回来。
+            if (mode == 6) {
+                if (isClient(player)) {
+                    sendCollectToCursor();
+                }
+                // 原版 mode=6 会直接改写光标和槽位；共享存储没有可供两端同步的真实槽位，
+                // 所以改成一个服务端权威的收集请求，避免双击时生成幽灵物品。
                 return null;
             }
             return super.slotClick(slotId, mouseButton, mode, player);
@@ -546,17 +548,139 @@ public class ContainerSharedTerminal extends Container {
     // 客户端：把点击翻译成请求包
     // ==================================================================
 
+    /** 数字键快捷交换。流体条目没有可放入快捷栏的物品键，仍保留流体页原有语义。 */
+    private void handleHotbarSwap(int viewIndex, int hotbarSlot) {
+        if (hotbarSlot < 0 || hotbarSlot >= InventoryExchange.HOTBAR_SIZE) return;
+        if (player.inventory.getItemStack() != null) return;
+
+        ItemStack display = ghost.getDisplay(viewIndex);
+        if (display == null) return;
+
+        FluidKey fluidKey = viewIndex < pageFluidKeys.length ? pageFluidKeys[viewIndex] : null;
+        FluidStack shown = GTUtility.getFluidFromDisplayStack(display);
+        if (fluidKey != null || (shown != null && shown.getFluid() != null && shown.amount > 0)) return;
+
+        ItemKey key = viewIndex < pageItemKeys.length ? pageItemKeys[viewIndex] : null;
+        if (key == null) key = ItemKey.of(display);
+        if (key == null) return;
+
+        NetworkHandler.INSTANCE.sendToServer(
+            PacketStorageAction
+                .itemSlot(PacketStorageAction.HOTBAR_SWAP, key, hotbarSlot, Math.max(1, display.getMaxStackSize())));
+    }
+
+    /** Q / Ctrl+Q：共享虚拟槽位没有真实栈可供原版丢弃，所以改走服务端动作。 */
+    private void handleDrop(int viewIndex, int mouseButton) {
+        if (player.inventory.getItemStack() != null) return;
+
+        ItemStack display = ghost.getDisplay(viewIndex);
+        if (display == null) return;
+
+        FluidKey fluidKey = viewIndex < pageFluidKeys.length ? pageFluidKeys[viewIndex] : null;
+        FluidStack shown = GTUtility.getFluidFromDisplayStack(display);
+        if (fluidKey != null || (shown != null && shown.getFluid() != null && shown.amount > 0)) return;
+
+        ItemKey key = viewIndex < pageItemKeys.length ? pageItemKeys[viewIndex] : null;
+        if (key == null) key = ItemKey.of(display);
+        if (key == null) return;
+
+        long amount = mouseButton == 1 ? Math.max(1, display.getMaxStackSize()) : 1L;
+        NetworkHandler.INSTANCE.sendToServer(PacketStorageAction.item(PacketStorageAction.DROP_ITEM, key, amount));
+    }
+
+    /** 双击收集只对物品条目生效；流体页签仍由自己的容器/毫巴操作处理。 */
+    private void handleCollect(int viewIndex) {
+        ItemStack cursor = player.inventory.getItemStack();
+        ItemStack display = ghost.getDisplay(viewIndex);
+        if (cursor == null || display == null) return;
+
+        FluidKey fluidKey = viewIndex < pageFluidKeys.length ? pageFluidKeys[viewIndex] : null;
+        FluidStack shown = GTUtility.getFluidFromDisplayStack(display);
+        if (fluidKey != null || (shown != null && shown.getFluid() != null && shown.amount > 0)) return;
+
+        ItemKey displayKey = viewIndex < pageItemKeys.length ? pageItemKeys[viewIndex] : null;
+        if (displayKey == null) displayKey = ItemKey.of(display);
+        ItemKey cursorKey = ItemKey.of(cursor);
+        if (displayKey == null || !displayKey.equals(cursorKey)) return;
+
+        sendCollectToCursor();
+    }
+
+    /** 普通左/右键从共享存储取到光标。 */
+    private void sendWithdrawToCursor(ItemKey key, long amount) {
+        if (key == null || amount <= 0L) return;
+        NetworkHandler.INSTANCE
+            .sendToServer(PacketStorageAction.item(PacketStorageAction.WITHDRAW_TO_CURSOR, key, amount));
+    }
+
+    /** 发送 Bogo Sorter 的空槽单物品转移（Ctrl+右键）。 */
+    public void requestWithdrawFromDisplayToEmpty(int viewIndex) {
+        ItemStack display = ghost.getDisplay(viewIndex);
+        if (display == null) return;
+
+        ItemKey key = viewIndex < pageItemKeys.length ? pageItemKeys[viewIndex] : null;
+        if (key == null) key = ItemKey.of(display);
+        if (key == null) return;
+
+        NetworkHandler.INSTANCE
+            .sendToServer(PacketStorageAction.item(PacketStorageAction.WITHDRAW_ITEM_EMPTY, key, 1L));
+    }
+
+    /** 发送 Bogo Sorter 的整库转移（空格+左键）。 */
+    public void sendWithdrawAllItems() {
+        NetworkHandler.INSTANCE.sendToServer(new PacketStorageAction(PacketStorageAction.WITHDRAW_ALL));
+    }
+
+    /** 发送 Bogo Sorter 的共享存储整库丢弃（空格+Q）。 */
+    public void sendDropAllItems() {
+        NetworkHandler.INSTANCE.sendToServer(new PacketStorageAction(PacketStorageAction.DROP_ALL_ITEMS));
+    }
+
+    /** 发送 Bogo Sorter 的共享存储同类丢弃（Alt+Q）。 */
+    public void sendDropMatching(ItemKey key) {
+        if (key == null) return;
+        NetworkHandler.INSTANCE
+            .sendToServer(PacketStorageAction.item(PacketStorageAction.DROP_MATCHING_ITEMS, key, 0L));
+    }
+
+    /** 发送一次服务端权威的双击收集请求，数量只取光标还剩的空间。 */
+    private void sendCollectToCursor() {
+        ItemStack cursor = player.inventory.getItemStack();
+        if (cursor == null) return;
+
+        ItemKey key = ItemKey.of(cursor);
+        if (key == null) return;
+
+        int limit = cursor.getMaxStackSize();
+        if (limit <= 0) limit = 64;
+        long space = limit - cursor.stackSize;
+        if (space <= 0L) return;
+
+        NetworkHandler.INSTANCE
+            .sendToServer(PacketStorageAction.item(PacketStorageAction.COLLECT_TO_CURSOR, key, space));
+    }
+
     /**
      * @param mouseButton 0=左键, 1=右键, 2=中键
-     * @param mode        0=普通, 1=Shift, 3=中键, 5=拖拽经过
+     * @param mode        0=普通, 1=Shift, 2=数字键, 3=中键, 4=丢弃, 5=拖拽经过, 6=双击
      */
     private void handleSharedSlotClick(int viewIndex, int mouseButton, int mode) {
         // 只认真正的「鼠标点击」。slotClick 的 mode 参数是复用的：
         // 2 = 数字键与快捷栏交换（mouseButton 是快捷栏下标 0..8，不是鼠标键）
         // 4 = Q 键丢弃（mouseButton 是 0/1）
         // 6 = 双击收集
-        // 不把这三个挡掉的话，对着网格按一下数字键 3 就会取出 64 个，
-        // 按一下 Q 就会取出 1 个 —— 玩家根本没点这一格。
+        if (mode == 2) {
+            handleHotbarSwap(viewIndex, mouseButton);
+            return;
+        }
+        if (mode == 4) {
+            handleDrop(viewIndex, mouseButton);
+            return;
+        }
+        if (mode == 6) {
+            handleCollect(viewIndex);
+            return;
+        }
         if (mode != 0 && mode != 1 && mode != 3 && mode != 5) return;
 
         boolean shift = mode == 1;
@@ -649,11 +773,16 @@ public class ContainerSharedTerminal extends Container {
         } else if (mouseButton == 2) {
             amount = Math.max(1, display.getMaxStackSize());
         } else if (shift) {
-            amount = mouseButton == 1 ? -1L : Config.shiftClickWithdrawAmount;
+            amount = mouseButton == 1 ? -1L
+                : Math.max(1L, Math.min((long) Config.shiftClickWithdrawAmount, display.getMaxStackSize()));
         } else if (mouseButton == 1) {
-            amount = Math.max(1, display.getMaxStackSize() / 2);
+            // 普通右键和原版容器一样：把半叠（奇数时向上取整）放到光标。
+            sendWithdrawToCursor(itemKey, Math.max(1, (display.getMaxStackSize() + 1) / 2));
+            return;
         } else {
-            amount = 1L;
+            // 普通左键和原版容器一样：把一整叠放到光标，而不是直接塞进背包。
+            sendWithdrawToCursor(itemKey, Math.max(1, display.getMaxStackSize()));
+            return;
         }
 
         NetworkHandler.INSTANCE
@@ -662,19 +791,29 @@ public class ContainerSharedTerminal extends Container {
 
     /** 供 {@link GhostInventory} / {@link SlotSharedStorage} 在别的模组直接操作槽位时调用。 */
     public void requestWithdrawFromDisplay(int viewIndex, int amount) {
+        requestWithdrawFromDisplay(viewIndex, (long) amount);
+    }
+
+    /** 供滚轮等快捷操作使用的长数量版本；流体页签的数量单位是毫巴。 */
+    public void requestWithdrawFromDisplay(int viewIndex, long amount) {
         if (isClient(player)) {
             withdrawFromDisplay(viewIndex, amount);
         }
     }
 
     public void requestDepositFromExternal(ItemStack stack) {
+        requestDepositMatching(stack, stack == null ? 0L : stack.stackSize);
+    }
+
+    /** 从玩家背包里找出指定物品存入；数量由服务端再次按实际背包内容封顶。 */
+    public void requestDepositMatching(ItemStack stack, long amount) {
         if (!isClient(player) || stack == null) return;
         ItemKey key = ItemKey.of(stack);
         if (key == null) return;
         // 语义是「从玩家背包里扣除这么多个再存进去」，而不是「凭空存这么多」。
         // 数量由服务端按背包实际内容封顶，所以外部模组无论传什么都不可能刷物品。
         NetworkHandler.INSTANCE
-            .sendToServer(PacketStorageAction.item(PacketStorageAction.DEPOSIT_MATCHING, key, stack.stackSize));
+            .sendToServer(PacketStorageAction.item(PacketStorageAction.DEPOSIT_MATCHING, key, amount));
     }
 
     private void withdrawFromDisplay(int viewIndex, long amount) {

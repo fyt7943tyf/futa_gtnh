@@ -99,12 +99,21 @@ public final class StorageActionHandler {
         }
 
         ContainerSharedTerminal container = (ContainerSharedTerminal) open;
+        boolean forceContainerSync = false;
 
         try {
             switch (packet.getAction()) {
                 case PacketStorageAction.WITHDRAW_ITEM: {
                     ItemKey key = packet.getItemKey();
                     InventoryExchange.withdrawItem(player, key, amount, storage, recorder);
+                    break;
+                }
+                case PacketStorageAction.WITHDRAW_ITEM_EMPTY: {
+                    InventoryExchange.withdrawItemToEmptySlot(player, packet.getItemKey(), amount, storage, recorder);
+                    break;
+                }
+                case PacketStorageAction.WITHDRAW_ALL: {
+                    InventoryExchange.withdrawAllItems(player, storage, recorder);
                     break;
                 }
                 case PacketStorageAction.FILL_CONTAINER: {
@@ -149,31 +158,37 @@ public final class StorageActionHandler {
                     break;
                 }
                 case PacketStorageAction.WITHDRAW_TO_CURSOR: {
-                    // 「取到光标上」：面板里左键点一下。物品先进光标，和从箱子里拿一致。
-                    ItemKey cursorKey = packet.getItemKey();
-                    if (cursorKey != null && amount > 0L) {
-                        ItemStack cursor = player.inventory.getItemStack();
-                        int limit = 64;
-                        if (cursor != null) {
-                            // 光标上是别的东西：不动（客户端也不该发这种包）
-                            if (!cursorKey.equals(ItemKey.of(cursor))) break;
-                            limit = cursor.getMaxStackSize();
-                            if (limit <= 0) limit = 64;
-                        }
-                        int space = limit - (cursor == null ? 0 : cursor.stackSize);
-                        if (space > 0) {
-                            long got = storage.extractItem(cursorKey, Math.min(amount, (long) space));
-                            if (got > 0L) {
-                                recorder.item(cursorKey);
-                                if (cursor == null) player.inventory.setItemStack(cursorKey.prototype((int) got));
-                                else cursor.stackSize += (int) got;
-                                // 光标栈不在任何槽位里，必须显式同步：
-                                // 这就是原版 NetHandlerPlayServer 用的那条路（S2FPacketSetSlot(-1,-1,..)）
-                                player.updateHeldItem();
-                                player.inventory.markDirty();
-                            }
-                        }
-                    }
+                    InventoryExchange.withdrawToCursor(player, packet.getItemKey(), amount, storage, recorder);
+                    break;
+                }
+                case PacketStorageAction.COLLECT_TO_CURSOR: {
+                    // 双击收集既可能只移动玩家背包里的真实槽位，也可能还要从共享存储补足。
+                    // 即使 delta 为空，真实槽位和光标也变了，必须强制同步容器。
+                    InventoryExchange.collectToCursor(
+                        player,
+                        container.getCraftMatrix(),
+                        packet.getItemKey(),
+                        amount,
+                        storage,
+                        recorder);
+                    forceContainerSync = true;
+                    break;
+                }
+                case PacketStorageAction.HOTBAR_SWAP: {
+                    InventoryExchange
+                        .swapHotbarItem(player, packet.getInvSlot(), packet.getItemKey(), amount, storage, recorder);
+                    break;
+                }
+                case PacketStorageAction.DROP_ITEM: {
+                    InventoryExchange.dropItem(player, packet.getItemKey(), amount, storage, recorder);
+                    break;
+                }
+                case PacketStorageAction.DROP_ALL_ITEMS: {
+                    InventoryExchange.dropAllItems(player, storage, recorder);
+                    break;
+                }
+                case PacketStorageAction.DROP_MATCHING_ITEMS: {
+                    InventoryExchange.dropItem(player, packet.getItemKey(), 0L, storage, recorder);
                     break;
                 }
                 case PacketStorageAction.DRAIN_CURSOR: {
@@ -235,7 +250,7 @@ public final class StorageActionHandler {
 
         // 玩家背包的槽位由容器自己同步（那些是真实槽位），
         // 增量包只负责共享存储网格那部分
-        if (!delta.isEmpty()) {
+        if (forceContainerSync || !delta.isEmpty()) {
             container.detectAndSendChanges();
         }
     }

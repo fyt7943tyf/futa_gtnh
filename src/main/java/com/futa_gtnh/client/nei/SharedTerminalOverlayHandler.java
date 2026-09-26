@@ -1,7 +1,10 @@
 package com.futa_gtnh.client.nei;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.TreeMap;
 
 import net.minecraft.client.gui.inventory.GuiContainer;
@@ -15,6 +18,7 @@ import net.minecraftforge.oredict.OreDictionary;
 
 import com.futa_gtnh.client.ClientStorageCache;
 import com.futa_gtnh.client.GuiSharedTerminal;
+import com.futa_gtnh.client.StorageViewEntry;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageAction;
@@ -67,6 +71,10 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
 
     /** 每格最多带多少个 craftingTool 矿辞名。 */
     private static final int MAX_TOOL_ORES = 16;
+
+    /** 全部共享存储中可用 craftingTool 矿辞的缓存；按库存修订号失效。 */
+    private static int toolOreIndexRevision = Integer.MIN_VALUE;
+    private static Set<String> availableStorageToolOres = Collections.emptySet();
 
     public SharedTerminalOverlayHandler() {
         super(OVERLAY_OFFSET_X, OVERLAY_OFFSET_Y);
@@ -142,7 +150,7 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
             available.add(stack.copy());
         }
 
-        // 共享存储的那一份（每种参与配方的候选都查一次存量）
+        // 共享存储的那一份（每种参与配方的候选都查一次存量；不依赖合成站当前显示页）
         for (PositionedStack positioned : ingredients) {
             if (positioned == null || positioned.items == null) continue;
             for (ItemStack candidate : positioned.items) {
@@ -177,12 +185,57 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
         }
 
         long have = ClientStorageCache.getItemAmount(candidate);
-        if (have <= 0L) return null;
+        if (have > 0L) {
+            ItemKey key = ItemKey.of(candidate);
+            if (key == null) return null;
+            // 封顶一个背包能装下的量：presence 判定按位核销，给多了没意义
+            return key.prototype((int) Math.min(have, 36L * 64L));
+        }
 
-        ItemKey key = ItemKey.of(candidate);
-        if (key == null) return null;
-        // 封顶一个背包能装下的量：presence 判定按位核销，给多了没意义
-        return key.prototype((int) Math.min(have, 36L * 64L));
+        // 锻造锤等 GT 工具的耐久属于实例状态：配方展示栈和仓库里的受损工具
+        // ItemKey 不同，但 craftingToolHammer 等矿辞仍表示同一种配方工具。
+        // 返回配方候选本身，让 NEI 用精确物品比较时也能显示为「有」。
+        return hasStoredCraftingTool(candidate) ? candidate.copy() : null;
+    }
+
+    private static boolean hasStoredCraftingTool(ItemStack candidate) {
+        try {
+            for (int id : OreDictionary.getOreIDs(candidate)) {
+                String name = OreDictionary.getOreName(id);
+                if (name != null && name.startsWith("craftingTool") && availableStorageToolOres().contains(name)) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+            // 某个模组物品的矿辞查询失败时，保留普通的精确匹配结果。
+        }
+        return false;
+    }
+
+    private static Set<String> availableStorageToolOres() {
+        int revision = ClientStorageCache.getRevision();
+        if (toolOreIndexRevision == revision) return availableStorageToolOres;
+
+        Set<String> names = new HashSet<>();
+        if (ClientStorageCache.isReady()) {
+            for (StorageViewEntry entry : ClientStorageCache.items()) {
+                if (entry == null || entry.getAmount() <= 0L || entry.getItemKey() == null) continue;
+                try {
+                    for (int id : OreDictionary.getOreIDs(
+                        entry.getItemKey()
+                            .prototype())) {
+                        String name = OreDictionary.getOreName(id);
+                        if (name != null && name.startsWith("craftingTool")) names.add(name);
+                    }
+                } catch (Throwable ignored) {
+                    // 个别条目矿辞查询失败不应影响其它工具的提示。
+                }
+            }
+        }
+
+        availableStorageToolOres = names;
+        toolOreIndexRevision = revision;
+        return availableStorageToolOres;
     }
 
     // ==================================================================
