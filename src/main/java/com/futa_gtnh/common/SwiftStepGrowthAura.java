@@ -1,8 +1,11 @@
 package com.futa_gtnh.common;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.List;
 
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockContainer;
 import net.minecraft.block.BlockDoublePlant;
 import net.minecraft.block.BlockGrass;
 import net.minecraft.block.BlockTallGrass;
@@ -12,10 +15,12 @@ import net.minecraft.entity.passive.EntitySheep;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.MathHelper;
 import net.minecraft.world.World;
 
+import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.item.ItemSwiftStep;
 
 /** 服务端处理迅步的作物与动物生长光环。 */
@@ -23,6 +28,15 @@ public final class SwiftStepGrowthAura {
 
     /** 作物光环每 5 秒触发一次；动物光环根据强度缩短触发间隔。 */
     private static final int TICK_INTERVAL = 100;
+    private static final String CROPS_NH_CROP_STICK_API = "com.gtnewhorizon.cropsnh.api.ICropStickTile";
+
+    private static boolean cropsNhApiResolved;
+    private static Class<?> cropsNhCropStickType;
+    private static Method cropsNhHasCrop;
+    private static Method cropsNhIsMature;
+    private static Method cropsNhIsSick;
+    private static Method cropsNhGrowthTick;
+    private static boolean cropsNhIntegrationDisabled;
 
     private SwiftStepGrowthAura() {}
 
@@ -92,12 +106,62 @@ public final class SwiftStepGrowthAura {
                     if (y < 0 || y >= 256) continue;
 
                     Block block = world.getBlock(x, y, z);
+                    if (tickCropsNh(world, block, x, y, z, growthTicks)) continue;
                     if (isGrowthBlock(block)) {
                         for (int tick = 0; tick < growthTicks && world.getBlock(x, y, z) == block; tick++) {
                             block.updateTick(world, x, y, z, world.rand);
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /** CropsNH grows through its crop-stick tile entity rather than Minecraft random block ticks. */
+    private static boolean tickCropsNh(World world, Block block, int x, int y, int z, int growthTicks) {
+        if (!(block instanceof BlockContainer) || cropsNhIntegrationDisabled) return false;
+
+        resolveCropsNhApi();
+        if (cropsNhCropStickType == null) return false;
+
+        TileEntity tile = world.getTileEntity(x, y, z);
+        if (tile == null || !cropsNhCropStickType.isInstance(tile)) return false;
+
+        try {
+            if (!((Boolean) cropsNhHasCrop.invoke(tile)) || (Boolean) cropsNhIsMature.invoke(tile)
+                || (Boolean) cropsNhIsSick.invoke(tile)) {
+                return true;
+            }
+
+            for (int tick = 0; tick < growthTicks; tick++) {
+                cropsNhGrowthTick.invoke(tile);
+                if (!((Boolean) cropsNhHasCrop.invoke(tile)) || (Boolean) cropsNhIsMature.invoke(tile)
+                    || (Boolean) cropsNhIsSick.invoke(tile)) {
+                    break;
+                }
+            }
+        } catch (IllegalAccessException | InvocationTargetException | ClassCastException e) {
+            cropsNhIntegrationDisabled = true;
+            FutaGtnhMod.LOG.warn("迅步：CropsNH 作物加速调用失败，已停用本次运行的联动", e);
+        }
+        return true;
+    }
+
+    private static void resolveCropsNhApi() {
+        if (cropsNhApiResolved) return;
+        synchronized (SwiftStepGrowthAura.class) {
+            if (cropsNhApiResolved) return;
+            try {
+                cropsNhCropStickType = Class
+                    .forName(CROPS_NH_CROP_STICK_API, false, SwiftStepGrowthAura.class.getClassLoader());
+                cropsNhHasCrop = cropsNhCropStickType.getMethod("hasCrop");
+                cropsNhIsMature = cropsNhCropStickType.getMethod("isMature");
+                cropsNhIsSick = cropsNhCropStickType.getMethod("isSick");
+                cropsNhGrowthTick = cropsNhCropStickType.getMethod("onGrowthTick");
+            } catch (ClassNotFoundException | NoSuchMethodException | LinkageError e) {
+                cropsNhCropStickType = null;
+            } finally {
+                cropsNhApiResolved = true;
             }
         }
     }
