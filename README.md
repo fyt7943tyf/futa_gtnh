@@ -79,6 +79,7 @@ futa_gtnh/
 ├─ docs/                          开发笔记
 ├─ tools/                         辅助工具
 ├─ gtnhShared/                    Spotless / Checkstyle 格式化配置
+├─ vendor/                        钉死版本的联动兼容 jar（CI 编译依赖，见 vendor/README.md）
 └─ version.txt                    版本号（唯一来源）
 ```
 
