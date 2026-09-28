@@ -1,0 +1,44 @@
+# CI 构建：push / PR 到 main 时编译并跑格式检查（Spotless、Checkstyle 随 build 一并执行）。
+# 构建产物（build/libs 下的 jar）作为 artifact 保留 7 天，方便不发版时直接取包测试。
+name: CI 构建
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # gradle-daemon-jvm.properties 钉了 toolchainVersion=25，与本地开发保持一致
+      - name: 设置 JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      # 提供 Gradle 依赖缓存 + wrapper 完整性校验
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: true
+
+      - name: 构建
+        run: ./gradlew build --build-cache --stacktrace
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: futa_gtnh-${{ github.run_number }}
+          path: build/libs/*.jar
+          retention-days: 7

@@ -1,0 +1,134 @@
+# 自动发版：创建 GitHub Release 并附上模组 jar。
+#
+# 三种触发方式：
+#   1. 改 version.txt 推送到 main —— 自动检测版本号变化，打 tag 并发版（日常发版用这个）
+#   2. 推送 v 开头的 tag（如 v1.5.1）—— 校验 tag 与 version.txt 一致后发版（手动控制用这个）
+#   3. Actions 页面手动 workflow_dispatch —— 为当前 version.txt 发版（补发/重试用这个）
+#
+# 版本号唯一来源是 version.txt；tag 固定为 v<version.txt>，例如 1.5.1 -> v1.5.1。
+name: 发版
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # 第一步：判定这次需不需要发版，产出 should_release / tag / version
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.decide.outputs.should_release }}
+      tag: ${{ steps.decide.outputs.tag }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      # 需要完整历史：拿上一个 tag 时的 version.txt 做对比
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 判定是否发版
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          VERSION="$(tr -d '[:space:]' < version.txt)"
+          TAG="v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "$EVENT" = "push" ] && [[ "$REF" == refs/tags/* ]]; then
+            # tag 触发：版本号必须与 tag 一致，防止产物版本和发布版本对不上
+            TAG_NAME="${REF#refs/tags/}"
+            if [ "$TAG" != "$TAG_NAME" ]; then
+              echo "::error::tag $TAG_NAME 与 version.txt（$VERSION）不一致。请保证两者同步：tag 固定为 v<version.txt>。"
+              exit 1
+            fi
+            echo "tag $TAG_NAME 触发发版"
+            echo "should_release=true"  >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG_NAME"        >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # push main / workflow_dispatch：目标 tag 已存在就不再发（版本号回退、重复推送都安全）
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "tag $TAG 已存在，跳过发版"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "手动触发：为当前版本 $VERSION 发版"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG"            >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # push main：version.txt 相对上一个 tag 有变化才发版
+          LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          if [ -n "$LAST_TAG" ]; then
+            OLD_VERSION="$(git show "$LAST_TAG:version.txt" 2>/dev/null | tr -d '[:space:]' || echo '')"
+            if [ "$OLD_VERSION" = "$VERSION" ]; then
+              echo "version.txt 自 $LAST_TAG 以来未变化，跳过发版"
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "version.txt 由 $OLD_VERSION 变为 $VERSION，自动打 tag $TAG 并发版"
+          else
+            echo "仓库还没有任何 tag：为首版 $VERSION 发版（tag $TAG）"
+          fi
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"            >> "$GITHUB_OUTPUT"
+
+  # 第二步：构建并把 jar 挂到 Release 上。
+  # tag 不存在时（自动/手动发版），action-gh-release 会在 target_commitish 上创建 tag。
+  release:
+    needs: decide
+    if: needs.decide.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 设置 JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: true
+
+      - name: 构建
+        run: ./gradlew build --build-cache --stacktrace
+
+      - name: 整理发布文件（主 jar + sources）
+        env:
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          mkdir -p release-assets
+          cp "build/libs/futa_gtnh-$VERSION.jar" release-assets/
+          cp "build/libs/futa_gtnh-$VERSION-sources.jar" release-assets/ 2>/dev/null || true
+          ls -la release-assets
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.decide.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: FutaGTNH ${{ needs.decide.outputs.version }}
+          generate_release_notes: true
+          files: release-assets/*
+          fail_on_unmatched_files: true
