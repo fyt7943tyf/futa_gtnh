@@ -148,6 +148,7 @@ futa_gtnh.msg.lootassist.search_nothing=附近没有发现新的地牢候选点
 
 futa_gtnh.msg.lootgames.full_reward=重试次数已达上限，按满奖励结算！
 futa_gtnh.msg.lootgames.level_skip_denied=当前阶段无法跳过
+futa_gtnh.msg.lootgames.skip_hint=提示：跳关请「潜行 + 右击」棋盘西北外角的主方块 —— 它和地板长得一模一样，在棋盘的左后方那一格（本提示每次登录只出现一次）
 
 futa_gtnh.gui.locator.title=寻物魔杖
 futa_gtnh.gui.locator.tab.blocks=方块
