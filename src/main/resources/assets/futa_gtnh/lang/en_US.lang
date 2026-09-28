@@ -81,6 +81,17 @@ futa_gtnh.gui.auto.tip.persist=Personal setting, saved with your player data (su
 
 futa_gtnh.gui.search.hint=Search (Chinese / pinyin / @mod / *ore / #tooltip)
 
+futa_gtnh.gui.searchmode.manual=Manual
+futa_gtnh.gui.searchmode.auto=Auto
+futa_gtnh.gui.searchmode.nei_sync=NEI sync
+futa_gtnh.gui.searchmode.nei_sync_auto=NEI sync+
+futa_gtnh.gui.searchmode.tip.title=Search box / NEI integration (left-click cycle, right-click reverse)
+futa_gtnh.gui.searchmode.tip.manual=Manual: click the search box to start typing
+futa_gtnh.gui.searchmode.tip.auto=Auto: the search box is focused when the GUI opens
+futa_gtnh.gui.searchmode.tip.nei_sync=NEI sync: typing pushes to NEI's search bar and filters its panel
+futa_gtnh.gui.searchmode.tip.nei_sync_auto=NEI sync+: sync, plus auto focus on open
+futa_gtnh.gui.searchmode.tip.none=NEI not installed; sync modes behave like "Auto"
+
 futa_gtnh.gui.page=Page %s/%s
 futa_gtnh.gui.types.item=%s items
 futa_gtnh.gui.types.fluid=%s fluids
@@ -124,6 +135,16 @@ futa_gtnh.gui.lootassist.no_lootgames=LootGames is not installed
 futa_gtnh.gui.lootassist.empty=No dungeons known yet - click "Search nearby"
 futa_gtnh.gui.lootassist.count=%s dungeons
 futa_gtnh.gui.lootassist.progress=Scanning %s / %s (found %s)
+futa_gtnh.gui.lootassist.teleport=TP
+futa_gtnh.gui.lootassist.teleport_tip=Teleport to this dungeon's surface entrance
+
+futa_gtnh.msg.lootassist.teleported=Teleported to the dungeon entrance (%s, %s, %s)
+futa_gtnh.msg.lootassist.teleport_wrong_dim=That dungeon is in dimension %s; this helper can only teleport within your current dimension
+futa_gtnh.msg.lootassist.teleport_no_entrance=The entrance of this dungeon hasn't been located yet (surrounding chunks not fully loaded), try again later
+futa_gtnh.msg.lootassist.teleport_unloaded=The entrance chunk isn't loaded - get closer and try again (this helper never force-generates chunks)
+futa_gtnh.msg.lootassist.teleport_protected=No safe landing spot near the entrance and the surroundings must not be carved, teleport cancelled
+futa_gtnh.msg.lootassist.teleport_failed=No safe landing spot found, teleport cancelled
+futa_gtnh.msg.lootassist.teleport_gone=This entry just became invalid, search again
 
 futa_gtnh.msg.lootassist.no_lootgames=LootGames is not installed on this server
 futa_gtnh.msg.lootassist.search_busy=A scan is already running, please wait

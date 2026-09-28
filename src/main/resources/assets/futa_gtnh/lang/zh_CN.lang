@@ -77,6 +77,17 @@ futa_gtnh.gui.auto.tip.persist=这个开关是你个人的，会跟着存档保�
 
 futa_gtnh.gui.search.hint=搜索（中文 / 拼音 / @模组 / *矿辞 / #tooltip）
 
+futa_gtnh.gui.searchmode.manual=手动
+futa_gtnh.gui.searchmode.auto=自动
+futa_gtnh.gui.searchmode.nei_sync=同步
+futa_gtnh.gui.searchmode.nei_sync_auto=同步+自动
+futa_gtnh.gui.searchmode.tip.title=搜索框与 NEI 的联动（左键切换 / 右键反向）
+futa_gtnh.gui.searchmode.tip.manual=手动：点搜索框开始输入
+futa_gtnh.gui.searchmode.tip.auto=自动：打开界面时搜索框自动聚焦
+futa_gtnh.gui.searchmode.tip.nei_sync=同步：输入实时推送到 NEI 搜索条，NEI 面板随之过滤
+futa_gtnh.gui.searchmode.tip.nei_sync_auto=同步+自动：同步，且打开界面时自动聚焦
+futa_gtnh.gui.searchmode.tip.none=当前没装 NEI，同步模式按「自动」对待
+
 futa_gtnh.gui.page=第 %s/%s 页
 futa_gtnh.gui.types.item=%s 种物品
 futa_gtnh.gui.types.fluid=%s 种流体
@@ -120,6 +131,16 @@ futa_gtnh.gui.lootassist.no_lootgames=未检测到 LootGames
 futa_gtnh.gui.lootassist.empty=还没有地牢记录 —— 点「搜索附近」开始扫描
 futa_gtnh.gui.lootassist.count=%s 个地牢
 futa_gtnh.gui.lootassist.progress=扫描中 %s / %s（找到 %s）
+futa_gtnh.gui.lootassist.teleport=传送
+futa_gtnh.gui.lootassist.teleport_tip=传送到这个地牢的地表入口
+
+futa_gtnh.msg.lootassist.teleported=已传送到地牢入口（%s, %s, %s）
+futa_gtnh.msg.lootassist.teleport_wrong_dim=这个地牢在维度 %s，本助手只能传送到你所在的维度
+futa_gtnh.msg.lootassist.teleport_no_entrance=这个地牢的入口还没推算出来（周边区块还没加载全），稍后再试
+futa_gtnh.msg.lootassist.teleport_unloaded=入口所在的区块还没加载 —— 走近一点再试（助手绝不强制生成区块）
+futa_gtnh.msg.lootassist.teleport_protected=入口附近没有安全落脚点，且周围都是不该挖的方块，传送取消
+futa_gtnh.msg.lootassist.teleport_failed=没找到安全的落脚点，传送取消
+futa_gtnh.msg.lootassist.teleport_gone=这条记录刚刚失效了，重新搜索后再试
 
 futa_gtnh.msg.lootassist.no_lootgames=这台服务器没有安装 LootGames
 futa_gtnh.msg.lootassist.search_busy=已有扫描任务在进行中，请稍候

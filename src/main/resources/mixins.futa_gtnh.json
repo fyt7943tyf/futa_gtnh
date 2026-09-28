@@ -17,7 +17,6 @@
 		"lootgames.MixinGameMineSweeper",
 		"lootgames.MixinGameOfLight",
 		"lootgames.MixinGameSudoku",
-		"lootgames.MixinGameMasterBlock",
 		"lootgames.InvokerGameMineSweeper",
 		"lootgames.InvokerGOLStage"
 	],

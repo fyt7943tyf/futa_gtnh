@@ -7,7 +7,6 @@ import java.util.Locale;
 
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
-import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.entity.RenderItem;
 import net.minecraft.init.Blocks;
@@ -20,6 +19,7 @@ import net.minecraft.world.biome.BiomeGenBase;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 
+import com.futa_gtnh.client.widget.FutaSearchField;
 import com.futa_gtnh.locator.OreVeinCatalog;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketLocatorAction;
@@ -107,7 +107,7 @@ public class GuiLocatorWand extends GuiScreen {
 
     private int guiLeft;
     private int guiTop;
-    private GuiTextField searchField;
+    private FutaSearchField searchField;
     private GuiButton teleportButton;
     private GuiButton stopButton;
     private GuiButton blocksTab;
@@ -143,15 +143,14 @@ public class GuiLocatorWand extends GuiScreen {
 
         String previous = searchField == null ? "" : searchField.getText();
 
-        searchField = new GuiTextField(
+        searchField = new FutaSearchField(
             fontRendererObj,
             guiLeft + GRID_X + 3,
             guiTop + SEARCH_Y + 4,
             GUI_WIDTH - 2 * GRID_X - 6,
             12);
-        searchField.setMaxStringLength(64);
-        searchField.setEnableBackgroundDrawing(false);
-        searchField.setText(previous);
+        searchField.setText(previous, false);
+        searchField.setChangeListener(text -> viewDirty = true);
         // 默认不给焦点，点一下才进输入状态 —— 和共享背包那边保持一致
         // （以前是强制常驻焦点，玩家点别处也退不出来）
         searchField.setFocused(false);
@@ -866,7 +865,7 @@ public class GuiLocatorWand extends GuiScreen {
         // 注意：1.7.10 的 GuiScreen#keyTyped 不声明 throws，
         // 覆写时加上 throws IOException 会直接编译不过
         if (searchField != null && searchField.textboxKeyTyped(typedChar, keyCode)) {
-            viewDirty = true;
+            // 文本变化由 FutaSearchField 的变更回调置 viewDirty；光标移动不用刷新
             return;
         }
         if (keyCode == Keyboard.KEY_PRIOR) {

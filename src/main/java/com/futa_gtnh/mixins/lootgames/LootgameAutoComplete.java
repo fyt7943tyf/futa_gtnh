@@ -12,7 +12,8 @@ import ru.timeconqueror.lootgames.minigame.sudoku.GameSudoku;
  * 潜行右击游戏主方块的「自动完成当前进度」分发逻辑。
  *
  * <p>
- * 只在服务端、且玩家潜行时被 {@link MixinGameMasterBlock} 调用。按游戏类型
+ * 只在服务端、且玩家潜行时被 {@code lootassist.LootgameSneakComplete} 的
+ * Forge 事件处理器调用（为什么不走 mixin 见那个类的说明）。按游戏类型
  * 找到它当前的「等待玩家输入」阶段，然后走该游戏<b>原版的过关路径</b>：
  *
  * <ul>
