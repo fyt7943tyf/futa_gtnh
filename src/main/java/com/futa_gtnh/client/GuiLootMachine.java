@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Locale;
 
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.item.ItemStack;
@@ -41,7 +40,7 @@ import com.futa_gtnh.network.PacketLootMachineAction;
  * 必须加 {@code guiLeft/guiTop} 偏移；而背景/前景两层绘制是 GUI 相对坐标。
  * 混用会得到「按钮贴在屏幕左上角、面板却居中」的错位界面。
  */
-public class GuiLootMachine extends GuiContainer {
+public class GuiLootMachine extends FutaGuiContainer {
 
     private static final ResourceLocation TEXTURE = new ResourceLocation(
         FutaGtnhMod.MODID,

@@ -5,8 +5,6 @@ import java.util.List;
 import java.util.Locale;
 
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.GuiTextField;
-import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumChatFormatting;
@@ -19,6 +17,7 @@ import org.lwjgl.opengl.GL11;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
+import com.futa_gtnh.client.widget.FutaSearchField;
 import com.futa_gtnh.exchange.InventoryExchange;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
@@ -30,12 +29,16 @@ import com.futa_gtnh.shared.ItemKey;
  * 全服共享背包的主界面。
  *
  * <p>
- * 布局分四块：搜索框、共享存储网格（分页）、翻页/排序/存入按钮、玩家背包。
- * 网格是<b>虚拟槽位</b> —— 见 {@link ContainerSharedTerminal} 的说明 ——
- * 但对玩家和 NEI 来说它就是普通的物品格，所以对着共享存储里的东西直接按
- * R/U 查配方是可以用的。
+ * 布局分四块：搜索框（+ NEI 联动模式按钮）、共享存储网格（分页）、
+ * 翻页/排序/存入按钮、玩家背包。网格是<b>虚拟槽位</b> —— 见
+ * {@link ContainerSharedTerminal} 的说明 —— 但对玩家和 NEI 来说它就是普通的
+ * 物品格，所以对着共享存储里的东西直接按 R/U 查配方是可以用的。
+ *
+ * <p>
+ * 继承 {@link FutaGuiContainer}：NEI 联动（面板可见性、遮罩区）走
+ * {@link NeiAwareGui} 的统一入口，输入兜底在基类，这里只声明自己的差异。
  */
-public class GuiSharedTerminal extends GuiContainer {
+public class GuiSharedTerminal extends FutaGuiContainer {
 
     private static final ResourceLocation TEXTURE = new ResourceLocation(
         FutaGtnhMod.MODID,
@@ -52,15 +55,23 @@ public class GuiSharedTerminal extends GuiContainer {
     private static final int BTN_STORE_MAIN = 7;
     private static final int BTN_DRAIN = 8;
     private static final int BTN_AUTO_STORE = 9;
+    private static final int BTN_SEARCH_MODE = 10;
 
     private static final int TAB_ITEMS = 0;
     private static final int TAB_FLUIDS = 1;
 
+    // 搜索行：框变窄是为了给右侧的「NEI 联动模式」循环按钮腾位（见 initGui）
+    private static final int SEARCH_FIELD_X = 8;
+    private static final int SEARCH_FIELD_WIDTH = 116;
+    private static final int SEARCH_MODE_X = 126;
+    private static final int SEARCH_MODE_WIDTH = 40;
+
     private final ContainerSharedTerminal container;
 
-    private GuiTextField searchField;
+    private FutaSearchField searchField;
     private GuiButton sortButton;
     private GuiButton autoStoreButton;
+    private GuiButton searchModeButton;
 
     /** 当前过滤 + 排序后的结果，是这一页内容的来源 */
     private final List<StorageViewEntry> filtered = new ArrayList<>();
@@ -135,23 +146,20 @@ public class GuiSharedTerminal extends GuiContainer {
 
         String previousQuery = searchField == null ? "" : searchField.getText();
 
-        searchField = new GuiTextField(
+        searchField = new FutaSearchField(
             fontRendererObj,
-            guiLeft + 8,
+            guiLeft + SEARCH_FIELD_X,
             guiTop + ContainerSharedTerminal.SEARCH_Y,
-            160,
+            SEARCH_FIELD_WIDTH,
             12);
-        searchField.setMaxStringLength(64);
-        searchField.setEnableBackgroundDrawing(false);
-        searchField.setText(previousQuery);
-        // 默认不给焦点。
-        //
-        // 以前这里是 setFocused(true) + 点击时强制回焦点，理由是
-        // 「点到空白处再敲字母会触发快捷键直接关界面」。那个担心其实不成立：
-        // KeyHandler 里有 currentScreen != null 就 return 的守卫，B 键不可能关掉界面；
-        // 而 GuiContainer 只对「打开背包」那个键（默认 E）关界面，字母键不会。
-        // 代价是搜索框永远失不了焦，玩家点别处也没法退出输入状态，很别扭。
-        searchField.setFocused(false);
+        // 恢复上一次的搜索词：程序性写入，不触发变更回调
+        // （initGui 结束时本来就会置 viewDirty，不需要平白多刷）
+        searchField.setText(previousQuery, false);
+        searchField.setChangeListener(this::onSearchTextChanged);
+        // 联动模式为「自动聚焦」时直接进输入状态；其余模式点一下才聚焦。
+        // KeyHandler 里有 currentScreen != null 就 return 的守卫，B 键不会关掉界面；
+        // GuiContainer 只对「打开背包」那个键（默认 E）关界面，字母键不会。
+        searchField.setFocused(effectiveSearchMode().autoFocus());
         // 按住退格能连删。1.7.10 的 GuiTextField 不会自己开重复事件，
         // 这里开、关界面时关（和原版 GuiEditSign 同一个套路）
         Keyboard.enableRepeatEvents(true);
@@ -164,6 +172,15 @@ public class GuiSharedTerminal extends GuiContainer {
         // 页签这一行的右边是空的，正好放「拾取自动入库」开关
         autoStoreButton = new GuiSmallButton(BTN_AUTO_STORE, guiLeft + 89, tabY, 80, 14, autoStoreLabel());
         buttonList.add(autoStoreButton);
+
+        searchModeButton = new GuiSmallButton(
+            BTN_SEARCH_MODE,
+            guiLeft + SEARCH_MODE_X,
+            guiTop + ContainerSharedTerminal.SEARCH_Y - 1,
+            SEARCH_MODE_WIDTH,
+            14,
+            searchModeLabel());
+        buttonList.add(searchModeButton);
 
         int navY = guiTop + ContainerSharedTerminal.NAV_Y;
         buttonList.add(new GuiSmallButton(BTN_PREV, guiLeft + 7, navY, 14, 14, "<"));
@@ -197,6 +214,9 @@ public class GuiSharedTerminal extends GuiContainer {
         if (autoStoreButton != null) {
             autoStoreButton.displayString = autoStoreLabel();
         }
+        if (searchModeButton != null) {
+            searchModeButton.displayString = searchModeLabel();
+        }
 
         // 容器需要知道当前页签，才能决定「光标上拿着装流体的容器时点一下」该倒料还是该当物品存。
         // 在切页签的当场就同步过去，不能等到下一次 updateScreen 重建视图 ——
@@ -217,6 +237,73 @@ public class GuiSharedTerminal extends GuiContainer {
      */
     private String autoStoreLabel() {
         return tr(ClientTerminalState.isAutoStore() ? "futa_gtnh.gui.auto.on" : "futa_gtnh.gui.auto.off");
+    }
+
+    // ==================================================================
+    // 搜索框与 NEI 的联动（对齐 AE2 的搜索模式，见 Config#TerminalSearchMode）
+    // ==================================================================
+
+    /**
+     * 实际生效的联动模式：没装 NEI 时，同步类模式退化为「自动聚焦」——
+     * 配置里保留原值，装回 NEI 后自动恢复。
+     */
+    private Config.TerminalSearchMode effectiveSearchMode() {
+        Config.TerminalSearchMode mode = Config.terminalSearchMode;
+        if (mode.neiSync() && !NeiSearchBridge.isInstalled()) return Config.TerminalSearchMode.AUTO;
+        return mode;
+    }
+
+    /** 搜索词变化（键入、右键清空）的唯一入口：刷新本界面列表 + 推给 NEI。 */
+    private void onSearchTextChanged(String text) {
+        viewDirty = true;
+        pendingResort = true;
+        if (Config.terminalSearchMode.neiSync()) {
+            // 桥未安装（没装 NEI）时是空操作；推不推得动由实现里的判空兜底
+            NeiSearchBridge.pushSearchText(text);
+        }
+    }
+
+    private String searchModeLabel() {
+        return tr(
+            "futa_gtnh.gui.searchmode." + Config.terminalSearchMode.name()
+                .toLowerCase(Locale.ROOT));
+    }
+
+    /** 循环切换联动模式并持久化。{@code backwards} = 反向（右键）。 */
+    private void cycleSearchMode(boolean backwards) {
+        Config.TerminalSearchMode[] modes = Config.TerminalSearchMode.values();
+        int index = Config.terminalSearchMode.ordinal();
+        int next = ((index + (backwards ? -1 : 1)) % modes.length + modes.length) % modes.length;
+        Config.saveTerminalSearchMode(modes[next]);
+        updateTabStates();
+    }
+
+    private boolean isHoveringButton(GuiButton button, int mouseX, int mouseY) {
+        return button != null && button.visible
+            && mouseX >= button.xPosition
+            && mouseY >= button.yPosition
+            && mouseX < button.xPosition + button.width
+            && mouseY < button.yPosition + button.height;
+    }
+
+    /** 搜索联动按钮的悬停说明：四个模式各自的含义 + 当前选中。 */
+    private void drawSearchModeTooltip(int mouseX, int mouseY) {
+        if (!isHoveringButton(searchModeButton, mouseX, mouseY)) return;
+
+        List<String> lines = new ArrayList<>();
+        lines.add(EnumChatFormatting.GOLD + tr("futa_gtnh.gui.searchmode.tip.title"));
+        for (Config.TerminalSearchMode mode : Config.TerminalSearchMode.values()) {
+            String marker = mode == Config.terminalSearchMode ? EnumChatFormatting.GREEN + "\u25b8 "
+                : EnumChatFormatting.GRAY + "  ";
+            lines.add(
+                marker + tr(
+                    "futa_gtnh.gui.searchmode.tip." + mode.name()
+                        .toLowerCase(Locale.ROOT)));
+        }
+        if (!NeiSearchBridge.isInstalled()) {
+            lines.add(EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.searchmode.tip.none"));
+        }
+        drawHoveringText(lines, mouseX, mouseY, fontRendererObj);
     }
 
     private static String tr(String key) {
@@ -356,6 +443,7 @@ public class GuiSharedTerminal extends GuiContainer {
             searchField.drawTextBox();
         }
         drawAutoStoreTooltip(mouseX, mouseY);
+        drawSearchModeTooltip(mouseX, mouseY);
     }
 
     /**
@@ -390,29 +478,30 @@ public class GuiSharedTerminal extends GuiContainer {
             .bindTexture(TEXTURE);
         drawTexturedModalRect(guiLeft, guiTop, 0, 0, xSize, ySize);
 
-        // 聚焦时把搜索框描一圈亮边 —— 现在它默认不是焦点了，
-        // 得让玩家一眼看出「现在敲键盘是往这里输」还是「不在输入状态」
+        // 聚焦时把搜索框描一圈亮边 —— 得让玩家一眼看出「现在敲键盘是往这里输」
+        // 还是「不在输入状态」
         if (searchField != null && searchField.isFocused()) {
             drawRect(
-                guiLeft + 7,
+                guiLeft + SEARCH_FIELD_X - 1,
                 guiTop + ContainerSharedTerminal.SEARCH_Y - 1,
-                guiLeft + 7 + 162,
+                guiLeft + SEARCH_FIELD_X - 1 + SEARCH_FIELD_WIDTH + 2,
                 guiTop + ContainerSharedTerminal.SEARCH_Y,
                 0xFF55FF55);
             drawRect(
-                guiLeft + 7,
+                guiLeft + SEARCH_FIELD_X - 1,
                 guiTop + ContainerSharedTerminal.SEARCH_Y + 12,
-                guiLeft + 7 + 162,
+                guiLeft + SEARCH_FIELD_X - 1 + SEARCH_FIELD_WIDTH + 2,
                 guiTop + ContainerSharedTerminal.SEARCH_Y + 13,
                 0xFF55FF55);
         }
 
-        // 搜索框的输入提示：只在空的时候显示
+        // 搜索框的输入提示：只在空的时候显示（截到框宽，别压到右边的联动按钮上）
         if (searchField != null && searchField.getText()
             .isEmpty()) {
             fontRendererObj.drawStringWithShadow(
-                EnumChatFormatting.DARK_GRAY + tr("futa_gtnh.gui.search.hint"),
-                guiLeft + 9,
+                EnumChatFormatting.DARK_GRAY
+                    + fontRendererObj.trimStringToWidth(tr("futa_gtnh.gui.search.hint"), SEARCH_FIELD_WIDTH - 4),
+                guiLeft + SEARCH_FIELD_X + 1,
                 guiTop + ContainerSharedTerminal.SEARCH_Y + 2,
                 0xFFFFFF);
         }
@@ -544,6 +633,13 @@ public class GuiSharedTerminal extends GuiContainer {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) {
+        // 搜索联动按钮的右键反向循环：原版按钮只认左键，这里自己接。
+        // 在 super 之前消费掉，避免这记右键继续落进容器/搜索框。
+        if (mouseButton == 1 && isHoveringButton(searchModeButton, mouseX, mouseY)) {
+            cycleSearchMode(true);
+            return;
+        }
+
         // Inventory Bogo Sorter 的 Ctrl / Alt / Space 快捷键最终也是在这里落地。
         // 共享网格是虚拟槽位，不能让它继续走 Bogo 的本地 putStack 路径；先转换成
         // 我们自己的服务端权威动作，普通点击仍交给 GuiContainer。
@@ -551,10 +647,9 @@ public class GuiSharedTerminal extends GuiContainer {
 
         super.mouseClicked(mouseX, mouseY, mouseButton);
         if (searchField != null) {
+            // FutaSearchField 自己处理聚焦/失焦/右键清空；文本真的变了的话
+            // 变更回调已经置过 viewDirty，这里只补「焦点切换」的旧逻辑
             boolean before = searchField.isFocused();
-            // GuiTextField.mouseClicked 自己就会按「点在不在框内」决定聚焦还是失焦
-            // （canLoseFocus 默认 true），所以这里不要再补一句 setFocused(true)——
-            // 那样搜索框就永远退不出输入状态了。
             searchField.mouseClicked(mouseX, mouseY, mouseButton);
             if (before != searchField.isFocused()) viewDirty = true;
         }
@@ -732,8 +827,8 @@ public class GuiSharedTerminal extends GuiContainer {
         // 注意：1.7.10 的 GuiScreen#keyTyped 没有声明 throws，
         // 覆写时加上 throws IOException 会直接编译不过
         if (searchField != null && searchField.textboxKeyTyped(typedChar, keyCode)) {
-            viewDirty = true;
-            pendingResort = true;
+            // 文本变化时 FutaSearchField 的变更回调已经置过 viewDirty/pendingResort
+            // 并推送 NEI；光标移动这类不改文本的按键不需要刷新
             return;
         }
         if (keyCode == Keyboard.KEY_Q && (isSpaceDown() || isAltDown())) {
@@ -757,28 +852,7 @@ public class GuiSharedTerminal extends GuiContainer {
         super.keyTyped(typedChar, keyCode);
     }
 
-    /**
-     * 旧输入层（LWJGL2 + InputFix 一类）的兜底：把「只有字符、没有按键」的事件也转给
-     * {@link #keyTyped}。原版 {@code GuiScreen#handleKeyboardInput()} 只在
-     * {@code Keyboard.getEventKeyState()} 为真时才转发字符，而那些辅助层送来的正是
-     * keyState 为假的事件 —— 汉字就是这么没的。
-     *
-     * <p>
-     * <b>lwjgl3ify 环境下不需要也不走这条路</b>（见 {@link ImeCompat}）：它把输入法
-     * 提交的文字镜像成 keyState 为真、key 为 0 的事件塞进传统队列，原版路径自己就能
-     * 收到，GuiTextField 里的文字由 lwjgl3ify 的 mixin 负责注入。这种情况下这段兜底
-     * 必须闭嘴，否则同一批字符会被送进去两遍。
-     */
-    @Override
-    public void handleKeyboardInput() {
-        if (!ImeCompat.hasNativeIme()) {
-            char injected = Keyboard.getEventCharacter();
-            if (!Keyboard.getEventKeyState() && injected > 255) {
-                this.keyTyped(injected, 0);
-            }
-        }
-        super.handleKeyboardInput();
-    }
+    // handleKeyboardInput 的 IME 兜底在 FutaGuiContainer 基类里，这里不用再写。
 
     @Override
     protected void actionPerformed(GuiButton button) {
@@ -829,6 +903,9 @@ public class GuiSharedTerminal extends GuiContainer {
                 updateTabStates();
                 NetworkHandler.INSTANCE.sendToServer(new PacketAutoStore(ClientTerminalState.isAutoStore()));
                 break;
+            case BTN_SEARCH_MODE:
+                cycleSearchMode(false);
+                break;
             default:
                 break;
         }
@@ -839,6 +916,23 @@ public class GuiSharedTerminal extends GuiContainer {
         super.onGuiClosed();
         Keyboard.enableRepeatEvents(false);
         container.clearPageDisplay();
+    }
+
+    /** 遮罩区全是静态布局常量，缓存成一份：NEI 每帧会对每个面板格子查一遍。 */
+    private static final List<int[]> NEI_MASKED_AREAS = java.util.Arrays.asList(
+        new int[] { SEARCH_FIELD_X - 1, ContainerSharedTerminal.SEARCH_Y - 1,
+            SEARCH_MODE_X + SEARCH_MODE_WIDTH - SEARCH_FIELD_X + 1, 14 },
+        new int[] { ContainerSharedTerminal.SIDEBAR_X - 1, ContainerSharedTerminal.TAB_Y,
+            ContainerSharedTerminal.GUI_WIDTH - ContainerSharedTerminal.SIDEBAR_X + 1,
+            ContainerSharedTerminal.RESULT_Y + 18 + 4 - ContainerSharedTerminal.TAB_Y });
+
+    /**
+     * 要遮住 NEI 物品面板的区域：搜索行（输入框 + 联动按钮）和右侧的
+     * 装备/合成侧栏。GuiButton 不用登记 —— NEI 会自动按 buttonList 遮。
+     */
+    @Override
+    public List<int[]> neiMaskedAreas() {
+        return NEI_MASKED_AREAS;
     }
 
     // ==================================================================

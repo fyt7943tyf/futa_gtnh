@@ -86,6 +86,13 @@ public class CommonProxy {
         // lootgames 联动的服务端行为覆写（重试上限等）。
         // 必须在它的配置加载之后：本模组声明了 after:lootgames，preInit 一定排在后面。
         com.futa_gtnh.lootassist.LootgamesCompat.applyServerTweaks();
+        // 潜行右击主方块跳关：挂在 Forge 的右键事件上（为什么不用 mixin 见
+        // LootgameSneakComplete 的类注释）。handler 类 import 了 lootgames 的类型，
+        // 必须只在装了 LootGames 时才加载 —— 守卫和注册写在同一行。
+        if (com.futa_gtnh.lootassist.LootgamesCompat.isAvailable()) {
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS
+                .register(new com.futa_gtnh.lootassist.LootgameSneakComplete());
+        }
 
         NetworkRegistry.INSTANCE.registerGuiHandler(FutaGtnhMod.instance, new GuiHandler());
     }
