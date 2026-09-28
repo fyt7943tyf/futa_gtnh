@@ -53,6 +53,10 @@ public final class LootgameAutoComplete {
         }
 
         if (game instanceof GameSudoku) {
+            if (!(stage instanceof GameSudoku.StageWaiting)) {
+                deny(game, player);
+                return true;
+            }
             ((GameSudoku) game).onLevelSuccessfullyFinished();
             return true;
         }
@@ -66,6 +70,23 @@ public final class LootgameAutoComplete {
             return true;
         }
 
+        return false;
+    }
+
+    /**
+     * 当前阶段是否处于「点主方块就能跳一格」的状态（不真的跳，只回答能不能）。
+     *
+     * <p>
+     * 给 {@code lootassist.LootgameSneakComplete} 的发现性提示用：玩家潜行右击的
+     * 是<b>棋盘格子</b>时不能替他跳（扫雷的潜行+右键是扫弦、数独是减小数字，
+     * 都是真操作），但如果他此刻去点主方块就能跳，就值得提示一次主方块在哪。
+     */
+    public static boolean canSkip(LootGame<?, ?> game) {
+        Object stage = game.getStage();
+        if (stage == null) return false;
+        if (game instanceof GameMineSweeper) return stage instanceof GameMineSweeper.StageWaiting;
+        if (game instanceof GameSudoku) return stage instanceof GameSudoku.StageWaiting;
+        if (game instanceof GameOfLight) return stage instanceof GameOfLight.StageWaitingForSequence;
         return false;
     }
 

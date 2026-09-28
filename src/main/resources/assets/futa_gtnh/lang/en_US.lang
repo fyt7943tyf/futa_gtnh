@@ -152,6 +152,7 @@ futa_gtnh.msg.lootassist.search_nothing=No new dungeon candidates nearby
 
 futa_gtnh.msg.lootgames.full_reward=Retry limit reached - settling with FULL rewards!
 futa_gtnh.msg.lootgames.level_skip_denied=This phase cannot be skipped
+futa_gtnh.msg.lootgames.skip_hint=Tip: to skip, sneak + right-click the master block at the board's north-west outer corner - it looks exactly like the floor, one block diagonally behind the board (this tip shows once per login)
 
 futa_gtnh.gui.locator.title=Locator Wand
 futa_gtnh.gui.locator.tab.blocks=Blocks
