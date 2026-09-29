@@ -548,6 +548,17 @@ public class GuiSharedTerminal extends GuiContainer {
         // 共享网格是虚拟槽位，不能让它继续走 Bogo 的本地 putStack 路径；先转换成
         // 我们自己的服务端权威动作，普通点击仍交给 GuiContainer。
         if (handleShortcutClick(mouseX, mouseY, mouseButton)) return;
+        if (handleShiftDoubleClick(mouseX, mouseY, mouseButton)) return;
+
+        // 「Shift + 按住左键滑动存入」只从背包上按下才算数：这样
+        // 「Shift 点共享格取出 → 顺手划过背包」不会把刚取出来的东西又存回去。
+        // 每次左键按下都重算一遍，鼠标在窗口外松开导致丢事件时也不会一直「武装」着
+        if (mouseButton == 0) {
+            Slot pressed = hoveredContainerSlot(mouseX, mouseY);
+            sweepArmed = isShiftKeyDown() && isBackpackSlot(pressed);
+            // 按下那一格交给原版的 Shift 单击处理，滑动不必再补一次
+            if (sweepArmed) sweepSlot = pressed.slotNumber;
+        }
 
         super.mouseClicked(mouseX, mouseY, mouseButton);
         if (searchField != null) {
@@ -558,6 +569,124 @@ public class GuiSharedTerminal extends GuiContainer {
             searchField.mouseClicked(mouseX, mouseY, mouseButton);
             if (before != searchField.isFocused()) viewDirty = true;
         }
+    }
+
+    // ==================================================================
+    // Shift 批量存入：双击整类 + 按住滑动
+    // ==================================================================
+
+    /** 认双击的时间窗口，和原版 {@code GuiContainer} 用的一致。 */
+    private static final long DOUBLE_CLICK_MS = 250L;
+
+    /** 上一次「Shift 单击存入」的槽位 / 时刻 / 物品，用来认双击。 */
+    private int lastShiftClickSlot = -1;
+    private long lastShiftClickTime;
+    private ItemKey lastShiftClickKey;
+
+    /** 这一次按住鼠标是不是「从背包开始的 Shift + 左键」——只有它才允许滑动存入。 */
+    private boolean sweepArmed;
+    /** 上一次滑动扫过的槽位，避免同一格反复发请求。 */
+    private int sweepSlot = -1;
+
+    /**
+     * Shift + 双击背包里的格子 = 把背包里<b>同种</b>物品一次全存进去。
+     *
+     * <p>
+     * <b>为什么不能指望原版那套。</b>1.7.10 的 {@code GuiContainer} 确实写了
+     * 「Shift + 双击 = 把同一个背包里所有同类物品都快速移动一遍」
+     * （{@code mouseMovedOrUp} 里那个循环），但它依赖第一次点击时记住的那一叠
+     * （{@code field_146994_N}）—— 而第一次点击<b>已经把那一格存走了</b>：
+     * 第二次点击看到的是空格子，原版就把那个字段清成 null，于是松开鼠标时整个循环
+     * 直接跳过。表现就是「只有点的那一格进了仓库，同类的其它叠都还留在背包里」。
+     *
+     * <p>
+     * 所以这里自己在<b>第二次点击</b>时发一个「按条目存入全部」的服务端请求，
+     * 并且吃掉这次点击（不交给原版，原版那套也就不会再跑一遍）。
+     * 数量由服务端按背包实际内容封顶，客户端说了不算 —— 这条和别处一致。
+     *
+     * @return true 表示这次点击已经被处理掉，底层界面不该再看到
+     */
+    private boolean handleShiftDoubleClick(int mouseX, int mouseY, int mouseButton) {
+        if (mouseButton != 0 || !isShiftKeyDown()) return false;
+        // 光标上举着东西时，Shift 点击是「放下」而不是「存走」
+        if (mc.thePlayer.inventory.getItemStack() != null) return false;
+
+        Slot slot = hoveredContainerSlot(mouseX, mouseY);
+        if (!isBackpackSlot(slot)) return false;
+
+        long now = System.currentTimeMillis();
+        if (slot.slotNumber == lastShiftClickSlot && now - lastShiftClickTime <= DOUBLE_CLICK_MS) {
+            ItemKey key = lastShiftClickKey;
+            lastShiftClickSlot = -1;
+            lastShiftClickTime = 0L;
+            lastShiftClickKey = null;
+
+            if (key != null) {
+                // 0 = 有多少存多少（服务端按背包实际内容封顶）
+                container.requestDepositMatching(key, 0L);
+            }
+            return true;
+        }
+
+        // 第一下：趁槽位里还有东西，把「这是哪一种物品」记下来
+        // （这一下本身照旧由原版的 Shift 单击处理：存那一格）
+        lastShiftClickSlot = slot.slotNumber;
+        lastShiftClickTime = now;
+        lastShiftClickKey = slot.getStack() == null ? null : ItemKey.of(slot.getStack());
+        return false;
+    }
+
+    /**
+     * Shift + 按住左键在背包上滑动 = 滑到哪一格就把哪一格整叠存进去。
+     *
+     * <p>
+     * <b>为什么要自己写。</b>原版的拖拽协议（{@code Container.slotClick} 的 mode 5）
+     * 只在<b>光标上举着东西</b>时才发：{@code GuiContainer.mouseClickMove} 第一句就是
+     * 「光标里没有物品就什么也不做」。所以「空着手按住 Shift 划过背包」在原版里
+     * 一个包都不会发出去，只能由界面这一层把它转成存入请求。
+     *
+     * <p>
+     * 每一格只发一次（靠 {@link #sweepSlot} 去重）：滑过去之后那一格已经空了，
+     * 反复发请求除了刷包没有任何意义。
+     */
+    @Override
+    protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
+        super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
+
+        if (!sweepArmed || clickedMouseButton != 0 || !isShiftKeyDown()) return;
+        // 光标上举着东西时那是原版的「拖动分配物品」，不抢
+        if (mc.thePlayer.inventory.getItemStack() != null) return;
+
+        Slot slot = hoveredContainerSlot(mouseX, mouseY);
+        if (!isBackpackSlot(slot) || slot.slotNumber == sweepSlot) return;
+
+        sweepSlot = slot.slotNumber;
+        if (slot.getStack() == null) return;
+
+        // 和 Shift 单击走同一条路：整叠存入，数量与守恒由服务端裁决
+        container.sendDepositFromSlot(slot.slotNumber, 0L);
+    }
+
+    @Override
+    protected void mouseMovedOrUp(int mouseX, int mouseY, int state) {
+        super.mouseMovedOrUp(mouseX, mouseY, state);
+        // 松开鼠标 = 这一轮滑动结束（state 是松开的那个键）
+        sweepArmed = false;
+        sweepSlot = -1;
+    }
+
+    /**
+     * 这一格是不是玩家自己的 36 格背包（主背包 + 快捷栏）。
+     *
+     * <p>
+     * <b>护甲和合成栏故意不算。</b>滑动存入是一条会一路扫过去的手势，
+     * 顺手把身上的装备扒进仓库、或者把刚摆好的合成材料扫空，都不是玩家想要的；
+     * 而且 {@code DEPOSIT_MATCHING} 在服务端也只遍历玩家的 36 格背包。
+     * 这两种格子仍然可以照旧用 Shift 单击逐个存。
+     */
+    private boolean isBackpackSlot(Slot slot) {
+        return slot != null && slot.slotNumber >= ContainerSharedTerminal.MAIN_START
+            && slot.slotNumber < ContainerSharedTerminal.MAIN_END;
     }
 
     /**
