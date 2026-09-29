@@ -341,7 +341,7 @@ public final class CraftFiller {
 
             ItemKey key = chooseExactCandidate(player, storage, target, reserved, gridCounts);
             if (key == null && !target.toolOreNames.isEmpty()) {
-                if (indexedToolKeys == null) indexedToolKeys = indexAvailableToolKeys(player, storage);
+                if (indexedToolKeys == null) indexedToolKeys = indexAvailableToolKeys(player, storage, gridCounts);
                 key = chooseToolCandidate(player, storage, target, reserved, indexedToolKeys, gridCounts);
             }
             plan[target.index] = key;
@@ -594,7 +594,7 @@ public final class CraftFiller {
             } else {
                 key = chooseExactCandidate(player, storage, target, reserved, null);
                 if (key == null && !target.toolOreNames.isEmpty()) {
-                    if (indexedToolKeys == null) indexedToolKeys = indexAvailableToolKeys(player, storage);
+                    if (indexedToolKeys == null) indexedToolKeys = indexAvailableToolKeys(player, storage, null);
                     key = chooseToolCandidate(player, storage, target, reserved, indexedToolKeys, null);
                 }
             }
@@ -747,8 +747,19 @@ public final class CraftFiller {
         return total;
     }
 
-    /** 背包里的键排前面，随后是共享存储键；为实际可用 GT 工具建立矿辞索引。 */
-    private static Map<String, List<ItemKey>> indexAvailableToolKeys(EntityPlayerMP player, SharedStorage storage) {
+    /**
+     * 背包里的键排前面，随后是共享存储键，最后是<b>合成栏里现有的</b>；
+     * 为实际可用的 GT 工具建立矿辞索引。
+     *
+     * <p>
+     * 合成栏那批必须一起进来：干跑时它们会被退回仓库、再重新分配，所以同样算可用。
+     * 漏掉它们的具体表现是「扳手明明躺在合成栏里，工具格却报可用 0」——
+     * 而玩家把合成栏清空再点一次就正常了（东西进了背包/仓库，于是被索引到）。
+     * 这是用户实机撞出来的：03:57:04 报 Single Use Wrench 可用 0，
+     * 清空合成栏后 03:57:09 就填上了 Wrench x1。
+     */
+    private static Map<String, List<ItemKey>> indexAvailableToolKeys(EntityPlayerMP player, SharedStorage storage,
+        Map<ItemKey, Long> alsoCount) {
         Map<String, List<ItemKey>> byOre = new HashMap<>();
         Set<ItemKey> seen = new HashSet<>();
         for (ItemStack stack : player.inventory.mainInventory) {
@@ -758,6 +769,11 @@ public final class CraftFiller {
         }
         for (Map.Entry<ItemKey, Long> entry : storage.snapshotItems()) {
             if (entry.getValue() > 0L) indexToolKey(entry.getKey(), byOre, seen);
+        }
+        if (alsoCount != null) {
+            for (ItemKey key : alsoCount.keySet()) {
+                indexToolKey(key, byOre, seen);
+            }
         }
         return byOre;
     }
