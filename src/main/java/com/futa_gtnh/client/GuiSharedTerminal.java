@@ -23,6 +23,7 @@ import com.futa_gtnh.exchange.InventoryExchange;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketAutoStore;
+import com.futa_gtnh.network.PacketStorageAction;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 
@@ -55,6 +56,24 @@ public class GuiSharedTerminal extends GuiContainer {
     /** 打开「六个面怎么主动搬东西」的配置界面（只有从方块终端打开的界面才有）。 */
     private static final int BTN_TERMINAL_IO = 10;
 
+    /**
+     * 「返还原料」：把合成栏 9 格整份退回共享存储。
+     *
+     * <p>
+     * 放在合成栏正上方（原来「合成」小标题那一行，标题上移 8px 让位）——
+     * 按钮和它管的那块格子挨着，玩家不用猜它管什么。
+     */
+    private static final int BTN_CRAFT_DUMP = 11;
+
+    /** 侧栏底部那两排「一键取工具」按钮：4 列 × 2 行，每个 13px，一共 8 个。 */
+    private static final int TOOL_BTN_SIZE = 13;
+    /** 第一排按钮的 y（侧栏底部：产物格画到 y=222，下面这段一直是空的）。 */
+    private static final int TOOL_BTN_Y = 224;
+    /** 两排之间的间隔。 */
+    private static final int TOOL_BTN_ROW_GAP = 1;
+    /** 工具栏位按钮的 id 从这里开始往后排。 */
+    private static final int BTN_TOOL_FIRST = 20;
+
     private static final int TAB_ITEMS = 0;
     private static final int TAB_FLUIDS = 1;
 
@@ -63,6 +82,18 @@ public class GuiSharedTerminal extends GuiContainer {
     private GuiTextField searchField;
     private GuiButton sortButton;
     private GuiButton autoStoreButton;
+
+    /** 侧栏底部那排「一键取工具」按钮（顺序同 {@link CraftingToolShortcuts#ORES}）。 */
+    private final List<GuiToolButton> toolButtons = new ArrayList<>();
+    /**
+     * 上一次刷按钮时用的那份工具表。
+     *
+     * <p>
+     * {@link CraftingToolShortcuts#entries()} 按库存修订号缓存，库存没动时返回的是
+     * <b>同一个 List 对象</b> —— 拿它和这一份比一下就知道要不要重新刷按钮，
+     * 免得每帧都去动按钮状态。
+     */
+    private List<CraftingToolShortcuts.Entry> lastToolEntries;
 
     /** 当前过滤 + 排序后的结果，是这一页内容的来源 */
     private final List<StorageViewEntry> filtered = new ArrayList<>();
@@ -181,15 +212,55 @@ public class GuiSharedTerminal extends GuiContainer {
             .add(new GuiSmallButton(BTN_STORE_MAIN, guiLeft + 89, buttonY, 34, 14, tr("futa_gtnh.gui.store.main")));
         buttonList.add(new GuiSmallButton(BTN_DRAIN, guiLeft + 126, buttonY, 43, 14, tr("futa_gtnh.gui.store.drain")));
 
+        // 「返还原料」：合成栏正上方那一行（标签上移 8px 让它）。
+        // 宽度按侧栏内沿来（CRAFT_X..CRAFT_X+54 = 177..231），和 3×3 合成栏同宽。
+        //
+        // 高度只给 13：合成栏第一行槽位画在 y=133，而原版 {@code getSlotAtPosition}
+        // 判定时上下各放宽 1 像素（132 也算命中槽位）。按钮下沿压在 131 就既贴着合成栏、
+        // 又不会出现「点按钮顺手点到槽位」。
+        buttonList.add(
+            new GuiSmallButton(
+                BTN_CRAFT_DUMP,
+                guiLeft + ContainerSharedTerminal.CRAFT_X,
+                guiTop + ContainerSharedTerminal.CRAFT_DUMP_Y,
+                54,
+                13,
+                tr("futa_gtnh.gui.craft.dump")));
+
+        // 「一键取工具」：侧栏最底下那两排（4×2）。
+        //
+        // 为什么在这儿：整个界面的每一行都被占满了 —— 左列从上到下是搜索框 / 页签 /
+        // 9×5 仓库网格 / 翻页 / 存入 / 状态行 / 36 格背包 / 快捷栏，一格空位都没有；
+        // 侧栏在产物格（画到 y=222）下面正好剩 30px 一条空带，够放两排 13px 的图标按钮。
+        toolButtons.clear();
+        java.util.List<CraftingToolShortcuts.Entry> tools = CraftingToolShortcuts.entries();
+        for (int i = 0; i < tools.size(); i++) {
+            int col = i % 4;
+            int row = i / 4;
+            GuiToolButton button = new GuiToolButton(
+                BTN_TOOL_FIRST + i,
+                guiLeft + ContainerSharedTerminal.SIDEBAR_X + 2 + col * TOOL_BTN_SIZE,
+                guiTop + TOOL_BTN_Y + row * (TOOL_BTN_SIZE + TOOL_BTN_ROW_GAP),
+                TOOL_BTN_SIZE,
+                tools.get(i));
+            button.setEntry(tools.get(i));
+            toolButtons.add(button);
+            buttonList.add(button);
+        }
+        lastToolEntries = tools;
+
         // 「面配置」只在真的从方块终端打开时出现：远程打开（B 键）没有方块，也就没有面可配。
-        // 位置放在存入按钮那一行最右边 —— 那一行左边到 x=169 就结束了，右边正好空着
+        // 位置挑在<b>右上角那块空白</b>：搜索框到 x=168 就结束了，右侧侧栏（装备/合成，
+        // ARMOR_X=191、CRAFT_X=177）要到 y=26 才开始，所以 172..228 / 5..19 谁都不占。
+        // 翻页行和存入行都不能放 —— 那两行 x>172 整个落在侧栏的纵向范围里，按钮会压在侧栏上。
+        // 另外标签必须短：GuiButton 的标签居中，字太长会溢出到相邻按钮上，看着就是两个按钮叠在一起。
         if (container.getTerminal() != null) {
             buttonList.add(
                 new GuiSmallButton(
                     BTN_TERMINAL_IO,
                     guiLeft + 172,
-                    buttonY,
-                    53,
+                    guiTop + 5,
+                    56,
                     14,
                     tr("futa_gtnh.gui.store.terminal_io")));
         }
@@ -364,6 +435,7 @@ public class GuiSharedTerminal extends GuiContainer {
 
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        refreshToolButtons();
         super.drawScreen(mouseX, mouseY, partialTicks);
         // 搜索框画在 super 之后：原版会把 GUI 内容盖在按钮上，
         // 而文本框不是按钮，画早了会被后面的物品格盖住
@@ -371,6 +443,46 @@ public class GuiSharedTerminal extends GuiContainer {
             searchField.drawTextBox();
         }
         drawAutoStoreTooltip(mouseX, mouseY);
+        drawToolButtonTooltip(mouseX, mouseY);
+    }
+
+    /**
+     * 按当前库存刷新那排工具按钮（能不能取、取的是哪一种）。
+     *
+     * <p>
+     * 界面开着的时候仓库也可能在变（自动入库、别的终端在搬），所以每帧对一下修订号 ——
+     * 没变就是一个引用比较，不产生任何分配。
+     */
+    private void refreshToolButtons() {
+        List<CraftingToolShortcuts.Entry> entries = CraftingToolShortcuts.entries();
+        if (entries == lastToolEntries) return;
+
+        lastToolEntries = entries;
+        for (int i = 0; i < toolButtons.size() && i < entries.size(); i++) {
+            toolButtons.get(i)
+                .setEntry(entries.get(i));
+        }
+    }
+
+    /** 工具按钮的悬停说明：工具叫什么、点了会怎样、仓库里有没有。 */
+    private void drawToolButtonTooltip(int mouseX, int mouseY) {
+        for (GuiToolButton button : toolButtons) {
+            if (!button.func_146115_a()) continue;
+
+            CraftingToolShortcuts.Entry entry = button.entry();
+            if (entry == null) return;
+
+            String name = CraftingToolShortcuts.displayName(entry);
+            drawHoveringText(
+                java.util.Arrays.asList(
+                    EnumChatFormatting.GOLD + (name.isEmpty() ? entry.ore : name),
+                    EnumChatFormatting.GRAY
+                        + tr(entry.isAvailable() ? "futa_gtnh.gui.tool.take" : "futa_gtnh.gui.tool.missing")),
+                mouseX,
+                mouseY,
+                fontRendererObj);
+            return;
+        }
     }
 
     /**
@@ -456,17 +568,14 @@ public class GuiSharedTerminal extends GuiContainer {
             ContainerSharedTerminal.NAV_Y + 3,
             0x707070);
 
-        // ---- 状态行：优先显示鼠标指着的那一条的完整数量 ----
-        StorageViewEntry hovered = getHoveredEntry(mouseX, mouseY);
+        // ---- 状态行：只说「这个终端在干什么」 ----
+        //
+        // 以前这里优先显示鼠标指着的那一条的完整数量（物品名 × 1234567），本意是让大数量
+        // 能看全。实际用起来是反效果：格子右下角已经有一份紧凑数量（1.23M 这种），
+        // 悬停时下面又冒出同一份数字，看着像「同一个数量显示了两遍」，还容易被当成
+        // 界面画重了。数量就只在格子里显示，这一行留给状态。
         String status;
-        if (hovered != null) {
-            status = EnumChatFormatting.GOLD + hovered.getDisplayName()
-                + " "
-                + EnumChatFormatting.WHITE
-                + "\u00d7 "
-                + formatFull(hovered.getAmount())
-                + (hovered.isFluid() ? " L" : "");
-        } else if (container.isRemoteAccess()) {
+        if (container.isRemoteAccess()) {
             status = EnumChatFormatting.GRAY + tr("futa_gtnh.gui.status.remote");
         } else if (tab == TAB_ITEMS) {
             ItemKey output = ClientTerminalState.getOutputItem();
@@ -559,6 +668,9 @@ public class GuiSharedTerminal extends GuiContainer {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) {
+        // Shift + 左键点产物格 = 批量合成（服务端一路补料），这一条必须拦在原版前面
+        if (handleCraftResultClick(mouseX, mouseY, mouseButton)) return;
+
         // Inventory Bogo Sorter 的 Ctrl / Alt / Space 快捷键最终也是在这里落地。
         // 共享网格是虚拟槽位，不能让它继续走 Bogo 的本地 putStack 路径；先转换成
         // 我们自己的服务端权威动作，普通点击仍交给 GuiContainer。
@@ -702,6 +814,33 @@ public class GuiSharedTerminal extends GuiContainer {
     private boolean isBackpackSlot(Slot slot) {
         return slot != null && slot.slotNumber >= ContainerSharedTerminal.MAIN_START
             && slot.slotNumber < ContainerSharedTerminal.MAIN_END;
+    }
+
+    /**
+     * Shift + 左键点<b>产物格</b> = 一次把合成栏里现有的原料做完：把现在这个摆法交给
+     * 服务端，由它把整批合成跑完（见 {@link ContainerSharedTerminal#requestCraftFromGrid()}）。
+     * <b>不动合成栏、也不从共享存储补料</b> —— 一次点击最多消耗掉你摆进去的那些。
+     *
+     * <p>
+     * <b>为什么要在界面这一层拦住、不让原版去点。</b>原版 {@code slotClick} 的 Shift
+     * 分支靠 {@code retrySlotClick} 反复「再点一次产物格」，每做一次都要客户端和服务端
+     * 来回一趟；我们这条是「一次点击、服务端跑完整批」，快得多，也不会出现做了一半两边
+     * 状态对不上。
+     *
+     * @return true 表示这次点击已经被处理掉，底层界面不该再看到
+     */
+    private boolean handleCraftResultClick(int mouseX, int mouseY, int mouseButton) {
+        if (mouseButton != 0 || !isShiftKeyDown()) return false;
+        // 其它修饰键各有各的语义（Bogo 的搬运快捷键），先让它们落地
+        if (isCtrlDown() || isAltDown() || isSpaceDown()) return false;
+        // 光标上举着东西时的 Shift 点击是原版的「放下」，不抢
+        if (mc.thePlayer.inventory.getItemStack() != null) return false;
+
+        Slot slot = hoveredContainerSlot(mouseX, mouseY);
+        if (slot == null || slot.slotNumber != ContainerSharedTerminal.RESULT_SLOT) return false;
+
+        // 合成栏是空的时候没有配方可谈，交回原版（那边同样什么都不会做）
+        return container.requestCraftFromGrid();
     }
 
     /**
@@ -926,6 +1065,16 @@ public class GuiSharedTerminal extends GuiContainer {
 
     @Override
     protected void actionPerformed(GuiButton button) {
+        // 工具按钮：一次一件，从仓库取到背包（服务端按实际存量裁决，取不到就当没点）
+        if (button instanceof GuiToolButton) {
+            CraftingToolShortcuts.Entry entry = ((GuiToolButton) button).entry();
+            if (entry != null && entry.stored != null) {
+                NetworkHandler.INSTANCE
+                    .sendToServer(PacketStorageAction.item(PacketStorageAction.WITHDRAW_ITEM, entry.stored, 1L));
+            }
+            return;
+        }
+
         switch (button.id) {
             case BTN_TAB_ITEMS:
                 tab = TAB_ITEMS;
@@ -968,6 +1117,9 @@ public class GuiSharedTerminal extends GuiContainer {
                 break;
             case BTN_DRAIN:
                 container.sendDrainContainers();
+                break;
+            case BTN_CRAFT_DUMP:
+                container.requestDumpCraftGrid();
                 break;
             case BTN_AUTO_STORE:
                 // 先本地翻转让按钮立刻响应，再发请求；服务端会用权威值回一份同步包把
@@ -1046,11 +1198,6 @@ public class GuiSharedTerminal extends GuiContainer {
         } catch (Throwable t) {
             return String.valueOf(key.getFluid());
         }
-    }
-
-    /** 完整数量，带千位分隔符。 */
-    static String formatFull(long amount) {
-        return String.format(Locale.ROOT, "%,d", amount);
     }
 
     /** 数量量级后缀，和 {@link #formatShort} 的循环一一对应。 */

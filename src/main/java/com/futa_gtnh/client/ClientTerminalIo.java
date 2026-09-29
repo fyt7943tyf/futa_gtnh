@@ -22,14 +22,48 @@ public final class ClientTerminalIo {
     private static int z;
     private static final TerminalIoConfig CONFIG = new TerminalIoConfig();
     private static boolean present;
+    /** 六个面里哪几面真的挨着能搬东西的方块（服务端算好推过来的），位 i = ForgeDirection.getOrientation(i)。 */
+    private static int itemMask;
+    private static int fluidMask;
+    /** 每面邻居方块的注册名与 metadata（空串 = 没东西），用来把那圈方块画成它本来的样子。 */
+    private static final String[] NEIGHBOUR_NAMES = new String[6];
+    private static final byte[] NEIGHBOUR_METAS = new byte[6];
 
-    public static void setConfig(int newDimension, int newX, int newY, int newZ, NBTTagCompound tag) {
+    public static void setConfig(int newDimension, int newX, int newY, int newZ, NBTTagCompound tag, int newItemMask,
+        int newFluidMask, String[] names, byte[] metas) {
         dimension = newDimension;
         x = newX;
         y = newY;
         z = newZ;
         CONFIG.readFromNbt(tag);
+        itemMask = newItemMask;
+        fluidMask = newFluidMask;
+        for (int i = 0; i < 6; i++) {
+            NEIGHBOUR_NAMES[i] = names != null && i < names.length ? names[i] : null;
+            NEIGHBOUR_METAS[i] = metas != null && i < metas.length ? metas[i] : 0;
+        }
         present = true;
+    }
+
+    /** @return 这一面邻居方块的注册名（没有/未知时空串） */
+    public static String getNeighbourName(int face) {
+        String name = face >= 0 && face < 6 ? NEIGHBOUR_NAMES[face] : null;
+        return name == null ? "" : name;
+    }
+
+    /** @return 这一面邻居方块的 metadata */
+    public static byte getNeighbourMeta(int face) {
+        return face >= 0 && face < 6 ? NEIGHBOUR_METAS[face] : 0;
+    }
+
+    /** @return 这一面挨着能收/能给的物品容器吗 */
+    public static boolean hasItemTarget(int face) {
+        return (itemMask & (1 << face)) != 0;
+    }
+
+    /** @return 这一面挨着能收/能给的流体容器吗 */
+    public static boolean hasFluidTarget(int face) {
+        return (fluidMask & (1 << face)) != 0;
     }
 
     /** @return 服务端推过来的这份配置说的就是这几个坐标的那个方块吗 */
@@ -51,6 +85,8 @@ public final class ClientTerminalIo {
     public static void clear() {
         dimension = Integer.MIN_VALUE;
         present = false;
+        itemMask = 0;
+        fluidMask = 0;
         CONFIG.clearFilter();
         for (net.minecraftforge.common.util.ForgeDirection face : net.minecraftforge.common.util.ForgeDirection.VALID_DIRECTIONS) {
             CONFIG.setMode(face, false, TerminalIoConfig.Mode.OFF);

@@ -215,22 +215,46 @@ public final class StorageActionHandler {
                     PacketTerminalIoSync.send(player, container.getTerminal());
                     return;
                 }
+                case PacketStorageAction.DUMP_CRAFT_GRID: {
+                    // 侧栏「返还原料」：把合成栏 9 格整份退回共享存储。
+                    // 逐格走 InventoryExchange.depositFrom —— 和玩家自己 Shift 点某一格
+                    // 是同一条代码路径，所以「存不下 / 认不出键」这些边界也一样。
+                    long moved = 0L;
+                    for (int i = 0; i < ContainerSharedTerminal.CRAFT_SLOTS; i++) {
+                        moved += InventoryExchange
+                            .depositFrom(player, container.getCraftMatrix(), i, 0L, storage, recorder);
+                    }
+                    FutaGtnhMod.LOG.info("共享存储：合成栏返还 {} 个原料到仓库（玩家 {}）", moved, player.getCommandSenderName());
+                    if (moved > 0L) {
+                        player.addChatMessage(
+                            new net.minecraft.util.ChatComponentTranslation("futa_gtnh.msg.craft.dumped", moved));
+                    }
+                    forceContainerSync = true;
+                    break;
+                }
                 case PacketStorageAction.FILL_CRAFT_MATRIX:
                 case PacketStorageAction.AUTOCRAFT: {
                     // NEI 合成联动：布局在 keyTag 里，倍率在 amount 里。
-                    // CraftFiller 内部会自己 detectAndSendChanges ——
-                    // 就算存储一点没动（材料全来自背包），合成栏也是要同步的，
-                    // 不能依赖尾部那段「delta 非空才同步」的逻辑。
-                    // 终端的合成栏是原版的 InventoryCrafting + InventoryCraftResult，
-                    // 收产物走容器自己的 transferCraftResult（里面带防蒸发判断）
+                    //
+                    // 合成是真的在动共享存储（填栏取料、按配方补料），所以这里
+                    // <b>必须走到尾部的增量广播</b>：以前这里直接 return，
+                    // 结果是「东西已经消耗掉了，客户端那块库存数字却一动不动，
+                    // 关掉界面再打开才对」。容器那部分 CraftFiller 内部已经同步过，
+                    // 再用 forceContainerSync 兜一次（幂等）。
+                    //
+                    // 终端的合成栏是原版的 InventoryCrafting + InventoryCraftResult。
+                    // 产物<b>直接进共享存储</b>：从仓库拿的料，做出来的东西回仓库 ——
+                    // 一次 Shift 点下去，玩家背包一个格子都不用占。
+                    // （不带 Shift 的普通点击仍然走原版，产物照旧留在光标/背包上。）
                     CraftFiller.handle(player, container, container.getCraftMatrix(), new CraftFiller.ResultTaker() {
 
                         @Override
                         public ItemStack takeOnce(EntityPlayerMP who) {
-                            return container.transferCraftResult(who);
+                            return container.transferCraftResultToStorage(who, storage, recorder);
                         }
                     }, packet, storage, recorder);
-                    return;
+                    forceContainerSync = true;
+                    break;
                 }
                 default:
                     FutaGtnhMod.LOG

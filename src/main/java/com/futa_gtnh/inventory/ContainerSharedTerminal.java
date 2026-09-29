@@ -18,12 +18,14 @@ import net.minecraftforge.fluids.FluidStack;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
+import com.futa_gtnh.exchange.DeltaRecorder;
 import com.futa_gtnh.exchange.FluidContainerHelper;
 import com.futa_gtnh.exchange.InventoryExchange;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageAction;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
+import com.futa_gtnh.shared.SharedStorage;
 
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
@@ -87,7 +89,6 @@ public class ContainerSharedTerminal extends Container {
     public static final int CRAFT_SLOTS = CRAFT_SIZE * CRAFT_SIZE;
     public static final int CRAFT_END = CRAFT_START + CRAFT_SLOTS;
     public static final int RESULT_SLOT = CRAFT_END;
-    public static final int TOTAL_SLOTS = RESULT_SLOT + 1;
 
     // ---- GUI 布局（容器和 GUI 共用同一组常量，保证格子画在哪就点在哪） ----
     //
@@ -134,7 +135,17 @@ public class ContainerSharedTerminal extends Container {
     public static final int ARMOR_LABEL_Y = 26;
     public static final int ARMOR_X = 191;
     public static final int ARMOR_Y = 38;
-    public static final int CRAFT_LABEL_Y = 118;
+    /**
+     * 「合成」小标题的 y。
+     *
+     * <p>
+     * 原来在 118，现在上移到 110 —— 118 那一行腾给「返还原料」按钮（见
+     * {@link #CRAFT_DUMP_Y}）。护甲最后一格画到 y=110，110 正好是它下一个像素，
+     * 标题（8px 高）到 118 结束，按钮紧接着从 118 开始，一行都没浪费。
+     */
+    public static final int CRAFT_LABEL_Y = 110;
+    /** 侧栏「返还原料」按钮的 y（合成栏正上方，14px 高，下沿正好贴住合成栏）。 */
+    public static final int CRAFT_DUMP_Y = 118;
     public static final int CRAFT_X = 177;
     public static final int CRAFT_Y = 132;
     public static final int RESULT_X = 191;
@@ -268,16 +279,30 @@ public class ContainerSharedTerminal extends Container {
     }
 
     private void addCraftingSlots(InventoryPlayer playerInventory) {
-        // 产物格必须用 SlotCrafting：取出产物时消耗合成材料的逻辑全在它里面
-        addSlotToContainer(
-            new SlotCrafting(playerInventory.player, craftMatrix, craftResult, 0, RESULT_X + 1, RESULT_Y + 1));
-
+        // 3×3 <b>必须先加</b>：槽位下标就是加入顺序，而常量表写的是
+        // {@code CRAFT_START..CRAFT_END}（85..93）= 合成栏、{@code RESULT_SLOT}（94）= 产物格。
+        //
+        // 以前这里把产物格放在最前面，于是它的真实下标是 85、合成栏占了 86..94。
+        // 全套按常量做的判断就都错开一格：
+        // <ul>
+        // <li>{@code isStorableSlot} 认为 85 是合成栏 → <b>Shift 点产物格被当成
+        // 「把合成栏第 0 格存进共享存储」</b>：材料被搬进仓库、产物什么都不发生
+        // ——玩家报的「Shift 点产物，材料直接消失」就是这么来的；</li>
+        // <li>{@code getSlot(RESULT_SLOT)} 拿到的是合成栏右下角那一格 → 取产物永远
+        // 「产物格是空的」，NEI 的自动合成一次也做不成；</li>
+        // <li>合成栏存入的 {@code DEPOSIT_CRAFT_SLOT} 下标也跟着偏 1（86 → 1）。</li>
+        // </ul>
+        // 所以顺序不能凭手感写：它必须和常量表一致，产物格放在最后。
         for (int row = 0; row < CRAFT_SIZE; row++) {
             for (int col = 0; col < CRAFT_SIZE; col++) {
                 addSlotToContainer(
                     new Slot(craftMatrix, col + row * CRAFT_SIZE, CRAFT_X + 1 + col * 18, CRAFT_Y + 1 + row * 18));
             }
         }
+
+        // 产物格必须用 SlotCrafting：取出产物时消耗合成材料的逻辑全在它里面
+        addSlotToContainer(
+            new SlotCrafting(playerInventory.player, craftMatrix, craftResult, 0, RESULT_X + 1, RESULT_Y + 1));
     }
 
     public TileEntitySharedTerminal getTerminal() {
@@ -288,8 +313,83 @@ public class ContainerSharedTerminal extends Container {
         return ghost;
     }
 
+    /**
+     * 把当前 3×3 的内容打包成 NEI 那套布局 NBT（{@code {slots:[{idx,count,cands:[ItemKey]}]}}）。
+     *
+     * <p>
+     * Shift+点击产物要「批量合成」时用它：那一瞬间格子里的东西就是配方本身。
+     * 必须<b>在结算之前</b>取 —— 原版结算会把格子清空，之后就拿不到了。
+     *
+     * <p>
+     * 每格只放一个候选（就是格子里那件物品），{@code count} 取该格的堆叠数。
+     * {@code count} 在这里只是「这一格该填多少」的倍率底数，不是消耗量
+     * （消耗量由配方本身决定，原版 {@code SlotCrafting} 每合成一次每格扣 1），
+     * 所以取堆叠数正好等于「填满这一格，能做多少次就做多少次」。
+     *
+     * <p>
+     * 多带一个 {@code keep = true}：告诉服务端<b>别动合成栏里现有的摆法</b>。
+     * NEI 那条「照配方填栏」要先把格子倒空再重填，而这个布局本来就是从格子里
+     * 读出来的，倒空它等于自己把自己抹掉（详见 {@code CraftFiller} 里那段注释）。
+     */
+    public net.minecraft.nbt.NBTTagCompound layoutFromCraftMatrix() {
+        net.minecraft.nbt.NBTTagList slots = new net.minecraft.nbt.NBTTagList();
+        for (int i = 0; i < CRAFT_SLOTS; i++) {
+            ItemStack stack = craftMatrix.getStackInSlot(i);
+            if (stack == null || stack.stackSize <= 0) continue;
+
+            com.futa_gtnh.shared.ItemKey key = com.futa_gtnh.shared.ItemKey.of(stack);
+            if (key == null) continue;
+
+            net.minecraft.nbt.NBTTagCompound slot = new net.minecraft.nbt.NBTTagCompound();
+            slot.setInteger("idx", i);
+            slot.setInteger("count", Math.max(1, Math.min(stack.stackSize, 64)));
+            net.minecraft.nbt.NBTTagList cands = new net.minecraft.nbt.NBTTagList();
+            cands.appendTag(key.writeToNbt());
+            slot.setTag("cands", cands);
+            slots.appendTag(slot);
+        }
+        if (slots.tagCount() == 0) return null;
+
+        net.minecraft.nbt.NBTTagCompound root = new net.minecraft.nbt.NBTTagCompound();
+        root.setTag("slots", slots);
+        root.setBoolean("keep", true);
+        return root;
+    }
+
     public IInventory getCraftMatrix() {
         return craftMatrix;
+    }
+
+    /**
+     * Shift 点产物格：把「现在这个摆法」发给服务端，让它一直合成到
+     * <b>合成栏里现有的原料用完为止</b>，做完再把格子补回原样。
+     *
+     * <p>
+     * <b>一次点击最多消耗掉你摆进格子的那些</b>（不中途补料、也不动你的摆法），
+     * 做完整批之后如果原料够，再按原样把料补回合成栏 —— 下一次 Shift 点就能接着做。
+     * 补的是「你刚才那个样子」而不是塞满一整叠，想一次多做点就自己多放些。
+     *
+     * <p>
+     * <b>为什么不让原版那条 Shift 环路做。</b>原版 {@code slotClick} 的 Shift 分支
+     * 只会在产物格还有同类产物时调 {@code retrySlotClick} 再点一次 —— 一次点击到底能做
+     * 多少次、产物往哪收，全在客户端那一侧逐次跑；而我们要的是「一次点击、服务端跑完
+     * 整批」，少掉几十次来回的窗口点击，也不会出现「客户端做了一半、服务端没跟上」。
+     *
+     * <p>
+     * 所以 Shift 点产物格由界面层接管（见 {@code GuiSharedTerminal#handleCraftResultClick}），
+     * 包一发出去，合成循环整个在服务端跑（{@code CraftFiller}），客户端连点都不用预测。
+     *
+     * @return 是否已经把请求发出去；合成栏是空的（没有配方可谈）时返回 false，
+     *         那种情况下调用方应该把这次点击交回原版
+     */
+    public boolean requestCraftFromGrid() {
+        net.minecraft.nbt.NBTTagCompound layout = layoutFromCraftMatrix();
+        if (layout == null) return false;
+
+        // 数量 0 = 「有多少做多少」；次数上限在服务端（CraftFiller.MAX_AUTOCRAFT），
+        // 和别处一样：客户端只说意图，做多少由服务端按合成栏里实际的料封顶
+        NetworkHandler.INSTANCE.sendToServer(PacketStorageAction.craft(PacketStorageAction.AUTOCRAFT, layout, 0L));
+        return true;
     }
 
     public boolean isRemoteAccess() {
@@ -363,10 +463,38 @@ public class ContainerSharedTerminal extends Container {
 
         int limit = Math.min(page.size(), SHARED_SLOTS);
         for (int i = 0; i < limit; i++) {
-            ghost.setDisplay(i, page.get(i));
+            ghost.setDisplay(i, displayOnly(page.get(i)));
             if (itemKeys != null && i < itemKeys.size()) pageItemKeys[i] = itemKeys.get(i);
             if (fluidKeys != null && i < fluidKeys.size()) pageFluidKeys[i] = fluidKeys.get(i);
         }
+    }
+
+    /**
+     * 把「交给渲染用」的那一份显示栈的数量压成 1。
+     *
+     * <p>
+     * 物品条目本来就是 1（{@code ItemKey.prototype()} 造的就是 1 个），<b>流体条目不是</b>：
+     * GT 的流体显示物品把「多少」也塞进了 {@code stackSize}（托盘里那一叠就是多少份）。
+     * 而所有通用渲染器都会把大于 1 的数量当堆叠数画出来：
+     * <ul>
+     * <li>原版 {@code RenderItem.renderItemOverlayIntoGUI} 画一行；</li>
+     * <li><b>NEI 更狠</b>：它把原版那行换成自己的大号数字
+     * （{@code GuiContainerManager} 里对 {@code stackSize > 1} 的堆叠调
+     * {@code ReadableNumberConverter.toWideReadableForm} + {@code drawBigStackSize}）。</li>
+     * </ul>
+     * 两种都会和我们自己画的真实数量叠在同一格右下角，看起来就是「两个数字重叠」。
+     *
+     * <p>
+     * 数量信息一个都没丢：格子上的数字来自 {@code StorageViewEntry.getAmount()}，
+     * 点击取料读的是 {@code pageItemKeys} / {@code pageFluidKeys}，
+     * tooltip 也走 {@code StorageViewEntry} —— 没有任何一处看这个 {@code stackSize}。
+     */
+    private static ItemStack displayOnly(ItemStack stack) {
+        if (stack == null || stack.stackSize <= 1) return stack;
+
+        ItemStack single = stack.copy();
+        single.stackSize = 1;
+        return single;
     }
 
     public void clearPageDisplay() {
@@ -437,7 +565,18 @@ public class ContainerSharedTerminal extends Container {
     public ItemStack transferStackInSlot(EntityPlayer player, int index) {
         if (index == RESULT_SLOT) {
             // 合成产物是真实状态，走原版逻辑、两端一致。
-            // 原版 slotClick 的 Shift 分支会靠返回值反复重试，从而实现「一直合成到材料用完」。
+            //
+            // 这里<b>必须返回 null</b>：transferCraftResult 自己的职责就是「把合成结果挪进玩家背包」
+            // （见它的 javadoc，里面按原版 ContainerPlayer 那一支做了 mergeItemStack + onPickupFromSlot），
+            // 东西已经搬完了。以前把产物当返回值再交出去一次，原版 Shift 分支会拿它当
+            // 「没搬完的部分」继续处理 —— 结果就是产物被处理两遍，玩家看到的就是「Shift 点击后产物消失」。
+            //
+            // 真正没搬完的（背包满）留在产物格里，并且打一条日志：这类丢东西的问题不能静默。
+            // 返回值语义（照 transferCraftResult 的实现）：成功合成时它返回<b>产物的一份副本</b>，
+            // 原版 slotClick 的 Shift 分支靠这个非空返回值继续重试，
+            // 从而实现「Shift 点击一次，一直合成到材料用完」—— 这是原版行为，不能用 null 替代。
+            // （我一度改成返回 null 并把副本人为塞回产物格，那是错的：产物已经进背包了，
+            // 再塞一份回产物格只会让它在 onCraftMatrixChanged 重算时被抹掉，看着就是「消失」。）
             return transferCraftResult(player);
         }
 
@@ -452,7 +591,37 @@ public class ContainerSharedTerminal extends Container {
     }
 
     /**
-     * Shift 点击产物格：把合成结果挪进玩家背包。
+     * 把产物格里的那一份「真的」产物取出来；是幽灵（和合成栏对不上）就顺手修掉并返回 null。
+     *
+     * <p>
+     * <b>为什么必须验。</b>原版 {@code InventoryCrafting.markDirty()} 是空实现，任何
+     * 「直接改 stackSize 再 markDirty」的路径都不会重算产物，于是合成栏已经空了、
+     * 产物格却还挂着旧的产物。那个幽灵点下去要么凭空造出东西（材料一格都没少），要么
+     * 两侧点击结果对不上被服务端整包回滚（玩家看到的就是「Shift 点产物什么都没发生」）。
+     * 所以取产物之前一律以合成栏为准重算一次。
+     */
+    private ItemStack liveCraftResult(EntityPlayer player) {
+        Slot slot = getSlot(RESULT_SLOT);
+        if (slot == null || !slot.getHasStack()) {
+            // 这是批量合成的正常收尾出口（材料做完了，每轮循环都会走到一次），
+            // 所以不能无脑打日志。只有「合成栏里明明还有料、产物格却是空的」才是异常。
+            if (hasCraftMaterial()) warnCraftFailure(player, "产物格是空的（这个摆法合不出东西）");
+            return null;
+        }
+
+        ItemStack live = slot.getStack();
+        ItemStack expected = CraftingManager.getInstance()
+            .findMatchingRecipe(craftMatrix, player.worldObj);
+        if (!ItemStack.areItemStacksEqual(expected, live)) {
+            slot.putStack(expected);
+            warnCraftFailure(player, "产物格和合成栏对不上（幽灵产物 " + live + " → " + expected + "），已按合成栏重算");
+            return null;
+        }
+        return live;
+    }
+
+    /**
+     * 取一次产物，<b>放进玩家背包</b>（原版语义）。
      *
      * <p>
      * 照抄原版 {@code ContainerPlayer} 产物格那一支的写法，因为这里的时序很讲究：
@@ -461,20 +630,14 @@ public class ContainerSharedTerminal extends Container {
      * 而 {@code SlotCrafting} 正是在那一步消耗合成材料。顺序反了就会出现
      * 「材料扣了但产物没拿到」或者「产物拿到但材料没扣」。
      *
-     * <p>
-     * 可见性是 public：服务端的自动合成（{@code CraftFiller}，NEI 联动）在
-     * 填好合成栏之后也走这一个方法把产物收进背包 —— 和玩家 Shift 点击产物格
-     * 走的是同一条路径，包括 {@link #canAcceptAll} 那个防蒸发的判断。
-     *
-     * @return 被挪走的产物；一点都没挪动时返回 null（自动合成循环靠这个决定停不停）
+     * @return 被挪走的产物；一点都没挪动时返回 null
      */
     public ItemStack transferCraftResult(EntityPlayer player) {
         Slot slot = getSlot(RESULT_SLOT);
-        if (slot == null || !slot.getHasStack()) return null;
+        ItemStack live = liveCraftResult(player);
+        if (live == null) return null;
 
-        ItemStack before = slot.getStack()
-            .copy();
-        ItemStack live = slot.getStack();
+        ItemStack before = live.copy();
 
         // 原版在这里有个丢东西的口子：只要背包还能塞下产物的<b>一部分</b>，
         // mergeItemStack 就会返回 true，紧接着 onPickupFromSlot 会把整份材料扣掉，
@@ -482,9 +645,15 @@ public class ContainerSharedTerminal extends Container {
         // 「合成栏已空 → 没有产物」而蒸发。
         // 这里先确认整份产物都放得下，放不下就干脆不合成 ——
         // 玩家看到的应该是「背包满了」，而不是莫名其妙少了几个东西。
-        if (!canAcceptAll(live)) return null;
+        if (!canAcceptAll(live)) {
+            warnCraftFailure(player, "背包放不下这 " + live.stackSize + " 个产物");
+            return null;
+        }
 
-        if (!mergeItemStack(live, MAIN_START, MAIN_END, true)) return null;
+        if (!mergeItemStack(live, MAIN_START, MAIN_END, true)) {
+            warnCraftFailure(player, "产物塞不进背包的任何一格");
+            return null;
+        }
 
         if (live.stackSize <= 0) {
             slot.putStack(null);
@@ -496,6 +665,85 @@ public class ContainerSharedTerminal extends Container {
 
         slot.onPickupFromSlot(player, live);
         return before;
+    }
+
+    /**
+     * 取一次产物，<b>直接塞进共享存储</b>（Shift 批量合成走这条）。
+     *
+     * <p>
+     * 「从仓库里拿料做的东西，成品回仓库」是这个界面的自然闭环：一次 Shift 点下去，
+     * 料从仓库扣、成品回仓库堆，玩家背包一个格子都不占。原版那条
+     * （{@link #transferCraftResult}）仍然保留 —— 不带 Shift 的普通点击、以及别的
+     * 模组调 {@code transferStackInSlot} 时走的还是它。
+     *
+     * <p>
+     * 收产物必须<b>整份</b>收得下才动手：{@code insertItem} 到上限会只收一部分，
+     * 那部分要是留在产物格里，下一次 {@code onCraftMatrixChanged} 就把它抹掉了 ——
+     * 宁可这一次不合成，也不能出现「材料扣了、产物蒸发」。正常存量下（上限约 9.2e18）
+     * 这条路永远走不到。
+     *
+     * @return 被搬进仓库的产物；没搬动时返回 null（自动合成循环靠这个决定停不停）
+     */
+    public ItemStack transferCraftResultToStorage(EntityPlayer player, SharedStorage storage, DeltaRecorder recorder) {
+        Slot slot = getSlot(RESULT_SLOT);
+        ItemStack live = liveCraftResult(player);
+        if (live == null) return null;
+
+        ItemKey key = ItemKey.of(live);
+        if (key == null) {
+            warnCraftFailure(player, "产物认不出物品键，无法入库");
+            return null;
+        }
+
+        ItemStack before = live.copy();
+        long stored = storage.insertItem(key, live.stackSize);
+        if (stored < live.stackSize) {
+            // 存储到单条目上限了：把刚塞进去的退回来，这一次当没发生
+            if (stored > 0L) storage.extractItem(key, stored);
+            warnCraftFailure(player, "共享存储收不下这份产物（" + live.stackSize + " 个）");
+            return null;
+        }
+
+        recorder.item(key);
+        slot.putStack(null);
+        // 这一步才扣合成栏里的材料 —— 顺序不能反（同 transferCraftResult）
+        slot.onPickupFromSlot(player, live);
+        return before;
+    }
+
+    /**
+     * 客户端：把合成栏里的原料一次性退回共享存储（侧栏那个「返还原料」按钮）。
+     *
+     * <p>
+     * 合成栏有 9 格，一格一个包太吵，所以走一个动作让服务端自己扫一遍 ——
+     * 和别处一样，客户端只说意图，退多少由服务端按实际内容定。
+     */
+    public void requestDumpCraftGrid() {
+        if (!hasCraftMaterial()) return;
+        NetworkHandler.INSTANCE.sendToServer(new PacketStorageAction(PacketStorageAction.DUMP_CRAFT_GRID));
+    }
+
+    /** 合成栏里还有没有料（用来区分「正常做完了」和「异常地做不出来」）。 */
+    private boolean hasCraftMaterial() {
+        for (int i = 0; i < CRAFT_SLOTS; i++) {
+            ItemStack stack = craftMatrix.getStackInSlot(i);
+            if (stack != null && stack.stackSize > 0) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 放弃一次合成时留一行日志。
+     *
+     * <p>
+     * 「点了没反应」是这个界面最难查的故障 —— 服务端知道原因，玩家只看到一个没动静的
+     * 产物格。所以每条放弃路径都要说话，并且带上<b>是哪一侧</b>：客户端也会跑一遍
+     * {@code slotClick}，两边的失败原因经常不一样。
+     */
+    private void warnCraftFailure(EntityPlayer player, String reason) {
+        boolean remote = player.worldObj != null && player.worldObj.isRemote;
+        com.futa_gtnh.FutaGtnhMod.LOG
+            .warn("共享存储：放弃一次合成（{}，玩家 {}）—— {}", remote ? "客户端" : "服务端", player.getCommandSenderName(), reason);
     }
 
     /**

@@ -45,6 +45,30 @@ final class TerminalIoEngine {
 
     private TerminalIoEngine() {}
 
+    /**
+     * 六个面里，哪几个面挨着能搬东西的方块。
+     *
+     * <p>
+     * 位 {@code i} 为 1 表示 {@code ForgeDirection.getOrientation(i)} 那一面有目标。
+     * 这个结果只用来给配置界面画那圈半透明的小方块 —— 让玩家一眼看出哪几面真的接了东西；
+     * 真正的搬运每次还是现场去问容器，不依赖这个位掩码。
+     *
+     * @param fluid true = 看流体（{@link IFluidHandler}），false = 看物品（{@link IInventory}）
+     */
+    static int targetMask(World world, int x, int y, int z, boolean fluid) {
+        if (world == null) return 0;
+
+        int mask = 0;
+        for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
+            TileEntity tile = world.getTileEntity(x + face.offsetX, y + face.offsetY, z + face.offsetZ);
+            if (tile == null) continue;
+            if (fluid ? tile instanceof IFluidHandler : tile instanceof IInventory) {
+                mask |= 1 << face.ordinal();
+            }
+        }
+        return mask;
+    }
+
     /** 把六个面各走一遍。调用方保证这是服务端、而且配置里至少有一个面需要动。 */
     static void tick(World world, int x, int y, int z, TerminalIoConfig config) {
         for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
@@ -126,7 +150,15 @@ final class TerminalIoEngine {
         return current.stackSize <= before.stackSize - moved;
     }
 
-    /** 把共享存储里符合条件的东西送进相邻容器。 */
+    /**
+     * 把共享存储里符合条件的东西送进相邻容器。
+     *
+     * <p>
+     * <b>同一个条目在一轮里可以搬好几叠。</b>档位说的是「这一轮总共搬多少个」，
+     * 而一次提取最多一叠（原版堆叠上限 64）—— 不循环的话，「1024 个/轮」这种档位
+     * 在只筛了一种物品时会被卡在 64 个，档位就成了摆设。
+     * 循环的终止条件是目标收不下了或者额度用完，两件事都是当场问出来的。
+     */
     private static void pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
@@ -146,31 +178,43 @@ final class TerminalIoEngine {
             if (!config.matches(prototype)) continue;
 
             int maxSize = Math.max(1, prototype.getMaxStackSize());
-            int want = (int) Math.min(Math.min((long) budget, (long) maxSize), available);
-            // 目标装不下就别去扣仓库：先算清楚有多少空位
-            want = Math.min(want, freeSpaceFor(inventory, side, prototype));
-            if (want <= 0) continue;
 
-            long taken = storage.extractItem(key, want);
-            if (taken <= 0L) continue;
+            while (budget > 0 && available > 0L) {
+                int want = (int) Math.min(Math.min((long) budget, (long) maxSize), available);
+                // 目标装不下就别去扣仓库：先算清楚有多少空位（额度内够用就停）
+                want = Math.min(want, freeSpaceFor(inventory, side, prototype, budget));
+                if (want <= 0) break;
 
-            int accepted = insertInto(inventory, side, key.prototype(taken));
-            if (accepted < taken) {
-                // 目标中途不收（比如别的机器同时塞满了）：剩下的原样放回仓库。
-                // 宁可退回去，也不能凭空多出来
-                storage.insertItem(key, taken - accepted);
+                long taken = storage.extractItem(key, want);
+                if (taken <= 0L) break;
+
+                int accepted = insertInto(inventory, side, key.prototype(taken));
+                if (accepted < taken) {
+                    // 目标中途不收（比如别的机器同时塞满了）：剩下的原样放回仓库。
+                    // 宁可退回去，也不能凭空多出来
+                    storage.insertItem(key, taken - accepted);
+                }
+                inventory.markDirty();
+                SharedStorageManager.broadcastItemChange(key);
+
+                budget -= accepted;
+                available -= taken;
+                if (accepted < taken) break;
             }
-            inventory.markDirty();
-
-            SharedStorageManager.broadcastItemChange(key);
-            budget -= accepted;
         }
     }
 
-    /** @return 这个容器还能再装下多少个 {@code prototype}（按堆叠合并规则算） */
-    private static int freeSpaceFor(IInventory inventory, ForgeDirection side, ItemStack prototype) {
+    /**
+     * @return 这个容器还能再装下多少个 {@code prototype}（按堆叠合并规则算）
+     *
+     *         <p>
+     *         {@code limit} 是「再算也没意义了」的上限：调用方这一轮最多只要这么多，
+     *         没有必要为了一个精确数字把几百格的机器库存全扫一遍。
+     */
+    private static int freeSpaceFor(IInventory inventory, ForgeDirection side, ItemStack prototype, int limit) {
         int space = 0;
         int maxSize = Math.max(1, prototype.getMaxStackSize());
+        int stopAt = Math.max(1, Math.min(limit, maxSize * 512));
 
         for (int slot = 0; slot < inventory.getSizeInventory(); slot++) {
             ItemStack existing = inventory.getStackInSlot(slot);
@@ -180,7 +224,7 @@ final class TerminalIoEngine {
             } else if (sameItem(existing, prototype)) {
                 space += Math.max(0, Math.min(maxSize, existing.getMaxStackSize()) - existing.stackSize);
             }
-            if (space >= maxSize * 4) break;
+            if (space >= stopAt) break;
         }
         return space;
     }
@@ -278,7 +322,16 @@ final class TerminalIoEngine {
         if (key != null) SharedStorageManager.broadcastFluidChange(key);
     }
 
-    /** 把共享存储里符合条件的流体送进相邻容器。 */
+    /**
+     * 把共享存储里符合条件的流体送进相邻容器。
+     *
+     * <p>
+     * 和物品那边同理，<b>同一个条目在一轮里可以灌好几次</b>：
+     * 档位说的是「这一轮总共搬多少」，而一次 {@code fill} 只灌得进目标当时收得下的量
+     * （机器内部的小缓冲罐往往一次只收一点点）。不循环的话，
+     * 「2000 万 mB/轮」在只筛了一种流体时会被卡在一次 fill 的量上。
+     * 每轮循环至少推进 1 mB，所以额度用完一定停得下来。
+     */
     private static void pushFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config) {
         int budget = Math.max(1, config.getFluidPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
@@ -295,23 +348,27 @@ final class TerminalIoEngine {
             if (prototype == null || prototype.getFluid() == null) continue;
             if (!config.matches(prototype)) continue;
 
-            int want = (int) Math.min((long) budget, available);
-            FluidStack offered = key.prototype(want);
-            // 先模拟：目标收多少我们就扣多少，不做「先扣再退」的无用功
-            int accepted = handler.fill(side, offered, false);
-            if (accepted <= 0) continue;
+            while (budget > 0 && available > 0L) {
+                int want = (int) Math.min((long) budget, available);
+                // 先模拟：目标收多少我们就扣多少，不做「先扣再退」的无用功
+                int accepted = handler.fill(side, key.prototype(want), false);
+                if (accepted <= 0) break;
 
-            long taken = storage.extractFluid(key, accepted);
-            if (taken <= 0L) continue;
+                long taken = storage.extractFluid(key, accepted);
+                if (taken <= 0L) break;
 
-            int filled = handler.fill(side, key.prototype(taken), true);
-            if (filled < taken) {
-                // 目标中途不收了：没灌进去的原样放回仓库
-                storage.insertFluid(key, taken - filled);
+                int filled = handler.fill(side, key.prototype(taken), true);
+                if (filled < taken) {
+                    // 目标中途不收了：没灌进去的原样放回仓库
+                    storage.insertFluid(key, taken - filled);
+                }
+                if (filled > 0) SharedStorageManager.broadcastFluidChange(key);
+
+                budget -= filled;
+                available -= taken;
+                if (filled <= 0 || filled < taken) break;
             }
 
-            SharedStorageManager.broadcastFluidChange(key);
-            budget -= filled;
             if (budget <= 0) return;
         }
     }

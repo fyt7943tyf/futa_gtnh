@@ -141,6 +141,16 @@ public class PacketStorageAction implements IMessage {
      */
     public static final byte AUTOCRAFT = 31;
 
+    /**
+     * 把合成栏里的原料<b>一次性</b>全部退回共享存储。
+     *
+     * <p>
+     * 和 {@link #DEPOSIT_CRAFT_SLOT} 是同一件事，只是那一个按「第几格」逐格发；
+     * 合成栏一共 9 格，一格一个包太吵，所以给按钮单独开一个「整份退还」的动作，
+     * 服务端自己扫一遍合成栏。
+     */
+    public static final byte DUMP_CRAFT_GRID = 34;
+
     public static final byte KIND_ITEM = 0;
     public static final byte KIND_FLUID = 1;
 
@@ -213,6 +223,9 @@ public class PacketStorageAction implements IMessage {
      * 
      * <pre>
      * root: {
+     *   "keep": 1 表示「别动合成栏里现有的摆法」（Shift 点终端产物格那条路：布局就是
+     *           从合成栏读出来的）；缺省 / 0 表示先倒空再按布局重填（NEI 配方那两条路），
+     *           倒空前服务端会先干跑一遍，有格子凑不出料就一格都不动
      *   "slots": [ { "idx": 0..8, "count": 每次合成需要几个,
      *                "cands": [ ItemKey 的 NBT, ... 按优先级排序的候选 ],
      *                "toolOres": [ "craftingToolSaw", ... 可选的工具矿辞 ] }, ... ]

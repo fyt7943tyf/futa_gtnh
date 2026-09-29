@@ -73,6 +73,25 @@ public final class StorageViewEntry {
         if (display == null || display.getItem() == null) {
             return null;
         }
+
+        // ★ 关掉 GT 自己画在图标上的那行数量（「1000L」）。
+        //
+        // GT 的 {@code gregtech.common.render.FluidDisplayStackRenderer} 会给流体显示物品
+        // 在图标上直接画一行数量：
+        // <pre>
+        // long amount = nbt.getLong("mFluidDisplayAmount");
+        // if (amount &gt; 0 &amp;&amp; !nbt.getBoolean("mHideStackSize")) draw(amount + "L");
+        // </pre>
+        // 于是格子里除了我们自己画的紧凑数量（{@code 1.00k}），图标上还压着一行「1000L」——
+        // 同一个数量看着像显示了两遍，而且它和悬停无关、一直在那儿。
+        //
+        // 这个开关<b>只影响那行图标文字</b>（{@code ItemFluidDisplay} 的 tooltip 不看它），
+        // 所以悬停时该有的「1000 L 水」照样有。
+        if (display.getTagCompound() != null) {
+            display.getTagCompound()
+                .setBoolean("mHideStackSize", true);
+        }
+
         String registry = String.valueOf(FluidRegistry.getFluidName(key.getFluid()));
         String name = safeFluidName(key);
         return new StorageViewEntry(null, key, amount, display, modIdOf(registry), name, registry);

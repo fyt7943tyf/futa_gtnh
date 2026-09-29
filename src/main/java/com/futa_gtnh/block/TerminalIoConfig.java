@@ -92,22 +92,16 @@ public final class TerminalIoConfig {
      */
     public enum Preset {
 
-        RAW_ORE("futa_gtnh.gui.terminal.io.preset.raw", "rawOre", "ore"),
-        CRUSHED("futa_gtnh.gui.terminal.io.preset.crushed", "crushed"),
-        PURIFIED("futa_gtnh.gui.terminal.io.preset.purified", "crushedPurified"),
-        IMPURE("futa_gtnh.gui.terminal.io.preset.impure", "dustImpure"),
-        CENTRIFUGED("futa_gtnh.gui.terminal.io.preset.centrifuged", "crushedCentrifuged");
+        RAW_ORE("rawOre", "ore"),
+        CRUSHED("crushed"),
+        PURIFIED("crushedPurified"),
+        IMPURE("dustImpure"),
+        CENTRIFUGED("crushedCentrifuged");
 
-        private final String langKey;
         private final String[] prefixes;
 
-        Preset(String langKey, String... prefixes) {
-            this.langKey = langKey;
+        Preset(String... prefixes) {
             this.prefixes = prefixes;
-        }
-
-        public String getLangKey() {
-            return langKey;
         }
 
         public String[] getPrefixes() {
@@ -126,10 +120,24 @@ public final class TerminalIoConfig {
      * 服务端会把三个数字各自吸附到最接近的档位上（见 {@link #readFromNbt}）。
      * 所以伪造一个「每 tick 搬一百万」的包没有用 —— 落在档位之间的值会被夹回来。
      * 界面上也沿着同一组档位加加减减，玩家看到的就是服务端认的那几个数。
+     *
+     * <p>
+     * <b>档位要够高，别让方块自己先成瓶颈。</b>中段是按 GTNH 管道的量级定的：
+     * 流体那几个数字（Enderium 1800、Naquadah 9000、Neutronium 16800、
+     * NetherStar 19200、MysteriousCrystal 24000，单位 L/s）是从 GT 的
+     * {@code LoaderMetaPipeEntities.registerFluidPipes} 里逐个读出来的，
+     * 16000 mB/轮在 20 tick 那一档正好等于中子素管道的 16000 L/s。
+     *
+     * <p>
+     * 顶部两档则是<b>刻意远远超过任何管道</b>的（物品 32768 个/轮、流体 2000 万 mB/轮）：
+     * 共享存储是个无限仓库，玩家要的往往是「一口气把这一箱抽空」，
+     * 实际能搬多少仍然由目标容器自己决定（一次 fill / 一格一格塞，
+     * 塞不下的部分原样留在仓库里），所以档位给得高只是少一道人为限制，
+     * 不会凭空造出东西、也不会把目标撑爆。
      */
     private static final int[] INTERVAL_STEPS = { 1, 2, 5, 10, 20, 40, 100 };
-    private static final int[] ITEM_STEPS = { 1, 4, 16, 64, 256 };
-    private static final int[] FLUID_STEPS = { 100, 500, 1000, 4000, 16000 };
+    private static final int[] ITEM_STEPS = { 1, 4, 16, 64, 256, 1024, 4096, 16384, 32768 };
+    private static final int[] FLUID_STEPS = { 100, 500, 1000, 4000, 16000, 64000, 256000, 1000000, 4000000, 20000000 };
 
     /** 每隔多少 tick 动一轮。 */
     private int intervalTicks = 5;

@@ -24,7 +24,6 @@ public class GuiSwiftStep extends GuiScreen {
 
     private static final int PAGE_MOVEMENT = 0;
     private static final int PAGE_GROWTH = 1;
-    private static final int PAGE_RECOVERY = 2;
 
     private static final int BTN_FLIGHT_DOWN = 0;
     private static final int BTN_FLIGHT_UP = 1;
@@ -60,6 +59,20 @@ public class GuiSwiftStep extends GuiScreen {
     private static final int BTN_ITEM_MAGNET_RADIUS_UP_10 = 26;
     private static final int BTN_ITEM_MAGNET_RADIUS_DOWN_100 = 27;
     private static final int BTN_ITEM_MAGNET_RADIUS_UP_100 = 28;
+
+    /**
+     * 生长强度和恢复速度的 ±100 档。
+     *
+     * <p>
+     * 两者的上限都是 1000（见 {@code ItemSwiftStep.MAX_GROWTH_AURA_SPEED} /
+     * {@code MAX_RECOVERY_SPEED}）：没有 ±100 的话，从 100 调到 1000 要点 900 下。
+     */
+    private static final int BTN_GROWTH_SPEED_DOWN_100 = 29;
+    private static final int BTN_GROWTH_SPEED_UP_100 = 30;
+    private static final int BTN_RECOVERY_SPEED_DOWN_10 = 31;
+    private static final int BTN_RECOVERY_SPEED_UP_10 = 32;
+    private static final int BTN_RECOVERY_SPEED_DOWN_100 = 33;
+    private static final int BTN_RECOVERY_SPEED_UP_100 = 34;
 
     private static final float STEP = 0.25F;
     private static final float[] PRESETS = { 1.0F, 2.0F, 3.0F, 5.0F, 10.0F, 16.0F };
@@ -157,10 +170,13 @@ public class GuiSwiftStep extends GuiScreen {
                 90,
                 18,
                 tr("futa_gtnh.swift_step.gui.growth_aura.radius_up")));
-        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_DOWN_10, left + 8, top + 152, 42, 18, "-10"));
-        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_DOWN, left + 54, top + 152, 42, 18, "-1"));
-        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_UP, left + 104, top + 152, 42, 18, "+1"));
-        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_UP_10, left + 150, top + 152, 42, 18, "+10"));
+        // 生长强度：±1 / ±10 / ±100 六档 —— 上限 1000，只有 ±10 的话从 100 调到 1000 要点 90 下
+        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_DOWN_100, left + 8, top + 152, 29, 18, "-100"));
+        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_DOWN_10, left + 39, top + 152, 29, 18, "-10"));
+        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_DOWN, left + 70, top + 152, 29, 18, "-1"));
+        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_UP, left + 104, top + 152, 29, 18, "+1"));
+        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_UP_10, left + 135, top + 152, 29, 18, "+10"));
+        buttonList.add(new GuiSmallButton(BTN_GROWTH_SPEED_UP_100, left + 166, top + 152, 29, 18, "+100"));
 
         buttonList
             .add(new GuiSmallButton(BTN_ITEM_MAGNET_TOGGLE, left + 8, top + 211, 184, 18, itemMagnetToggleText()));
@@ -177,22 +193,13 @@ public class GuiSwiftStep extends GuiScreen {
             new GuiSmallButton(BTN_HEALTH_RECOVERY_TOGGLE, left + 8, top + 94, 184, 18, healthRecoveryToggleText()));
         buttonList
             .add(new GuiSmallButton(BTN_FOOD_RECOVERY_TOGGLE, left + 8, top + 160, 184, 18, foodRecoveryToggleText()));
-        buttonList.add(
-            new GuiSmallButton(
-                BTN_RECOVERY_SPEED_DOWN,
-                left + 8,
-                top + 232,
-                90,
-                18,
-                tr("futa_gtnh.swift_step.gui.recovery.speed_down")));
-        buttonList.add(
-            new GuiSmallButton(
-                BTN_RECOVERY_SPEED_UP,
-                left + 102,
-                top + 232,
-                90,
-                18,
-                tr("futa_gtnh.swift_step.gui.recovery.speed_up")));
+        // 恢复速度同样是 ±1 / ±10 / ±100 六档（上限 1000 = 每 tick 恢复一次）
+        buttonList.add(new GuiSmallButton(BTN_RECOVERY_SPEED_DOWN_100, left + 8, top + 232, 29, 18, "-100"));
+        buttonList.add(new GuiSmallButton(BTN_RECOVERY_SPEED_DOWN_10, left + 39, top + 232, 29, 18, "-10"));
+        buttonList.add(new GuiSmallButton(BTN_RECOVERY_SPEED_DOWN, left + 70, top + 232, 29, 18, "-1"));
+        buttonList.add(new GuiSmallButton(BTN_RECOVERY_SPEED_UP, left + 104, top + 232, 29, 18, "+1"));
+        buttonList.add(new GuiSmallButton(BTN_RECOVERY_SPEED_UP_10, left + 135, top + 232, 29, 18, "+10"));
+        buttonList.add(new GuiSmallButton(BTN_RECOVERY_SPEED_UP_100, left + 166, top + 232, 29, 18, "+100"));
     }
 
     private void addPresetRow(int left, int y, int baseId) {
@@ -362,7 +369,10 @@ public class GuiSwiftStep extends GuiScreen {
 
     private void drawRecoveryPage(int top) {
         int interval = ItemSwiftStep.getRecoveryIntervalTicks(charm);
+        // 恢复速度上限 1000 时间隔是 1 tick（0.05 秒）：一位小数会显示成「0.1 秒」，
+        // 所以不到 1 秒就多给一位
         float seconds = interval / 20.0F;
+        String secondsText = fixed(seconds, seconds < 1.0F ? 2 : 1);
 
         drawCenteredFittedString(
             EnumChatFormatting.YELLOW + tr("futa_gtnh.swift_step.gui.recovery.health"),
@@ -370,7 +380,7 @@ public class GuiSwiftStep extends GuiScreen {
             top + 62,
             0xFFFFFF);
         drawCenteredFittedString(
-            EnumChatFormatting.GRAY + tr("futa_gtnh.swift_step.gui.recovery.health_status", fixed(seconds, 1)),
+            EnumChatFormatting.GRAY + tr("futa_gtnh.swift_step.gui.recovery.health_status", secondsText),
             width / 2,
             top + 77,
             0xFFFFFF);
@@ -380,7 +390,7 @@ public class GuiSwiftStep extends GuiScreen {
             top + 128,
             0xFFFFFF);
         drawCenteredFittedString(
-            EnumChatFormatting.GRAY + tr("futa_gtnh.swift_step.gui.recovery.food_status", fixed(seconds, 1)),
+            EnumChatFormatting.GRAY + tr("futa_gtnh.swift_step.gui.recovery.food_status", secondsText),
             width / 2,
             top + 143,
             0xFFFFFF);
@@ -488,15 +498,17 @@ public class GuiSwiftStep extends GuiScreen {
 
     private void updateGrowthAuraSpeedButtons() {
         int speed = ItemSwiftStep.getGrowthAuraSpeed(charm);
+        int min = ItemSwiftStep.MIN_GROWTH_AURA_SPEED;
+        int max = ItemSwiftStep.MAX_GROWTH_AURA_SPEED;
         for (Object object : buttonList) {
             if (!(object instanceof GuiButton)) continue;
             GuiButton button = (GuiButton) object;
-            if (button.id == BTN_GROWTH_SPEED_DOWN || button.id == BTN_GROWTH_SPEED_DOWN_10) {
-                button.enabled = speed > ItemSwiftStep.MIN_GROWTH_AURA_SPEED;
-            }
-            if (button.id == BTN_GROWTH_SPEED_UP || button.id == BTN_GROWTH_SPEED_UP_10) {
-                button.enabled = speed < ItemSwiftStep.MAX_GROWTH_AURA_SPEED;
-            }
+            if (button.id == BTN_GROWTH_SPEED_DOWN) button.enabled = speed > min;
+            if (button.id == BTN_GROWTH_SPEED_DOWN_10) button.enabled = speed - 10 >= min;
+            if (button.id == BTN_GROWTH_SPEED_DOWN_100) button.enabled = speed - 100 >= min;
+            if (button.id == BTN_GROWTH_SPEED_UP) button.enabled = speed < max;
+            if (button.id == BTN_GROWTH_SPEED_UP_10) button.enabled = speed + 10 <= max;
+            if (button.id == BTN_GROWTH_SPEED_UP_100) button.enabled = speed + 100 <= max;
         }
     }
 
@@ -511,11 +523,17 @@ public class GuiSwiftStep extends GuiScreen {
 
     private void updateRecoverySpeedButtons() {
         int speed = ItemSwiftStep.getRecoverySpeed(charm);
+        int min = ItemSwiftStep.MIN_RECOVERY_SPEED;
+        int max = ItemSwiftStep.MAX_RECOVERY_SPEED;
         for (Object object : buttonList) {
             if (!(object instanceof GuiButton)) continue;
             GuiButton button = (GuiButton) object;
-            if (button.id == BTN_RECOVERY_SPEED_DOWN) button.enabled = speed > ItemSwiftStep.MIN_RECOVERY_SPEED;
-            if (button.id == BTN_RECOVERY_SPEED_UP) button.enabled = speed < ItemSwiftStep.MAX_RECOVERY_SPEED;
+            if (button.id == BTN_RECOVERY_SPEED_DOWN) button.enabled = speed > min;
+            if (button.id == BTN_RECOVERY_SPEED_DOWN_10) button.enabled = speed - 10 >= min;
+            if (button.id == BTN_RECOVERY_SPEED_DOWN_100) button.enabled = speed - 100 >= min;
+            if (button.id == BTN_RECOVERY_SPEED_UP) button.enabled = speed < max;
+            if (button.id == BTN_RECOVERY_SPEED_UP_10) button.enabled = speed + 10 <= max;
+            if (button.id == BTN_RECOVERY_SPEED_UP_100) button.enabled = speed + 100 <= max;
         }
     }
 
@@ -579,6 +597,10 @@ public class GuiSwiftStep extends GuiScreen {
             applyGrowthAuraSpeed(ItemSwiftStep.getGrowthAuraSpeed(charm) - 10);
         else if (button.id == BTN_GROWTH_SPEED_UP_10)
             applyGrowthAuraSpeed(ItemSwiftStep.getGrowthAuraSpeed(charm) + 10);
+        else if (button.id == BTN_GROWTH_SPEED_DOWN_100)
+            applyGrowthAuraSpeed(ItemSwiftStep.getGrowthAuraSpeed(charm) - 100);
+        else if (button.id == BTN_GROWTH_SPEED_UP_100)
+            applyGrowthAuraSpeed(ItemSwiftStep.getGrowthAuraSpeed(charm) + 100);
         else if (button.id == BTN_ITEM_MAGNET_TOGGLE) {
             applyItemMagnetEnabled(!ItemSwiftStep.isItemMagnetEnabled(charm));
             updateItemMagnetButtons();
@@ -602,6 +624,13 @@ public class GuiSwiftStep extends GuiScreen {
             updateRecoveryToggleButtons();
         } else if (button.id == BTN_RECOVERY_SPEED_DOWN) applyRecoverySpeed(ItemSwiftStep.getRecoverySpeed(charm) - 1);
         else if (button.id == BTN_RECOVERY_SPEED_UP) applyRecoverySpeed(ItemSwiftStep.getRecoverySpeed(charm) + 1);
+        else if (button.id == BTN_RECOVERY_SPEED_DOWN_10)
+            applyRecoverySpeed(ItemSwiftStep.getRecoverySpeed(charm) - 10);
+        else if (button.id == BTN_RECOVERY_SPEED_UP_10) applyRecoverySpeed(ItemSwiftStep.getRecoverySpeed(charm) + 10);
+        else if (button.id == BTN_RECOVERY_SPEED_DOWN_100)
+            applyRecoverySpeed(ItemSwiftStep.getRecoverySpeed(charm) - 100);
+        else if (button.id == BTN_RECOVERY_SPEED_UP_100)
+            applyRecoverySpeed(ItemSwiftStep.getRecoverySpeed(charm) + 100);
         else if (button.id >= FLIGHT_PRESET_BASE && button.id < FLIGHT_PRESET_BASE + PRESETS.length)
             applyFlight(PRESETS[button.id - FLIGHT_PRESET_BASE]);
         else if (button.id >= WALK_PRESET_BASE && button.id < WALK_PRESET_BASE + PRESETS.length)

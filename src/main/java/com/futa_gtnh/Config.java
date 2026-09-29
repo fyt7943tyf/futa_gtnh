@@ -260,7 +260,7 @@ public class Config {
      * 这是<b>客户端表现</b>：服务器改这一项不影响玩家自己客户端的表现，
      * 各端读自己配置文件里的值。
      */
-    public static boolean hideNeiPanelInTerminalGui = true;
+    public static boolean showNeiPanelInTerminalGui = true;
 
     // ------------------------------------------------------------------
     // Roguelike 地牢地图（客户端）
@@ -473,11 +473,15 @@ public class Config {
             displayItemBecomesFluid,
             "把 GT 的流体显示物品存进共享存储时，自动把它转成流体。");
 
-        hideNeiPanelInTerminalGui = configuration.getBoolean(
-            "hideNeiPanelInTerminalGui",
+        // 键名换成了正向的 showNeiPanelInTerminalGui（旧键 hideNeiPanelInTerminalGui 不再读取）：
+        // Forge 的配置项一旦写进 cfg，改代码里的默认值是不生效的 —— 旧文件里存着 true，
+        // 玩家就会一直看不到面板。换个键名，新键直接吃新默认值。
+        showNeiPanelInTerminalGui = configuration.getBoolean(
+            "showNeiPanelInTerminalGui",
             Configuration.CATEGORY_GENERAL,
-            hideNeiPanelInTerminalGui,
-            "打开共享终端界面时暂时收起 NEI 的物品面板（终端界面较宽，面板会叠在合成栏上）。客户端行为，各端读各自的配置。");
+            showNeiPanelInTerminalGui,
+            "打开共享终端界面时显示 NEI 的物品面板（默认 true）。一边开着终端一边查配方是常态；" + "如果嫌面板压住右侧的装备/合成栏，把它改成 false 就会临时收起。"
+                + "客户端行为，各端读各自的配置。");
 
         enableRoguelikeMap = configuration.getBoolean(
             "enableRoguelikeMap",

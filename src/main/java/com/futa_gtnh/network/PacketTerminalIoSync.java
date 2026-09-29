@@ -32,6 +32,19 @@ public class PacketTerminalIoSync implements IMessage {
     private int y;
     private int z;
     private NBTTagCompound config;
+    /** 六个面里哪几面真的挨着能搬东西的方块：位 i = ForgeDirection.getOrientation(i)。 */
+    private int itemMask;
+    private int fluidMask;
+    /**
+     * 每面邻居方块是什么（注册名 + metadata），用来在界面里把那圈方块画成<b>它本来的样子</b> ——
+     * 边上放的是木箱子就该画成木箱子，而不是画成又一个共享终端。
+     *
+     * <p>
+     * 发的是注册名字符串而不是数字 ID：GTNH 这边方块 ID 空间是被 EndlessIDs 改过的，
+     * 名字才是两端一致的标识。空字符串表示这一面没有东西。
+     */
+    private final String[] neighbourNames = new String[6];
+    private final byte[] neighbourMetas = new byte[6];
 
     public PacketTerminalIoSync() {}
 
@@ -45,6 +58,22 @@ public class PacketTerminalIoSync implements IMessage {
         packet.z = terminal.zCoord;
         packet.config = terminal.getIo()
             .writeToNbt();
+        packet.itemMask = terminal.getTargetMask(false);
+        packet.fluidMask = terminal.getTargetMask(true);
+
+        // 邻居长什么样：注册名 + metadata（拿不到就留空，客户端会退化成纯色半透明方块）
+        net.minecraft.world.World world = terminal.getWorldObj();
+        for (net.minecraftforge.common.util.ForgeDirection face : net.minecraftforge.common.util.ForgeDirection.VALID_DIRECTIONS) {
+            int bx = terminal.xCoord + face.offsetX;
+            int by = terminal.yCoord + face.offsetY;
+            int bz = terminal.zCoord + face.offsetZ;
+            net.minecraft.block.Block block = world.getBlock(bx, by, bz);
+            if (block == null || block == net.minecraft.init.Blocks.air) continue;
+
+            String name = net.minecraft.block.Block.blockRegistry.getNameForObject(block);
+            packet.neighbourNames[face.ordinal()] = name == null ? "" : name;
+            packet.neighbourMetas[face.ordinal()] = (byte) world.getBlockMetadata(bx, by, bz);
+        }
         return packet;
     }
 
@@ -60,6 +89,12 @@ public class PacketTerminalIoSync implements IMessage {
         y = buf.readInt();
         z = buf.readInt();
         config = buf.readBoolean() ? ByteBufUtils.readTag(buf) : null;
+        itemMask = buf.readInt();
+        fluidMask = buf.readInt();
+        for (int i = 0; i < 6; i++) {
+            neighbourNames[i] = ByteBufUtils.readUTF8String(buf);
+            neighbourMetas[i] = buf.readByte();
+        }
     }
 
     @Override
@@ -72,6 +107,12 @@ public class PacketTerminalIoSync implements IMessage {
         if (config != null) {
             ByteBufUtils.writeTag(buf, config);
         }
+        buf.writeInt(itemMask);
+        buf.writeInt(fluidMask);
+        for (int i = 0; i < 6; i++) {
+            ByteBufUtils.writeUTF8String(buf, neighbourNames[i] == null ? "" : neighbourNames[i]);
+            buf.writeByte(neighbourMetas[i]);
+        }
     }
 
     public static class Handler implements IMessageHandler<PacketTerminalIoSync, IMessage> {
@@ -79,7 +120,16 @@ public class PacketTerminalIoSync implements IMessage {
         @Override
         public IMessage onMessage(PacketTerminalIoSync message, MessageContext ctx) {
             try {
-                ClientTerminalIo.setConfig(message.dimension, message.x, message.y, message.z, message.config);
+                ClientTerminalIo.setConfig(
+                    message.dimension,
+                    message.x,
+                    message.y,
+                    message.z,
+                    message.config,
+                    message.itemMask,
+                    message.fluidMask,
+                    message.neighbourNames,
+                    message.neighbourMetas);
             } catch (Throwable t) {
                 FutaGtnhMod.LOG.warn("共享存储：处理终端面配置同步失败", t);
             }

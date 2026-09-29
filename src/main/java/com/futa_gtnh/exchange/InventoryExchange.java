@@ -106,11 +106,17 @@ public final class InventoryExchange {
         if (stored <= 0L) return 0;
 
         stack.stackSize -= (int) stored;
-        if (stack.stackSize <= 0) {
-            inventory.setInventorySlotContents(index, null);
-        }
-        // 对 InventoryCrafting 来说 markDirty 是「重算产物」，部分取出后也必须调，
-        // 否则合成栏里少了东西、产物格却还显示原来的结果
+        // 写回必须走 setInventorySlotContents，<b>不能</b>只改 stackSize 再 markDirty：
+        // 原版 {@code InventoryCrafting.markDirty()} 是<b>空实现</b>
+        // （InventoryCrafting.java:147 就是 `public void markDirty() {}`），
+        // 只有 setInventorySlotContents 会触发 onCraftMatrixChanged 重算产物。
+        //
+        // 只改 stackSize 的后果是「幽灵产物」：合成栏里的东西一个个被拿走（Ctrl 点击
+        // 每次存 1 个走的就是这条部分取出路径）、格子空了，产物格却还挂着一开始的产物。
+        // 那个幽灵点下去，客户端会照着它乐观合成一份、服务端那边产物格早已是空的，
+        // 两边点击结果对不上 → 服务端整包回滚 → 玩家看到的就是
+        // 「Shift 点产物什么都没发生，材料也没了、东西也没多出来」。
+        inventory.setInventorySlotContents(index, stack.stackSize <= 0 ? null : stack);
         inventory.markDirty();
         recorder.item(key);
         return stored;
