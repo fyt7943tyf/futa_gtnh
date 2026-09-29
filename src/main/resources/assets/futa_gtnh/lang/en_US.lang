@@ -120,6 +120,11 @@ futa_gtnh.gui.terminal.io.selected=Selected
 futa_gtnh.gui.terminal.io.no_filter=(empty = move everything)
 futa_gtnh.gui.terminal.io.empty=Nothing matches
 futa_gtnh.gui.terminal.io.syncing=Syncing... (asking the server for this terminal's config)
+futa_gtnh.gui.terminal.io.rate=Pace (this terminal's own setting)
+futa_gtnh.gui.terminal.io.rate.interval=Interval
+futa_gtnh.gui.terminal.io.rate.items=Items
+futa_gtnh.gui.terminal.io.rate.fluid=Fluid
+futa_gtnh.gui.terminal.io.rate.round=/ round
 futa_gtnh.gui.terminal.io.preset.raw=Raw ore (rawOre / ore blocks)
 futa_gtnh.gui.terminal.io.preset.raw.short=Raw
 futa_gtnh.gui.terminal.io.preset.crushed=Crushed ore (crushed)

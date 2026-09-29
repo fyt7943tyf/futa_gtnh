@@ -118,6 +118,26 @@ public final class TerminalIoConfig {
     /** 面的数量，等于 {@code ForgeDirection} 的取值个数。 */
     public static final int FACES = 6;
 
+    /**
+     * 节奏用「档位」而不是任意整数。
+     *
+     * <p>
+     * 这些档位<b>同时就是服务端的上限</b>：客户端把配置发上来之后，
+     * 服务端会把三个数字各自吸附到最接近的档位上（见 {@link #readFromNbt}）。
+     * 所以伪造一个「每 tick 搬一百万」的包没有用 —— 落在档位之间的值会被夹回来。
+     * 界面上也沿着同一组档位加加减减，玩家看到的就是服务端认的那几个数。
+     */
+    private static final int[] INTERVAL_STEPS = { 1, 2, 5, 10, 20, 40, 100 };
+    private static final int[] ITEM_STEPS = { 1, 4, 16, 64, 256 };
+    private static final int[] FLUID_STEPS = { 100, 500, 1000, 4000, 16000 };
+
+    /** 每隔多少 tick 动一轮。 */
+    private int intervalTicks = 5;
+    /** 每个面每轮最多搬多少个物品。 */
+    private int itemsPerOperation = 16;
+    /** 每个面每轮最多搬多少毫巴流体。 */
+    private int fluidPerOperation = 1000;
+
     private final Mode[] itemModes = new Mode[FACES];
     private final Mode[] fluidModes = new Mode[FACES];
 
@@ -168,10 +188,106 @@ public final class TerminalIoConfig {
         return false;
     }
 
+    /** @return 节奏被改过没有（决定要不要往存档里写这一段） */
+    public boolean hasCustomRates() {
+        return intervalTicks != 5 || itemsPerOperation != 16 || fluidPerOperation != 1000;
+    }
+
     private static int index(ForgeDirection face) {
         if (face == null) return -1;
         int ordinal = face.ordinal();
         return ordinal >= 0 && ordinal < FACES ? ordinal : -1;
+    }
+
+    // ==================================================================
+    // 节奏（每台终端各自设置，界面上改）
+    // ==================================================================
+
+    public int getIntervalTicks() {
+        return intervalTicks;
+    }
+
+    public int getItemsPerOperation() {
+        return itemsPerOperation;
+    }
+
+    public int getFluidPerOperation() {
+        return fluidPerOperation;
+    }
+
+    /** 间隔的档位编号，界面画「第几档」用。 */
+    public int getIntervalStep() {
+        return stepIndex(INTERVAL_STEPS, intervalTicks);
+    }
+
+    public int getItemStep() {
+        return stepIndex(ITEM_STEPS, itemsPerOperation);
+    }
+
+    public int getFluidStep() {
+        return stepIndex(FLUID_STEPS, fluidPerOperation);
+    }
+
+    public int getIntervalStepCount() {
+        return INTERVAL_STEPS.length;
+    }
+
+    public int getItemStepCount() {
+        return ITEM_STEPS.length;
+    }
+
+    public int getFluidStepCount() {
+        return FLUID_STEPS.length;
+    }
+
+    /**
+     * 沿档位走一格。
+     *
+     * @param which 0 = 间隔，1 = 物品，2 = 流体
+     * @param delta +1 / -1
+     */
+    public void stepRate(int which, int delta) {
+        switch (which) {
+            case 0:
+                intervalTicks = step(INTERVAL_STEPS, intervalTicks, delta);
+                break;
+            case 1:
+                itemsPerOperation = step(ITEM_STEPS, itemsPerOperation, delta);
+                break;
+            default:
+                fluidPerOperation = step(FLUID_STEPS, fluidPerOperation, delta);
+                break;
+        }
+    }
+
+    /** 把三个数字都吸附到最近的档位上。用在读存档 / 读客户端发来的配置时。 */
+    private void snapRates() {
+        intervalTicks = snap(INTERVAL_STEPS, intervalTicks);
+        itemsPerOperation = snap(ITEM_STEPS, itemsPerOperation);
+        fluidPerOperation = snap(FLUID_STEPS, fluidPerOperation);
+    }
+
+    private static int step(int[] steps, int current, int delta) {
+        int index = stepIndex(steps, current);
+        int next = Math.max(0, Math.min(steps.length - 1, index + (delta < 0 ? -1 : 1)));
+        return steps[next];
+    }
+
+    private static int stepIndex(int[] steps, int value) {
+        int best = 0;
+        int bestDistance = Integer.MAX_VALUE;
+        for (int i = 0; i < steps.length; i++) {
+            int distance = Math.abs(steps[i] - value);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    private static int snap(int[] steps, int value) {
+        return steps[stepIndex(steps, value)];
     }
 
     // ==================================================================
@@ -370,6 +486,10 @@ public final class TerminalIoConfig {
         tag.setByteArray("itemModes", itemBytes);
         tag.setByteArray("fluidModes", fluidBytes);
 
+        tag.setInteger("intervalTicks", intervalTicks);
+        tag.setInteger("itemsPerOperation", itemsPerOperation);
+        tag.setInteger("fluidPerOperation", fluidPerOperation);
+
         NBTTagList itemList = new NBTTagList();
         for (ItemKey key : items) {
             itemList.appendTag(key.writeToNbt());
@@ -405,6 +525,13 @@ public final class TerminalIoConfig {
             itemModes[i] = Mode.OFF;
             fluidModes[i] = Mode.OFF;
         }
+
+        // 节奏：存档里读出来的、以及客户端发上来的一律先吸附到档位。
+        // 客户端发的那份不能信，这一步就是那道闸门（落在档位之间的值会被夹回来）
+        if (tag.hasKey("intervalTicks")) intervalTicks = tag.getInteger("intervalTicks");
+        if (tag.hasKey("itemsPerOperation")) itemsPerOperation = tag.getInteger("itemsPerOperation");
+        if (tag.hasKey("fluidPerOperation")) fluidPerOperation = tag.getInteger("fluidPerOperation");
+        snapRates();
 
         byte[] itemBytes = tag.getByteArray("itemModes");
         byte[] fluidBytes = tag.getByteArray("fluidModes");

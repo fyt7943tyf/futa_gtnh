@@ -12,7 +12,6 @@ import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.IFluidHandler;
 
-import com.futa_gtnh.Config;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -85,7 +84,7 @@ final class TerminalIoEngine {
 
     /** 从相邻容器里把符合条件的东西抽进共享存储。 */
     private static void pullItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
-        int budget = Math.max(1, Config.terminalItemsPerOperation);
+        int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
 
         for (int slot = 0; slot < inventory.getSizeInventory() && budget > 0; slot++) {
@@ -129,7 +128,7 @@ final class TerminalIoEngine {
 
     /** 把共享存储里符合条件的东西送进相邻容器。 */
     private static void pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
-        int budget = Math.max(1, Config.terminalItemsPerOperation);
+        int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
 
         List<Map.Entry<ItemKey, Long>> snapshot = storage.snapshotItems();
@@ -257,7 +256,7 @@ final class TerminalIoEngine {
 
     /** 从相邻容器里把符合条件的流体抽进共享存储。 */
     private static void pullFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config) {
-        int budget = Math.max(1, Config.terminalFluidPerOperation);
+        int budget = Math.max(1, config.getFluidPerOperation());
 
         FluidStack preview = handler.drain(side, budget, false);
         if (preview == null || preview.getFluid() == null || preview.amount <= 0) return;
@@ -281,7 +280,7 @@ final class TerminalIoEngine {
 
     /** 把共享存储里符合条件的流体送进相邻容器。 */
     private static void pushFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config) {
-        int budget = Math.max(1, Config.terminalFluidPerOperation);
+        int budget = Math.max(1, config.getFluidPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
 
         List<Map.Entry<FluidKey, Long>> snapshot = storage.snapshotFluids();

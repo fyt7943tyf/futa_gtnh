@@ -41,13 +41,15 @@ import com.futa_gtnh.shared.ItemKey;
 public class GuiTerminalIo extends GuiScreen {
 
     private static final int GUI_WIDTH = 300;
-    private static final int GUI_HEIGHT = 196;
+    private static final int GUI_HEIGHT = 216;
 
     private static final int BTN_FACE_BASE = 0; // 0..11：六个面 × 物品/流体
     private static final int BTN_KIND = 20;
     private static final int BTN_CLEAR = 21;
     private static final int BTN_PRESET_BASE = 30; // 30..34：五个预设
     private static final int BTN_DONE = 40;
+    /** 节奏：三行 × （减 / 加）。id 是 50 + 行 * 2 + (0 减 / 1 加)。 */
+    private static final int BTN_RATE_BASE = 50;
 
     /** 筛选网格的列数 / 行数。 */
     private static final int COLS = 8;
@@ -133,6 +135,13 @@ public class GuiTerminalIo extends GuiScreen {
 
         buttonList.add(new GuiButton(BTN_CLEAR, filterX, guiTop + 170, 46, 18, ""));
         buttonList.add(new GuiButton(BTN_DONE, guiLeft + GUI_WIDTH - 54, guiTop + 170, 46, 18, ""));
+
+        // ---- 节奏（每台终端各自设置，就在这个界面里改）----
+        int rateY = guiTop + 168;
+        for (int row = 0; row < 3; row++) {
+            buttonList.add(new GuiButton(BTN_RATE_BASE + row * 2, guiLeft + 118, rateY + row * 16, 14, 14, "-"));
+            buttonList.add(new GuiButton(BTN_RATE_BASE + row * 2 + 1, guiLeft + 134, rateY + row * 16, 14, 14, "+"));
+        }
 
         refreshFilter();
         refreshLabels();
@@ -321,6 +330,9 @@ public class GuiTerminalIo extends GuiScreen {
                 .drawString(faceName(face), guiLeft + 10, guiTop + 39 + row * 20, isActive(face) ? 0x55FF55 : 0xE0E0E0);
         }
 
+        // ---- 节奏（这一台自己的设置）----
+        drawRateRows();
+
         // ---- 筛选区 ----
         fontRendererObj.drawString(tr("futa_gtnh.gui.terminal.io.filter"), guiLeft + 190, guiTop + 8, 0xFFFFFF);
         drawFilterGrid(mouseX, mouseY);
@@ -341,12 +353,41 @@ public class GuiTerminalIo extends GuiScreen {
                 + selectedCount()
                 + (ClientTerminalIo.get()
                     .isFilterEmpty() ? tr("futa_gtnh.gui.terminal.io.no_filter") : ""),
-            guiLeft + 8,
-            guiTop + 176,
+            guiLeft + 190,
+            guiTop + 194,
             0xA0A0A0);
 
         super.drawScreen(mouseX, mouseY, partialTicks);
         drawTooltips(mouseX, mouseY);
+    }
+
+    /**
+     * 节奏三行：间隔 / 物品每轮 / 流体每轮。
+     *
+     * <p>
+     * 值是「档位」而不是任意数字（见 {@code TerminalIoConfig} 里的说明）：
+     * 加号减号各走一格，服务端认的就是这几个数，玩家不会调出一个自己都记不住的数。
+     */
+    private void drawRateRows() {
+        TerminalIoConfig config = ClientTerminalIo.get();
+
+        fontRendererObj
+            .drawStringWithShadow(tr("futa_gtnh.gui.terminal.io.rate"), guiLeft + 10, guiTop + 156, 0xFFFFFF);
+
+        String[][] rows = { { tr("futa_gtnh.gui.terminal.io.rate.interval"), config.getIntervalTicks() + " tick" },
+            { tr("futa_gtnh.gui.terminal.io.rate.items"),
+                config.getItemsPerOperation() + " / " + tr("futa_gtnh.gui.terminal.io.rate.round") },
+            { tr("futa_gtnh.gui.terminal.io.rate.fluid"),
+                config.getFluidPerOperation() + " mB / " + tr("futa_gtnh.gui.terminal.io.rate.round") } };
+
+        for (int row = 0; row < rows.length; row++) {
+            int y = guiTop + 171 + row * 16;
+            fontRendererObj.drawString(rows[row][0], guiLeft + 10, y + 3, 0xC0C0C0);
+
+            String value = rows[row][1];
+            int width = fontRendererObj.getStringWidth(value);
+            fontRendererObj.drawString(value, guiLeft + 112 - width, y + 3, 0xFFFF55);
+        }
     }
 
     private void drawTooltips(int mouseX, int mouseY) {
@@ -475,6 +516,14 @@ public class GuiTerminalIo extends GuiScreen {
         if (button.id >= BTN_PRESET_BASE && button.id < BTN_PRESET_BASE + TerminalIoConfig.Preset.values().length) {
             config.togglePreset(TerminalIoConfig.Preset.values()[button.id - BTN_PRESET_BASE]);
             refreshLabels();
+            pushConfig();
+            return;
+        }
+
+        if (button.id >= BTN_RATE_BASE && button.id < BTN_RATE_BASE + 6) {
+            int index = button.id - BTN_RATE_BASE;
+            // 0/1 = 间隔，2/3 = 物品，4/5 = 流体；偶数号是减，奇数号是加
+            config.stepRate(index / 2, index % 2 == 0 ? -1 : 1);
             pushConfig();
             return;
         }
