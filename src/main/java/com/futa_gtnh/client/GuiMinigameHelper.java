@@ -6,7 +6,6 @@ import java.util.Locale;
 
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
-import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.StatCollector;
 
@@ -14,6 +13,7 @@ import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 
 import com.futa_gtnh.Config;
+import com.futa_gtnh.client.widget.FutaSearchField;
 import com.futa_gtnh.lootassist.LootassistEntry;
 import com.futa_gtnh.lootassist.LootgamesCompat;
 import com.futa_gtnh.network.NetworkHandler;
@@ -53,6 +53,9 @@ public class GuiMinigameHelper extends GuiScreen {
 
     private static final int BTN_SEARCH = 0;
 
+    /** 行尾「传送」按钮的宽度。只有可传送（同维度 + 入口已推算）的行才显示。 */
+    private static final int TELEPORT_BUTTON_WIDTH = 34;
+
     private static final int COLOR_PANEL = 0xC0101010;
     private static final int COLOR_BORDER = 0xFF808080;
     private static final int COLOR_ROW_ALT = 0x20FFFFFF;
@@ -67,7 +70,7 @@ public class GuiMinigameHelper extends GuiScreen {
 
     private int guiLeft;
     private int guiTop;
-    private GuiTextField filterField;
+    private FutaSearchField filterField;
     private GuiButton searchButton;
     private int scrollRow;
     private boolean viewDirty = true;
@@ -93,15 +96,14 @@ public class GuiMinigameHelper extends GuiScreen {
 
         String previous = filterField == null ? "" : filterField.getText();
 
-        filterField = new GuiTextField(
+        filterField = new FutaSearchField(
             fontRendererObj,
             guiLeft + PAD + 3,
             guiTop + SEARCH_Y + 3,
             GUI_WIDTH - 2 * PAD - 6,
             12);
-        filterField.setMaxStringLength(64);
-        filterField.setEnableBackgroundDrawing(false);
-        filterField.setText(previous);
+        filterField.setText(previous, false);
+        filterField.setChangeListener(text -> viewDirty = true);
         filterField.setFocused(false);
         Keyboard.enableRepeatEvents(true);
 
@@ -312,13 +314,27 @@ public class GuiMinigameHelper extends GuiScreen {
             fontRendererObj
                 .drawStringWithShadow(line.toString(), listX + 14, rowY + 3, entry.completed ? COLOR_DONE : 0xFFFFFF);
 
-            // 同维度时右对齐显示距离
+            // 同维度时右对齐显示距离；可传送的行距离挪到「传送」按钮左边
             if (entry.dim == dim && mc != null && mc.thePlayer != null) {
                 int dist = Math.round((float) Math.sqrt(distanceSq(entry)));
                 String distText = dist + "m";
+                int distRight = teleportable(entry) ? teleportButtonX() - 4 : listX + listW - 4;
                 fontRendererObj.drawStringWithShadow(
                     EnumChatFormatting.GRAY + distText,
-                    listX + listW - 4 - fontRendererObj.getStringWidth(distText),
+                    distRight - fontRendererObj.getStringWidth(distText),
+                    rowY + 3,
+                    0xFFFFFF);
+            }
+
+            // 行尾「传送」按钮：同维度且入口已推算的行才有
+            if (teleportable(entry)) {
+                boolean buttonHovered = mouseX >= teleportButtonX() && mouseX < listX + listW
+                    && mouseY >= rowY
+                    && mouseY < rowY + ROW_HEIGHT;
+                String label = tr("futa_gtnh.gui.lootassist.teleport");
+                fontRendererObj.drawStringWithShadow(
+                    (buttonHovered ? EnumChatFormatting.GREEN : EnumChatFormatting.AQUA) + label,
+                    teleportButtonX(),
                     rowY + 3,
                     0xFFFFFF);
             }
@@ -404,6 +420,10 @@ public class GuiMinigameHelper extends GuiScreen {
         if (!entry.verified()) {
             lines.add(EnumChatFormatting.LIGHT_PURPLE + tr("futa_gtnh.gui.lootassist.pending_tip"));
         }
+        // 鼠标正压在「传送」按钮上时给一句按钮自己的说明
+        if (isOverTeleportButton(mouseX, mouseY)) {
+            lines.add(EnumChatFormatting.AQUA + tr("futa_gtnh.gui.lootassist.teleport_tip"));
+        }
         return lines;
     }
 
@@ -419,6 +439,16 @@ public class GuiMinigameHelper extends GuiScreen {
             && mouseY < filterField.yPosition + 12) {
             filterField.mouseClicked(mouseX, mouseY, mouseButton);
             return;
+        }
+
+        // 「传送」按钮优先于整行的标记切换：按钮在行尾，先拦下才算按钮的
+        if (mouseButton == 0 && isOverTeleportButton(mouseX, mouseY)) {
+            LootassistEntry target = entryAt(mouseX, mouseY);
+            if (target != null) {
+                if (filterField != null) filterField.setFocused(false);
+                NetworkHandler.INSTANCE.sendToServer(PacketLootassistAction.teleport(target.key()));
+                return;
+            }
         }
 
         LootassistEntry entry = entryAt(mouseX, mouseY);
@@ -454,7 +484,7 @@ public class GuiMinigameHelper extends GuiScreen {
     protected void keyTyped(char typedChar, int keyCode) {
         // 注意：1.7.10 的 GuiScreen#keyTyped 不声明 throws，覆写时不能加 throws IOException
         if (filterField != null && filterField.textboxKeyTyped(typedChar, keyCode)) {
-            viewDirty = true;
+            // 文本变化由 FutaSearchField 的变更回调置 viewDirty；光标移动不用刷新
             return;
         }
         if (keyCode == Keyboard.KEY_PRIOR) {
@@ -506,6 +536,32 @@ public class GuiMinigameHelper extends GuiScreen {
         int row = (mouseY - guiTop - LIST_Y) / ROW_HEIGHT;
         int index = scrollRow + row;
         return index >= 0 && index < visible.size() ? visible.get(index) : null;
+    }
+
+    // ==================================================================
+    // 行内「传送」按钮
+    // ==================================================================
+
+    /**
+     * 这一行现在能不能传送：<b>同维度</b> 且 <b>地表入口已推算出来</b>。
+     * 跨维度的走不了（服务端也会再拦一遍并说明原因）；候选未验证的没有入口可去。
+     */
+    private boolean teleportable(LootassistEntry entry) {
+        return entry.entranceY >= 0 && mc != null && mc.thePlayer != null && entry.dim == mc.thePlayer.dimension;
+    }
+
+    /** 「传送」按钮文字的左缘（行内右对齐）。 */
+    private int teleportButtonX() {
+        return guiLeft + GUI_WIDTH - PAD - TELEPORT_BUTTON_WIDTH;
+    }
+
+    /** @return 鼠标是否点在这一行的「传送」按钮上 */
+    private boolean isOverTeleportButton(int mouseX, int mouseY) {
+        LootassistEntry entry = entryAt(mouseX, mouseY);
+        if (entry == null || !teleportable(entry)) return false;
+        return mouseX >= teleportButtonX() && mouseX < guiLeft + GUI_WIDTH - PAD
+            && mouseY >= guiTop + LIST_Y
+            && mouseY < guiTop + LIST_Y + LIST_HEIGHT;
     }
 
     private void drawBorder(int x, int y, int width, int height) {

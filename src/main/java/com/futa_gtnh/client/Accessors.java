@@ -16,14 +16,19 @@ import net.minecraft.client.gui.inventory.GuiContainer;
  * <b>开发环境和正式 jar 的字段名不一样</b>：开发期是 MCP 名（{@code guiLeft}），
  * 打包时 reobf 成 SRG 名（{@code field_147003_i}）。所以两个都试，结果按
  * 「类 + 字段」缓存；都读不到时返回 0，调用方退回默认值。
+ *
+ * <p>
+ * public 是给 {@code client.nei} 包用的：NEI 的统一 handler 需要 guiLeft/guiTop
+ * 把 NEI 的屏幕坐标换算成 GUI 本地坐标，而那个类不是 GuiContainer 子类，
+ * 只能走反射。
  */
-final class Accessors {
+public final class Accessors {
 
     private static final java.util.Map<String, Field> CACHE = new java.util.HashMap<>();
 
     private Accessors() {}
 
-    static int intField(Object target, String mcpName, String srgName) {
+    public static int intField(Object target, String mcpName, String srgName) {
         if (target == null) return 0;
         String cacheKey = target.getClass()
             .getName() + '#'

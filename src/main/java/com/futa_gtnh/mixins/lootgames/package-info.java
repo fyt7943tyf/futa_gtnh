@@ -14,10 +14,15 @@
  * {@code triggerGameWin} 被调用时进度在中间档，只可能来自「重试次数耗尽、
  * 按已达到进度折算部分奖励」的失败路径 —— 把进度抬到满级再放行，就变成了满奖励；
  * {@code triggerGameLose}（第 1 关耗尽的爆炸/刷怪/岩浆路径）整个拦掉，同样转为满奖励。</li>
- * <li><b>潜行右击游戏主方块自动完成当前关</b>：{@link MixinGameMasterBlock} 拦截
- * GameMasterBlock 的右键，按游戏类型调到对应的「过关」私有方法上
+ * <li><b>潜行右击游戏主方块自动完成当前关</b>：{@link LootgameAutoComplete} 按游戏类型
+ * 调到对应的「过关」私有方法上
  * （{@link InvokerGameMineSweeper} / {@link InvokerGOLStage}）。只对进行中的游戏生效，
- * PuzzleMasterBlock（未开局）不经过这里。</li>
+ * PuzzleMasterBlock（未开局）不经过这里。
+ *
+ * <p>
+ * 这一条<b>不走 mixin</b>：原来是一个拦 GameMasterBlock 右键的 mixin，现在改成
+ * {@code lootassist.LootgameSneakComplete} 里的 Forge 事件处理器 —— 要在「没跳过」
+ * 的时候给玩家一句解释、还要顺带做发现性提示，用事件比注入方块类干净得多。</li>
  * </ol>
  *
  * <p>

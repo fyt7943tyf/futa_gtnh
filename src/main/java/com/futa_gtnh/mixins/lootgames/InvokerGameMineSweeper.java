@@ -7,7 +7,7 @@ import ru.timeconqueror.lootgames.minigame.minesweeper.GameMineSweeper;
 
 /**
  * 把扫雷私有的 {@code onLevelSuccessfullyFinished()} 暴露给
- * {@link MixinGameMasterBlock} 的潜行右键自动完成逻辑。
+ * {@link LootgameAutoComplete} 的潜行右键自动完成逻辑。
  *
  * <p>
  * 接口 mixin 的 {@code @Invoker} 会在目标类里生成接口实现，所以拿到

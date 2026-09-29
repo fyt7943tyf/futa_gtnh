@@ -63,5 +63,9 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketLootMachineResult.Handler.class, PacketLootMachineResult.class, 25, Side.CLIENT);
         // 共享终端方块的面配置快照（S2C；上行改动走 PacketStorageAction 的 SET_TERMINAL_IO）
         INSTANCE.registerMessage(PacketTerminalIoSync.Handler.class, PacketTerminalIoSync.class, 26, Side.CLIENT);
+        // 太阳能除钙剂：右键锅炉的请求（C2S）。1.7.10 的 onItemUseFirst 在客户端
+        // 返回 true 后原生 C08 点击包不再发送，服务端动作必须自己带包过去。
+        // 合并 PR #4 时这条原本也写的 26，和上面的 PacketTerminalIoSync 撞号了 —— 改成 27。
+        INSTANCE.registerMessage(PacketSolarDescalerUse.Handler.class, PacketSolarDescalerUse.class, 27, Side.SERVER);
     }
 }

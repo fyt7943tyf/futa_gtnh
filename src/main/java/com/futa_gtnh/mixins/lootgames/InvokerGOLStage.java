@@ -9,7 +9,7 @@ import ru.timeconqueror.lootgames.minigame.gol.GameOfLight;
 
 /**
  * 把光之游戏「等待玩家复述序列」阶段私有的 {@code onSuccessSequence(EntityPlayerMP)}
- * 暴露给 {@link MixinGameMasterBlock} 的潜行右键自动完成逻辑。
+ * 暴露给 {@link LootgameAutoComplete} 的潜行右键自动完成逻辑。
  *
  * <p>
  * 这个方法在目标类里做的是一整轮/一整关的推进：播过关音效、记

@@ -247,6 +247,74 @@ public final class LootassistManager {
         return true;
     }
 
+    /**
+     * 传送到指定地牢的<b>地表入口</b>。
+     *
+     * <p>
+     * 一层层的门槛都是为了让「传送失败」有明确的、能行动的理由：
+     * 条目存在 → 同一维度 → 入口已推算 → 入口区块已加载，然后才交给
+     * {@link com.futa_gtnh.locator.TeleportHelper} 找安全落点。
+     *
+     * <p>
+     * 两个刻意的限制：
+     * <ul>
+     * <li><b>只传同维度</b>：跨维传送要走 {@code travelToDimension} 那一套
+     * （床/重生点/背包转移），为了一个快捷按钮引入那堆边界问题不值得 ——
+     * 玩家换个维度再点就是了；</li>
+     * <li><b>绝不强制加载区块</b>：和搜索是同一条红线（未加载区块的同步生成
+     * 会冻结服务端主线程）。入口还没推算出来 / 区块没加载时，说明那个地牢
+     * 目前没人去过，走近点或等别人加载后再传。</li>
+     * </ul>
+     *
+     * @return 是否真的传送了（只用于日志）
+     */
+    public static boolean teleportTo(EntityPlayerMP player, String key) {
+        LootassistEntry entry = entries.get(key);
+        if (entry == null) {
+            player.addChatMessage(new ChatComponentTranslation("futa_gtnh.msg.lootassist.teleport_gone"));
+            return false;
+        }
+
+        if (entry.dim != player.dimension) {
+            player
+                .addChatMessage(new ChatComponentTranslation("futa_gtnh.msg.lootassist.teleport_wrong_dim", entry.dim));
+            return false;
+        }
+
+        if (entry.entranceY < 0) {
+            player.addChatMessage(new ChatComponentTranslation("futa_gtnh.msg.lootassist.teleport_no_entrance"));
+            return false;
+        }
+
+        // 入口那块区块必须已经在内存里 —— TeleportHelper 自己也会再查一遍（防御），
+        // 这里提前问一次是为了给出能行动的理由：「走近点」而不是含糊的「传送失败」
+        if (!LootgameFinder.isChunkLoaded(player.worldObj, entry.entranceX >> 4, entry.entranceZ >> 4)) {
+            player.addChatMessage(new ChatComponentTranslation("futa_gtnh.msg.lootassist.teleport_unloaded"));
+            return false;
+        }
+
+        com.futa_gtnh.locator.TeleportHelper.Result result = com.futa_gtnh.locator.TeleportHelper
+            .teleportNear(player, entry.entranceX, entry.entranceY, entry.entranceZ);
+
+        switch (result) {
+            case NATURAL:
+            case CARVED:
+                player.addChatMessage(
+                    new ChatComponentTranslation(
+                        "futa_gtnh.msg.lootassist.teleported",
+                        entry.entranceX,
+                        entry.entranceY,
+                        entry.entranceZ));
+                return true;
+            case FAILED_PROTECTED:
+                player.addChatMessage(new ChatComponentTranslation("futa_gtnh.msg.lootassist.teleport_protected"));
+                return false;
+            default:
+                player.addChatMessage(new ChatComponentTranslation("futa_gtnh.msg.lootassist.teleport_failed"));
+                return false;
+        }
+    }
+
     /** 备份恢复路径用的：把文件里的负缓存灌回内存（见 {@link LootassistFile}）。 */
     static void restoreAbsentChunks(Set<String> chunkKeys) {
         absentChunks.addAll(chunkKeys);
