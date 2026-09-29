@@ -148,16 +148,18 @@ public final class CraftFiller {
             unfillable = 0;
         } else {
             // 干跑：把「每一格会用哪种键」先定下来，同时确认材料凑得齐。
-            ItemKey[] plan = planFill(player, storage, targets);
+            ItemKey[] plan = planFill(player, storage, targets, gridContents(matrix));
             unfillable = countMissing(plan, targets);
             if (unfillable > 0) {
                 player.addChatMessage(new ChatComponentTranslation("futa_gtnh.msg.craft.fill_missing", unfillable));
+                reportMissingCells(player, storage, targets, plan);
                 FutaGtnhMod.LOG.info(
-                    "共享存储：配方{}放弃，合成栏保持原样 —— 布局 {} 格里 {} 格找不到材料（玩家 {}）",
+                    "共享存储：配方{}放弃，合成栏保持原样 —— 布局 {} 格里 {} 格找不到材料（玩家 {}）；缺：{}",
                     autocraft ? "自动合成" : "填栏",
                     countTargets(targets),
                     unfillable,
-                    player.getCommandSenderName());
+                    player.getCommandSenderName(),
+                    describeMissingCells(player, storage, targets, plan));
                 return;
             }
 
@@ -211,12 +213,17 @@ public final class CraftFiller {
         } else {
             // 「填完合成栏里有几格」是最有用的一条凭据：玩家说「点了按钮合成栏空了」时，
             // 只有它能区分「布局本身没料可填」和「填了但没填上」。
+            //
+            // 后面那串「每格填了什么」是给「填进去了、产物格却是空的」这种情况用的：
+            // 那时材料数量都对，问题出在<b>挑了哪一种</b>（工具格挑成锤子而不是扳手、
+            // 板子挑成另一个模组的同名板），不看每格的键根本查不出来。
             FutaGtnhMod.LOG.info(
-                "共享存储：按配方填栏（玩家 {}，布局 {} 格 → 合成栏现有 {} 格，{} 格缺料）",
+                "共享存储：按配方填栏（玩家 {}，布局 {} 格 → 合成栏现有 {} 格，{} 格缺料）；填的是：{}",
                 player.getCommandSenderName(),
                 countTargets(targets),
                 countFilled(matrix),
-                unfillable);
+                unfillable,
+                describeFilledCells(matrix, targets));
         }
 
         // 合成栏/背包/产物格是真实槽位，全靠这一句同步回客户端。
@@ -311,13 +318,20 @@ public final class CraftFiller {
      * 干跑一遍布局：给每一格挑出一个「现在真的拿得到」的键，什么都不改。
      *
      * <p>
-     * 故意<b>不看合成栏里现有的东西</b>：填栏会先把格子倒空再重填，干跑要模拟的正是
-     * 「全空」那个状态。否则格子里的旧东西会被当成「这一格有着落」，等真倒空了才发现
-     * 候选根本找不到 —— 干跑就白跑了。
+     * 要模拟的是「倒空之后」的状态：格子里的东西会被退回仓库、再按布局重填，所以
+     * 那批东西<b>仍然算可用</b>。这里踩过一个坑：原来只数仓库和背包，把合成栏里现有的
+     * 整叠材料漏掉了 —— 于是「上一轮填进去的 325 块板还在格子里」时，干跑却报
+     * 「Bronze Plate 可用 0」，玩家看到的是材料明明堆在眼前却说你没有。
+     *
+     * <p>
+     * 反过来说，<b>不能</b>拿格子里的东西当「这一格已经有着落」：那批东西倒空之后会
+     * 回到公共池里，由下面的候选挑选重新分配（而且可能被别的格子拿走）。所以这里
+     * 只把它们加进「可用总量」，不改变「每一格要重新挑键」这件事。
      *
      * @return 长度 {@link #CRAFT_SLOTS} 的数组；拿不到料的那一格是 null
      */
-    private static ItemKey[] planFill(EntityPlayerMP player, SharedStorage storage, Target[] targets) {
+    private static ItemKey[] planFill(EntityPlayerMP player, SharedStorage storage, Target[] targets,
+        Map<ItemKey, Long> gridCounts) {
         ItemKey[] plan = new ItemKey[CRAFT_SLOTS];
         Map<ItemKey, Long> reserved = new HashMap<>();
         Map<String, List<ItemKey>> indexedToolKeys = null;
@@ -325,14 +339,36 @@ public final class CraftFiller {
         for (Target target : targets) {
             if (target == null) continue;
 
-            ItemKey key = chooseExactCandidate(player, storage, target, reserved);
+            ItemKey key = chooseExactCandidate(player, storage, target, reserved, gridCounts);
             if (key == null && !target.toolOreNames.isEmpty()) {
                 if (indexedToolKeys == null) indexedToolKeys = indexAvailableToolKeys(player, storage);
-                key = chooseToolCandidate(player, storage, target, reserved, indexedToolKeys);
+                key = chooseToolCandidate(player, storage, target, reserved, indexedToolKeys, gridCounts);
             }
             plan[target.index] = key;
         }
         return plan;
+    }
+
+    /**
+     * 合成栏里现在装着什么 —— 干跑要把它算进「可用」，因为填栏会先把它退回仓库。
+     *
+     * <p>
+     * 只收 {@code stackSize > 0} 的；数量用饱和加法累加，别让不正常的格子把总数搞溢出。
+     */
+    private static Map<ItemKey, Long> gridContents(IInventory matrix) {
+        Map<ItemKey, Long> counts = new HashMap<>();
+        if (matrix == null) return counts;
+        for (int i = 0; i < matrix.getSizeInventory(); i++) {
+            ItemStack stack = matrix.getStackInSlot(i);
+            if (stack == null || stack.stackSize <= 0) continue;
+            ItemKey key = ItemKey.of(stack);
+            if (key == null) continue;
+            Long old = counts.get(key);
+            long merged = old == null ? stack.stackSize
+                : (old > Long.MAX_VALUE - stack.stackSize ? Long.MAX_VALUE : old + stack.stackSize);
+            counts.put(key, merged);
+        }
+        return counts;
     }
 
     private static int countMissing(ItemKey[] plan, Target[] targets) {
@@ -341,6 +377,165 @@ public final class CraftFiller {
             if (target != null && plan[target.index] == null) missing++;
         }
         return missing;
+    }
+
+    /** 聊天栏里最多列几格缺料，再多就只说一句「还有更多，见日志」。 */
+    private static final int MAX_MISSING_LINES = 4;
+
+    /**
+     * 缺料时说清楚「缺的是哪一格、哪个物品、手上有几个」。
+     *
+     * <p>
+     * 只报一个数字（「还缺 1 格材料」）等于没说 —— 玩家看到的是「材料明明有」，
+     * 而缺的那一格可能是<b>另一种</b>物品，也可能只是数量差一点：四角同一种材料时，
+     * 手上有 3 个、配方要 4 个，报的就是「还缺 1 格材料」。
+     * 这里把每格的物品名和实际可用数量都摆出来，让这句话自己回答「到底缺什么」。
+     */
+    private static void reportMissingCells(EntityPlayerMP player, SharedStorage storage, Target[] targets,
+        ItemKey[] plan) {
+        int shown = 0;
+        for (Target target : targets) {
+            if (target == null || plan[target.index] != null) continue;
+            if (shown++ >= MAX_MISSING_LINES) {
+                player.addChatMessage(new ChatComponentTranslation("futa_gtnh.msg.craft.fill_missing_more"));
+                break;
+            }
+            // 物品名交给客户端翻译（服务端没有玩家的语言文件），所以传的是栈本身
+            player.addChatMessage(
+                new ChatComponentTranslation(
+                    "futa_gtnh.msg.craft.fill_missing_detail",
+                    target.index / ContainerSharedTerminal.CRAFT_SIZE + 1,
+                    target.index % ContainerSharedTerminal.CRAFT_SIZE + 1,
+                    missingDisplay(target),
+                    missingAvailable(player, storage, target)));
+        }
+    }
+
+    /** 日志形态：{@code 第1行第1列 铜板 可用 3}。 */
+    private static String describeMissingCells(EntityPlayerMP player, SharedStorage storage, Target[] targets,
+        ItemKey[] plan) {
+        StringBuilder out = new StringBuilder();
+        for (Target target : targets) {
+            if (target == null || plan[target.index] != null) continue;
+            if (out.length() > 0) out.append("；");
+            out.append("第")
+                .append(target.index / ContainerSharedTerminal.CRAFT_SIZE + 1)
+                .append("行第")
+                .append(target.index % ContainerSharedTerminal.CRAFT_SIZE + 1)
+                .append("列 ")
+                .append(nameOf(missingDisplay(target)))
+                .append(" 可用 ")
+                .append(missingAvailable(player, storage, target));
+            List<String> nearMisses = describeNearMisses(player, storage, target);
+            if (!nearMisses.isEmpty()) {
+                out.append("（仓库里有像的：")
+                    .append(String.join("、", nearMisses))
+                    .append("）");
+            }
+        }
+        return out.length() == 0 ? "无" : out.toString();
+    }
+
+    /**
+     * 「明明有却报 0」时最有用的那条线索：仓库里有没有<b>同一个物品的另一把键</b> ——
+     * NBT 变体（受损的工具、带数据的物品），或者别的模组注册的<b>同名</b>物品
+     * （GT 的板和 IC2 的板都叫 Bronze Plate，却是两个物品）。
+     *
+     * <p>
+     * 有的话就说明是候选键对不上、而不是玩家真的没料；没有的话「可用 0」就是字面意思。
+     */
+    private static List<String> describeNearMisses(EntityPlayerMP player, SharedStorage storage, Target target) {
+        List<String> out = new ArrayList<>();
+        for (ItemKey candidate : target.candidates) {
+            if (availableAmount(player, storage, candidate) > 0L) continue;
+            String candidateName = nameOf(safePrototype(candidate));
+            for (Map.Entry<ItemKey, Long> entry : storage.snapshotItems()) {
+                if (entry.getValue() <= 0L || entry.getKey()
+                    .equals(candidate)) continue;
+                ItemKey stored = entry.getKey();
+                boolean sameItemKind = stored.getItem() == candidate.getItem()
+                    && stored.getMeta() == candidate.getMeta();
+                boolean sameName = candidateName.equals(nameOf(safePrototype(stored)));
+                if (!sameItemKind && !sameName) continue;
+
+                String detail = nameOf(safePrototype(stored)) + " x"
+                    + entry.getValue()
+                    + (sameItemKind ? "(NBT 不同)" : "(同名物品)");
+                if (!out.contains(detail)) out.add(detail);
+                if (out.size() >= 4) return out;
+            }
+        }
+        return out;
+    }
+
+    private static ItemStack safePrototype(ItemKey key) {
+        try {
+            return key.prototype();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 日志形态：每一格现在装的是什么 —— {@code 第1行第1列 青铜板 x64；第2行第2列 青铜扳手 x1}。
+     *
+     * <p>
+     * 「材料数量都对、产物格却是空的」时，这条是唯一能看出<b>挑了哪一种</b>的凭据：
+     * 扳手碎掉之后填料可能挑了把锤子，或者挑了另一个模组的同名板 —— 光看数量都是满的。
+     */
+    private static String describeFilledCells(IInventory matrix, Target[] targets) {
+        StringBuilder out = new StringBuilder();
+        for (Target target : targets) {
+            if (target == null) continue;
+            ItemStack stack = matrix.getStackInSlot(target.index);
+            if (stack == null) continue;
+            if (out.length() > 0) out.append("；");
+            out.append("第")
+                .append(target.index / ContainerSharedTerminal.CRAFT_SIZE + 1)
+                .append("行第")
+                .append(target.index % ContainerSharedTerminal.CRAFT_SIZE + 1)
+                .append("列 ")
+                .append(nameOf(stack))
+                .append(" x")
+                .append(stack.stackSize);
+        }
+        return out.length() == 0 ? "无" : out.toString();
+    }
+
+    /** 这一格首选物品的展示栈；工具格退回矿辞名 —— 拿不到名字也不会把流程打断。 */
+    private static Object missingDisplay(Target target) {
+        if (!target.candidates.isEmpty()) {
+            try {
+                ItemStack stack = target.candidates.get(0)
+                    .prototype();
+                if (stack != null) return stack;
+            } catch (Throwable ignored) {
+                // 名字拿不到就退回键名，见下
+            }
+            return String.valueOf(target.candidates.get(0));
+        }
+        return target.toolOreNames.isEmpty() ? "?" : target.toolOreNames.get(0);
+    }
+
+    /** 这一格所有候选里最富裕的那个能拿出多少 —— 回答「手上到底有几个」。 */
+    private static long missingAvailable(EntityPlayerMP player, SharedStorage storage, Target target) {
+        long best = 0L;
+        for (ItemKey candidate : target.candidates) {
+            long available = availableAmount(player, storage, candidate);
+            if (available > best) best = available;
+        }
+        return best;
+    }
+
+    private static String nameOf(Object display) {
+        if (display instanceof ItemStack) {
+            try {
+                return ((ItemStack) display).getDisplayName();
+            } catch (Throwable ignored) {
+                return String.valueOf(display);
+            }
+        }
+        return String.valueOf(display);
     }
 
     /** 试摆一遍：把干跑挑出来的键放进一个临时 3×3，看原版配方表认不认。 */
@@ -397,10 +592,10 @@ public final class CraftFiller {
             if (current != null) {
                 key = ItemKey.of(current);
             } else {
-                key = chooseExactCandidate(player, storage, target, reserved);
+                key = chooseExactCandidate(player, storage, target, reserved, null);
                 if (key == null && !target.toolOreNames.isEmpty()) {
                     if (indexedToolKeys == null) indexedToolKeys = indexAvailableToolKeys(player, storage);
-                    key = chooseToolCandidate(player, storage, target, reserved, indexedToolKeys);
+                    key = chooseToolCandidate(player, storage, target, reserved, indexedToolKeys, null);
                 }
             }
             if (key == null) {
@@ -472,11 +667,17 @@ public final class CraftFiller {
      */
     private static final long RESERVE_PER_CELL = 1L;
 
-    /** 按 NEI 优先级选当前可用候选；GT 工具还允许按 craftingTool 矿辞匹配实际变体。 */
+    /**
+     * 按 NEI 优先级选当前可用候选；GT 工具还允许按 craftingTool 矿辞匹配实际变体。
+     *
+     * @param alsoCount 额外算进「可用」的数量（干跑时是合成栏里现有的那批 ——
+     *                  它们会被退回仓库再重新分配，所以确实拿得到）；填料的实际
+     *                  分配阶段传 null，那时该由 {@code fillAll} 自己一套账算清楚
+     */
     private static ItemKey chooseExactCandidate(EntityPlayerMP player, SharedStorage storage, Target target,
-        Map<ItemKey, Long> reserved) {
+        Map<ItemKey, Long> reserved, Map<ItemKey, Long> alsoCount) {
         for (ItemKey candidate : target.candidates) {
-            long available = availableAmount(player, storage, candidate);
+            long available = availableAmount(player, storage, candidate, alsoCount);
             long alreadyReserved = reserved.containsKey(candidate) ? reserved.get(candidate) : 0L;
             if (available <= alreadyReserved) continue;
             reserve(reserved, candidate, RESERVE_PER_CELL);
@@ -486,14 +687,18 @@ public final class CraftFiller {
     }
 
     private static ItemKey chooseToolCandidate(EntityPlayerMP player, SharedStorage storage, Target target,
-        Map<ItemKey, Long> reserved, Map<String, List<ItemKey>> indexedToolKeys) {
+        Map<ItemKey, Long> reserved, Map<String, List<ItemKey>> indexedToolKeys, Map<ItemKey, Long> alsoCount) {
         // 工具的 NBT 往往含材质、耐久等实例数据；原料是 craftingToolSaw 这类
         // 矿辞时，配方语义只要求工具类型相同，不要求与 NEI 展示栈的 NBT 完全一致。
         for (String oreName : target.toolOreNames) {
             List<ItemKey> keys = indexedToolKeys.get(oreName);
             if (keys == null) continue;
             for (ItemKey availableKey : keys) {
-                long available = availableAmount(player, storage, availableKey);
+                // 碎掉的工具不再匹配配方（GT 的工具耗尽耐久后就是这种状态）：
+                // 把它填进合成栏等于摆了个空壳，产物格永远不会有东西 —— 宁可跳过，
+                // 让别的候选（背包里另一把好扳手）顶上。
+                if (isBrokenTool(availableKey)) continue;
+                long available = availableAmount(player, storage, availableKey, alsoCount);
                 long alreadyReserved = reserved.containsKey(availableKey) ? reserved.get(availableKey) : 0L;
                 if (available <= alreadyReserved) continue;
                 reserve(reserved, availableKey, RESERVE_PER_CELL);
@@ -503,9 +708,33 @@ public final class CraftFiller {
         return null;
     }
 
+    /** 耐久耗尽（damage >= maxDamage）的工具：GT 里它已经不能再当合成工具用了。 */
+    private static boolean isBrokenTool(ItemKey key) {
+        try {
+            ItemStack stack = key.prototype();
+            if (stack == null) return false;
+            int max = stack.getMaxDamage();
+            return max > 0 && stack.getItemDamage() >= max;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static void reserve(Map<ItemKey, Long> reserved, ItemKey key, long amount) {
         long old = reserved.containsKey(key) ? reserved.get(key) : 0L;
         reserved.put(key, old > Long.MAX_VALUE - amount ? Long.MAX_VALUE : old + amount);
+    }
+
+    private static long availableAmount(EntityPlayerMP player, SharedStorage storage, ItemKey key,
+        Map<ItemKey, Long> alsoCount) {
+        long total = availableAmount(player, storage, key);
+        if (alsoCount != null) {
+            Long extra = alsoCount.get(key);
+            if (extra != null) {
+                total = total > Long.MAX_VALUE - extra ? Long.MAX_VALUE : total + extra;
+            }
+        }
+        return total;
     }
 
     private static long availableAmount(EntityPlayerMP player, SharedStorage storage, ItemKey key) {

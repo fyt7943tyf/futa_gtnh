@@ -157,6 +157,8 @@ futa_gtnh.msg.craft.no_recipe=Shared storage: the crafting grid is empty - lay o
 futa_gtnh.msg.craft.missing=Shared storage: %s grid slot(s) still have no material anywhere
 futa_gtnh.msg.craft.full=Shared storage: the result could not be taken (inventory full, or this layout produces nothing)
 futa_gtnh.msg.craft.fill_missing=Shared storage: %s grid slot(s) have no material - the grid was left untouched
+futa_gtnh.msg.craft.fill_missing_detail=  row %s col %s: needs %s, have %s in inventory+storage
+futa_gtnh.msg.craft.fill_missing_more=  ...more cells are short; see the server log
 futa_gtnh.msg.craft.not_craftable=Shared storage: this is not a hand-crafting recipe - the grid was left untouched
 futa_gtnh.msg.craft.dumped=Shared storage: returned %s item(s) from the crafting grid
 
