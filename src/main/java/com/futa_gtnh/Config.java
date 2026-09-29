@@ -195,6 +195,26 @@ public class Config {
     public static int locatorAutoAdvanceMinDistance = 4;
 
     // ------------------------------------------------------------------
+    // 共享终端方块的主动搬运
+    // ------------------------------------------------------------------
+
+    /**
+     * 主动搬运每隔多少 tick 动一次。
+     *
+     * <p>
+     * 六个面共用一个节奏：每个面每轮最多搬
+     * {@link #terminalItemsPerOperation} 个物品和 {@link #terminalFluidPerOperation} 毫巴流体。
+     * 调小 = 更顺滑但更费 tick，调大 = 更省但看得出一顿一顿。
+     */
+    public static int terminalIoIntervalTicks = 5;
+
+    /** 每个面每轮最多搬多少个物品。 */
+    public static int terminalItemsPerOperation = 16;
+
+    /** 每个面每轮最多搬多少毫巴流体（1000 mB = 一桶）。 */
+    public static int terminalFluidPerOperation = 1000;
+
+    // ------------------------------------------------------------------
     // 小游戏助手（lootgames 联动）
     // ------------------------------------------------------------------
 
@@ -610,6 +630,30 @@ public class Config {
             0,
             256,
             "自动追下一处的最小距离（格）：新目标比这更近就只把追踪切过去、不传送。" + "挖矿时下一个常常就在隔壁一两格，为这个挪一下既没意义又晃眼。0 = 每次都传。");
+
+        terminalIoIntervalTicks = configuration.getInt(
+            "terminalIoIntervalTicks",
+            Configuration.CATEGORY_GENERAL,
+            terminalIoIntervalTicks,
+            1,
+            1200,
+            "共享终端方块主动搬运的间隔（tick）。六个面每轮各最多搬 terminalItemsPerOperation 个物品和 terminalFluidPerOperation 毫巴流体。");
+
+        terminalItemsPerOperation = configuration.getInt(
+            "terminalItemsPerOperation",
+            Configuration.CATEGORY_GENERAL,
+            terminalItemsPerOperation,
+            1,
+            4096,
+            "共享终端主动搬运时，每个面每轮最多搬多少个物品。");
+
+        terminalFluidPerOperation = configuration.getInt(
+            "terminalFluidPerOperation",
+            Configuration.CATEGORY_GENERAL,
+            terminalFluidPerOperation,
+            1,
+            1000000,
+            "共享终端主动搬运时，每个面每轮最多搬多少毫巴流体（1000 mB = 一桶）。");
 
         enableMinigameHelper = configuration.getBoolean(
             "enableMinigameHelper",

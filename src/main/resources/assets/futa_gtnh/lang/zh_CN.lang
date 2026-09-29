@@ -89,6 +89,43 @@ futa_gtnh.gui.store.all=全部
 futa_gtnh.gui.store.hotbar=快捷栏
 futa_gtnh.gui.store.main=主背包
 futa_gtnh.gui.store.drain=倒空容器
+futa_gtnh.gui.store.terminal_io=面配置 / 自动化
+
+# ------------------------------------------------- 终端方块的主动搬运（面配置）
+futa_gtnh.gui.terminal.io.title=终端自动化：往哪个面搬东西
+futa_gtnh.gui.terminal.io.face=面
+futa_gtnh.gui.terminal.io.items=物品
+futa_gtnh.gui.terminal.io.fluids=流体
+futa_gtnh.gui.terminal.io.dir.down=下
+futa_gtnh.gui.terminal.io.dir.up=上
+futa_gtnh.gui.terminal.io.dir.north=北
+futa_gtnh.gui.terminal.io.dir.south=南
+futa_gtnh.gui.terminal.io.dir.west=西
+futa_gtnh.gui.terminal.io.dir.east=东
+futa_gtnh.gui.terminal.io.mode.off=关
+futa_gtnh.gui.terminal.io.mode.pull=抽入
+futa_gtnh.gui.terminal.io.mode.push=输出
+futa_gtnh.gui.terminal.io.kind.item=筛选：物品
+futa_gtnh.gui.terminal.io.kind.fluid=筛选：流体
+futa_gtnh.gui.terminal.io.filter=筛选（空 = 全搬）
+futa_gtnh.gui.terminal.io.search=搜索（拼音 / @模组 / *矿辞）
+futa_gtnh.gui.terminal.io.prefix=矿辞前缀（回车生效）
+futa_gtnh.gui.terminal.io.clear=清空
+futa_gtnh.gui.terminal.io.done=完成
+futa_gtnh.gui.terminal.io.selected=已选
+futa_gtnh.gui.terminal.io.no_filter=（空 = 什么都搬）
+futa_gtnh.gui.terminal.io.empty=没有匹配的条目
+futa_gtnh.gui.terminal.io.syncing=同步中…（正在向服务端要这个终端的配置）
+futa_gtnh.gui.terminal.io.preset.raw=原矿（粗矿 / 矿石方块）
+futa_gtnh.gui.terminal.io.preset.raw.short=原矿
+futa_gtnh.gui.terminal.io.preset.crushed=粉碎的矿（crushed）
+futa_gtnh.gui.terminal.io.preset.crushed.short=粉碎
+futa_gtnh.gui.terminal.io.preset.purified=洗净的矿（crushedPurified）
+futa_gtnh.gui.terminal.io.preset.purified.short=洗净
+futa_gtnh.gui.terminal.io.preset.impure=含杂的矿（dustImpure）
+futa_gtnh.gui.terminal.io.preset.impure.short=含杂
+futa_gtnh.gui.terminal.io.preset.centrifuged=热力离心处理后的矿（crushedCentrifuged）
+futa_gtnh.gui.terminal.io.preset.centrifuged.short=离心
 futa_gtnh.msg.no_space=背包里没有空间放下它
 
 futa_gtnh.gui.status.remote=远程访问 —— 放置共享终端方块才能设置管道输出

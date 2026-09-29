@@ -52,6 +52,8 @@ public class GuiSharedTerminal extends GuiContainer {
     private static final int BTN_STORE_MAIN = 7;
     private static final int BTN_DRAIN = 8;
     private static final int BTN_AUTO_STORE = 9;
+    /** 打开「六个面怎么主动搬东西」的配置界面（只有从方块终端打开的界面才有）。 */
+    private static final int BTN_TERMINAL_IO = 10;
 
     private static final int TAB_ITEMS = 0;
     private static final int TAB_FLUIDS = 1;
@@ -178,6 +180,19 @@ public class GuiSharedTerminal extends GuiContainer {
         buttonList
             .add(new GuiSmallButton(BTN_STORE_MAIN, guiLeft + 89, buttonY, 34, 14, tr("futa_gtnh.gui.store.main")));
         buttonList.add(new GuiSmallButton(BTN_DRAIN, guiLeft + 126, buttonY, 43, 14, tr("futa_gtnh.gui.store.drain")));
+
+        // 「面配置」只在真的从方块终端打开时出现：远程打开（B 键）没有方块，也就没有面可配。
+        // 位置放在存入按钮那一行最右边 —— 那一行左边到 x=169 就结束了，右边正好空着
+        if (container.getTerminal() != null) {
+            buttonList.add(
+                new GuiSmallButton(
+                    BTN_TERMINAL_IO,
+                    guiLeft + 172,
+                    buttonY,
+                    53,
+                    14,
+                    tr("futa_gtnh.gui.store.terminal_io")));
+        }
 
         updateTabStates();
         viewDirty = true;
@@ -947,6 +962,9 @@ public class GuiSharedTerminal extends GuiContainer {
                 break;
             case BTN_STORE_MAIN:
                 container.sendDepositAll(InventoryExchange.SCOPE_MAIN);
+                break;
+            case BTN_TERMINAL_IO:
+                GuiTerminalIo.open(container);
                 break;
             case BTN_DRAIN:
                 container.sendDrainContainers();

@@ -414,6 +414,14 @@ public class CommonProxy {
                 terminal.xCoord,
                 terminal.yCoord,
                 terminal.zCoord);
+
+            // 顺带把「六个面怎么搬东西」的配置推一份给客户端：那份配置是每个方块各自的，
+            // 客户端自己没有权威值，不推的话配置界面打开时只能显示上一次缓存
+            if (player instanceof net.minecraft.entity.player.EntityPlayerMP) {
+                com.futa_gtnh.network.NetworkHandler.INSTANCE.sendTo(
+                    com.futa_gtnh.network.PacketTerminalIoSync.of(terminal),
+                    (net.minecraft.entity.player.EntityPlayerMP) player);
+            }
             return;
         }
 
