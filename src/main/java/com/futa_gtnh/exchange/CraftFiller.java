@@ -456,15 +456,30 @@ public final class CraftFiller {
         return unfillable;
     }
 
+    /**
+     * 干跑时每一格记多少账：<b>1 个</b>。
+     *
+     * <p>
+     * 原版 3×3 的每一格一次合成只消耗 1 个 —— 格里放一叠 64 只是「能做 64 次」，
+     * 不是「一次要吃 64 个」。所以「够不够做出来」这个问题每一格只该记 1 个的账。
+     *
+     * <p>
+     * 这里踩过坑：原来记的是布局里的 <b>perCraft（每格填多少，最多 64）</b>，
+     * 于是同一物品占两格的配方（两块木板、两个铁锭、两根木棍……）里，
+     * 第一格先把整叠记成「已占用」，第二格一看「剩的还没占用的多」就判成缺料，
+     * 报「还缺 1 格材料」—— 明明仓库里有一整叠。干跑是<b>拦错</b>用的，
+     * 宁可放过也别错杀：真缺料时后面的试验摆放与实际填料自己会露馅。
+     */
+    private static final long RESERVE_PER_CELL = 1L;
+
     /** 按 NEI 优先级选当前可用候选；GT 工具还允许按 craftingTool 矿辞匹配实际变体。 */
     private static ItemKey chooseExactCandidate(EntityPlayerMP player, SharedStorage storage, Target target,
         Map<ItemKey, Long> reserved) {
-        long reserveAmount = Math.max(1, target.perCraft);
         for (ItemKey candidate : target.candidates) {
             long available = availableAmount(player, storage, candidate);
             long alreadyReserved = reserved.containsKey(candidate) ? reserved.get(candidate) : 0L;
             if (available <= alreadyReserved) continue;
-            reserve(reserved, candidate, reserveAmount);
+            reserve(reserved, candidate, RESERVE_PER_CELL);
             return candidate;
         }
         return null;
@@ -472,7 +487,6 @@ public final class CraftFiller {
 
     private static ItemKey chooseToolCandidate(EntityPlayerMP player, SharedStorage storage, Target target,
         Map<ItemKey, Long> reserved, Map<String, List<ItemKey>> indexedToolKeys) {
-        long reserveAmount = Math.max(1, target.perCraft);
         // 工具的 NBT 往往含材质、耐久等实例数据；原料是 craftingToolSaw 这类
         // 矿辞时，配方语义只要求工具类型相同，不要求与 NEI 展示栈的 NBT 完全一致。
         for (String oreName : target.toolOreNames) {
@@ -482,7 +496,7 @@ public final class CraftFiller {
                 long available = availableAmount(player, storage, availableKey);
                 long alreadyReserved = reserved.containsKey(availableKey) ? reserved.get(availableKey) : 0L;
                 if (available <= alreadyReserved) continue;
-                reserve(reserved, availableKey, reserveAmount);
+                reserve(reserved, availableKey, RESERVE_PER_CELL);
                 return availableKey;
             }
         }
