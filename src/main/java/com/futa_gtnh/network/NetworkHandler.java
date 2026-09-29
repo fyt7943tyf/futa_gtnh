@@ -61,5 +61,7 @@ public final class NetworkHandler {
         // 自选抽奖机（EnhancedLootBags 联动）：按钮动作（C2S）/ 状态回执（S2C）
         INSTANCE.registerMessage(PacketLootMachineAction.Handler.class, PacketLootMachineAction.class, 24, Side.SERVER);
         INSTANCE.registerMessage(PacketLootMachineResult.Handler.class, PacketLootMachineResult.class, 25, Side.CLIENT);
+        // 共享终端方块的面配置快照（S2C；上行改动走 PacketStorageAction 的 SET_TERMINAL_IO）
+        INSTANCE.registerMessage(PacketTerminalIoSync.Handler.class, PacketTerminalIoSync.class, 26, Side.CLIENT);
     }
 }

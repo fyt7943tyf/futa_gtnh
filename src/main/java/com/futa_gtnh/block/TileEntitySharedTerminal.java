@@ -11,6 +11,8 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidTankInfo;
 import net.minecraftforge.fluids.IFluidHandler;
 
+import com.futa_gtnh.Config;
+import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -44,6 +46,51 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     private FluidKey outputFluid;
     /** 这个终端往外输出的物品。null 表示还没选。 */
     private ItemKey outputItem;
+
+    /**
+     * 六个面的主动搬运配置（抽 / 送 + 筛选）。
+     *
+     * <p>
+     * 和上面的「输出物品/流体」是<b>两件事</b>：那两个是「别人来抽的时候给什么」，
+     * 是被动的；这里的配置是「我们自己每几 tick 去动一次」，是主动的。
+     * 两者互不影响，可以只开一边。
+     */
+    private final TerminalIoConfig io = new TerminalIoConfig();
+    /** 主动搬运的节流计时，单位 tick。 */
+    private int ioTimer;
+
+    public TerminalIoConfig getIo() {
+        return io;
+    }
+
+    /** 配置改了之后调一次：存档要重新落盘。 */
+    public void onIoChanged() {
+        markDirty();
+    }
+
+    /**
+     * 主动搬运的心跳。
+     *
+     * <p>
+     * 没有配任何面时第一件事就返回（一次六个 boolean 的判断），
+     * 所以放着几百个没配置的终端也不会有什么开销。
+     */
+    @Override
+    public void updateEntity() {
+        if (worldObj == null || worldObj.isRemote) return;
+        if (!io.hasAnyMode()) return;
+
+        int interval = Math.max(1, Config.terminalIoIntervalTicks);
+        if (++ioTimer < interval) return;
+        ioTimer = 0;
+
+        try {
+            TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io);
+        } catch (Throwable t) {
+            // 相邻方块是别的模组写的，出什么怪事都不该把整个服务端 tick 带崩
+            FutaGtnhMod.LOG.warn("共享终端：主动搬运时出错（{} {} {}），这个面这一轮跳过", xCoord, yCoord, zCoord, t);
+        }
+    }
 
     public FluidKey getOutputFluid() {
         return outputFluid;
@@ -297,6 +344,9 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         if (outputItem != null) {
             tag.setTag("outputItem", outputItem.writeToNbt());
         }
+        if (io.hasAnyMode() || !io.isFilterEmpty()) {
+            tag.setTag("io", io.writeToNbt());
+        }
     }
 
     @Override
@@ -304,5 +354,6 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         super.readFromNBT(tag);
         outputFluid = tag.hasKey("outputFluid") ? FluidKey.readFromNbt(tag.getCompoundTag("outputFluid")) : null;
         outputItem = tag.hasKey("outputItem") ? ItemKey.readFromNbt(tag.getCompoundTag("outputItem")) : null;
+        io.readFromNbt(tag.hasKey("io") ? tag.getCompoundTag("io") : null);
     }
 }

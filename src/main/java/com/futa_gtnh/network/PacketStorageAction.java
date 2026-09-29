@@ -106,6 +106,17 @@ public class PacketStorageAction implements IMessage {
     public static final byte SET_TERMINAL_FLUID = 20;
     /** 设置方块终端往物品管道输出的物品。 */
     public static final byte SET_TERMINAL_ITEM = 21;
+    /**
+     * 设置方块终端「六个面怎么主动搬东西」的配置。
+     *
+     * <p>
+     * 配置整份放在 {@link #keyTag} 里（见 {@code block/TerminalIoConfig}）。
+     * 走这条通道而不是自己开一个包，是因为这里本来就有
+     * 「必须真的开着这个方块终端的界面」的校验和每 tick 的限流。
+     */
+    public static final byte SET_TERMINAL_IO = 32;
+    /** 请服务端把终端的面配置推一份过来（客户端配置界面打开时用）。 */
+    public static final byte REQUEST_TERMINAL_IO = 33;
 
     /** 从共享存储取出物品并丢到世界中（Q / Ctrl+Q）。 */
     public static final byte DROP_ITEM = 22;
@@ -212,6 +223,13 @@ public class PacketStorageAction implements IMessage {
         PacketStorageAction packet = new PacketStorageAction(action);
         packet.keyTag = layout;
         packet.amount = multiplier;
+        return packet;
+    }
+
+    /** 纯 NBT 载荷的动作（面配置就是这一类）。 */
+    public static PacketStorageAction nbt(byte action, NBTTagCompound tag) {
+        PacketStorageAction packet = new PacketStorageAction(action);
+        packet.keyTag = tag;
         return packet;
     }
 

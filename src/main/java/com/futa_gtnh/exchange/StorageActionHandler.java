@@ -16,6 +16,7 @@ import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageAction;
 import com.futa_gtnh.network.PacketStorageDelta;
 import com.futa_gtnh.network.PacketTerminalFluid;
+import com.futa_gtnh.network.PacketTerminalIoSync;
 import com.futa_gtnh.network.PacketTerminalItem;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
@@ -203,6 +204,17 @@ public final class StorageActionHandler {
                     handleSetTerminalItem(player, container, packet.getItemKey());
                     return;
                 }
+                case PacketStorageAction.SET_TERMINAL_IO: {
+                    // 六个面怎么主动搬东西：整份配置在 keyTag 里。
+                    // 客户端算出来的任何东西都不被信任 —— 配置只影响「搬什么、往哪搬」，
+                    // 真正搬的时候每一步仍然由服务端自己校验（见 TerminalIoEngine）
+                    handleSetTerminalIo(player, container, packet.getLayoutTag());
+                    return;
+                }
+                case PacketStorageAction.REQUEST_TERMINAL_IO: {
+                    PacketTerminalIoSync.send(player, container.getTerminal());
+                    return;
+                }
                 case PacketStorageAction.FILL_CRAFT_MATRIX:
                 case PacketStorageAction.AUTOCRAFT: {
                     // NEI 合成联动：布局在 keyTag 里，倍率在 amount 里。
@@ -280,6 +292,26 @@ public final class StorageActionHandler {
 
         terminal.setOutputItem(selected);
         NetworkHandler.INSTANCE.sendTo(new PacketTerminalItem(selected), player);
+    }
+
+    /**
+     * 换掉终端方块「六个面怎么主动搬东西」的整份配置。
+     *
+     * <p>
+     * 这里只做<b>形状</b>上的校验（是一份能读的 NBT），不做业务校验：
+     * 配置本身只是「搬什么、往哪搬」的意愿，真正搬的每一步都由
+     * {@code TerminalIoEngine} 在服务端现查现搬，客户端改不出物品来。
+     * 改完回推一份权威值，客户端那份立刻对齐。
+     */
+    private static void handleSetTerminalIo(EntityPlayerMP player, ContainerSharedTerminal container,
+        net.minecraft.nbt.NBTTagCompound tag) {
+        TileEntitySharedTerminal terminal = container.getTerminal();
+        if (terminal == null || tag == null) return;
+
+        terminal.getIo()
+            .readFromNbt(tag);
+        terminal.onIoChanged();
+        PacketTerminalIoSync.send(player, terminal);
     }
 
     /** {@code <= 0} 表示「尽可能多」，原样保留；正数则夹到上限。 */

@@ -93,6 +93,43 @@ futa_gtnh.gui.store.all=All
 futa_gtnh.gui.store.hotbar=Hotbar
 futa_gtnh.gui.store.main=Main
 futa_gtnh.gui.store.drain=Drain
+futa_gtnh.gui.store.terminal_io=Faces / auto-IO
+
+# ------------------------------------------------- Terminal block active IO (face config)
+futa_gtnh.gui.terminal.io.title=Terminal automation: what moves on which face
+futa_gtnh.gui.terminal.io.face=Face
+futa_gtnh.gui.terminal.io.items=Items
+futa_gtnh.gui.terminal.io.fluids=Fluids
+futa_gtnh.gui.terminal.io.dir.down=Down
+futa_gtnh.gui.terminal.io.dir.up=Up
+futa_gtnh.gui.terminal.io.dir.north=North
+futa_gtnh.gui.terminal.io.dir.south=South
+futa_gtnh.gui.terminal.io.dir.west=West
+futa_gtnh.gui.terminal.io.dir.east=East
+futa_gtnh.gui.terminal.io.mode.off=Off
+futa_gtnh.gui.terminal.io.mode.pull=In
+futa_gtnh.gui.terminal.io.mode.push=Out
+futa_gtnh.gui.terminal.io.kind.item=Filter: items
+futa_gtnh.gui.terminal.io.kind.fluid=Filter: fluids
+futa_gtnh.gui.terminal.io.filter=Filter (empty = move everything)
+futa_gtnh.gui.terminal.io.search=Search (pinyin / @mod / *oredict)
+futa_gtnh.gui.terminal.io.prefix=Ore dict prefix (press Enter)
+futa_gtnh.gui.terminal.io.clear=Clear
+futa_gtnh.gui.terminal.io.done=Done
+futa_gtnh.gui.terminal.io.selected=Selected
+futa_gtnh.gui.terminal.io.no_filter=(empty = move everything)
+futa_gtnh.gui.terminal.io.empty=Nothing matches
+futa_gtnh.gui.terminal.io.syncing=Syncing... (asking the server for this terminal's config)
+futa_gtnh.gui.terminal.io.preset.raw=Raw ore (rawOre / ore blocks)
+futa_gtnh.gui.terminal.io.preset.raw.short=Raw
+futa_gtnh.gui.terminal.io.preset.crushed=Crushed ore (crushed)
+futa_gtnh.gui.terminal.io.preset.crushed.short=Crushed
+futa_gtnh.gui.terminal.io.preset.purified=Purified ore (crushedPurified)
+futa_gtnh.gui.terminal.io.preset.purified.short=Purified
+futa_gtnh.gui.terminal.io.preset.impure=Impure ore (dustImpure)
+futa_gtnh.gui.terminal.io.preset.impure.short=Impure
+futa_gtnh.gui.terminal.io.preset.centrifuged=Centrifuged ore (crushedCentrifuged)
+futa_gtnh.gui.terminal.io.preset.centrifuged.short=Centri.
 futa_gtnh.msg.no_space=No room in your inventory for that
 
 futa_gtnh.gui.status.remote=Remote access - place a terminal to configure pipe output
