@@ -154,6 +154,8 @@ futa_gtnh.msg.craft.no_recipe=共享存储：合成栏里没有材料，先把�
 futa_gtnh.msg.craft.missing=共享存储：还缺 %s 格材料（背包和仓库里都没有）
 futa_gtnh.msg.craft.full=共享存储：没能收下产物（背包满了，或者这个摆法合不出东西）
 futa_gtnh.msg.craft.fill_missing=共享存储：还缺 %s 格材料，合成栏没动
+futa_gtnh.msg.craft.fill_missing_detail=　第 %s 行第 %s 列：需要 %s，背包+仓库共 %s 个
+futa_gtnh.msg.craft.fill_missing_more=　…还有更多格缺料，详见服务端日志
 futa_gtnh.msg.craft.not_craftable=共享存储：这条配方不是手工合成配方（NEI 的按钮只对手工合成有效），合成栏没动
 futa_gtnh.msg.craft.dumped=共享存储：合成栏里的 %s 个原料已返还仓库
 
