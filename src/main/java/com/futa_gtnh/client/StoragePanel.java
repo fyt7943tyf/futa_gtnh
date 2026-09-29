@@ -5,7 +5,6 @@ import java.util.Collections;
 import java.util.List;
 
 import net.minecraft.client.gui.GuiScreen;
-import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.item.ItemStack;
@@ -16,6 +15,7 @@ import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
 
 import com.futa_gtnh.FutaGtnhMod;
+import com.futa_gtnh.client.widget.FutaSearchField;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStationView;
 import com.futa_gtnh.shared.ItemKey;
@@ -65,7 +65,7 @@ public final class StoragePanel {
 
     private final List<StorageViewEntry> filtered = new ArrayList<>();
 
-    private GuiTextField search;
+    private FutaSearchField search;
     private boolean focused;
     private int page;
     private int revision = -1;
@@ -136,14 +136,14 @@ public final class StoragePanel {
         border(x - PAD, y - PAD, x + width + PAD, y + SEARCH_H + FOOTER_H + PAD, 0xFF555555);
 
         if (search == null) {
-            search = new GuiTextField(
+            search = new FutaSearchField(
                 net.minecraft.client.Minecraft.getMinecraft().fontRenderer,
                 x + 2,
                 y + 2,
                 width - 4,
                 SEARCH_H - 4);
-            search.setMaxStringLength(64);
-            search.setText(lastQuery.equals("\u0000") ? "" : lastQuery);
+            // 面板的过滤是每帧轮询 getText() 的，右键清空后不用显式通知也会生效
+            search.setText(lastQuery.equals("\u0000") ? "" : lastQuery, false);
         }
         search.xPosition = x + 2;
         search.yPosition = y + 2;

@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Locale;
 
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.item.ItemStack;
@@ -41,7 +40,23 @@ import com.futa_gtnh.network.PacketLootMachineAction;
  * 必须加 {@code guiLeft/guiTop} 偏移；而背景/前景两层绘制是 GUI 相对坐标。
  * 混用会得到「按钮贴在屏幕左上角、面板却居中」的错位界面。
  */
-public class GuiLootMachine extends GuiContainer {
+public class GuiLootMachine extends FutaGuiContainer {
+
+    /**
+     * 抽奖机界面<b>不</b>跟着共享终端那个开关收 NEI 面板。
+     *
+     * <p>
+     * 继承 {@link FutaGuiContainer} 是为了输入兜底（IME、右键清空等），
+     * 但 {@link NeiAwareGui#hideNeiItemPanel()} 的默认实现读的是
+     * {@code Config.terminalNeiPanel} —— 那是<b>终端</b>语义的设置
+     * （终端比原版容器宽、右侧还有装备/合成栏，才需要收面板）。
+     * 抽奖机是普通尺寸的容器界面，没有任何理由跟着一起收：
+     * 玩家把终端设成 HIDE，不该顺手把抽奖机的 NEI 面板也弄没。
+     */
+    @Override
+    public boolean hideNeiItemPanel() {
+        return false;
+    }
 
     private static final ResourceLocation TEXTURE = new ResourceLocation(
         FutaGtnhMod.MODID,

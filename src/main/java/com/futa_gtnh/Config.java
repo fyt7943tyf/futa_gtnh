@@ -253,14 +253,48 @@ public class Config {
     // ------------------------------------------------------------------
 
     /**
-     * 打开共享终端界面时是否暂时收起 NEI 的物品面板。
-     *
-     * <p>
-     * 终端界面比原版容器宽（232px），NEI 的物品面板会和右侧的合成栏叠在一起。
-     * 这是<b>客户端表现</b>：服务器改这一项不影响玩家自己客户端的表现，
-     * 各端读自己配置文件里的值。
+     * 共享终端界面里 NEI 物品面板的可见性。
      */
-    public static boolean showNeiPanelInTerminalGui = true;
+    public enum TerminalNeiPanel {
+        /** 显示（默认）。与界面重叠的 NEI 格子会被遮罩，不会误触界面自己的控件。 */
+        SHOW,
+        /**
+         * 收起。注意 NEI 在「搜索条跟随面板」布局下（{@code NEI} 选项里的
+         * 搜索条位置设置）会连搜索条一起收掉 —— 这是 NEI 自己的行为。
+         */
+        HIDE
+    }
+
+    /**
+     * 共享终端搜索框与 NEI 的联动方式（对齐 AE2 终端的搜索模式）。
+     */
+    public enum TerminalSearchMode {
+
+        /** 手动：点搜索框开始输入（默认）。 */
+        MANUAL,
+        /** 自动聚焦：打开界面时搜索框直接进输入状态。 */
+        AUTO,
+        /** NEI 同步：输入实时推送到 NEI 搜索条，NEI 物品面板随之过滤。 */
+        NEI_SYNC,
+        /** NEI 同步 + 自动聚焦。 */
+        NEI_SYNC_AUTO;
+
+        /** 是否向 NEI 推送搜索词。 */
+        public boolean neiSync() {
+            return this == NEI_SYNC || this == NEI_SYNC_AUTO;
+        }
+
+        /** 打开界面时是否自动聚焦搜索框。 */
+        public boolean autoFocus() {
+            return this == AUTO || this == NEI_SYNC_AUTO;
+        }
+    }
+
+    /** NEI 物品面板在共享终端界面里的可见性。客户端偏好。 */
+    public static TerminalNeiPanel terminalNeiPanel = TerminalNeiPanel.SHOW;
+
+    /** 搜索框与 NEI 的联动方式。客户端偏好。 */
+    public static TerminalSearchMode terminalSearchMode = TerminalSearchMode.MANUAL;
 
     // ------------------------------------------------------------------
     // Roguelike 地牢地图（客户端）
@@ -473,15 +507,64 @@ public class Config {
             displayItemBecomesFluid,
             "把 GT 的流体显示物品存进共享存储时，自动把它转成流体。");
 
-        // 键名换成了正向的 showNeiPanelInTerminalGui（旧键 hideNeiPanelInTerminalGui 不再读取）：
-        // Forge 的配置项一旦写进 cfg，改代码里的默认值是不生效的 —— 旧文件里存着 true，
-        // 玩家就会一直看不到面板。换个键名，新键直接吃新默认值。
-        showNeiPanelInTerminalGui = configuration.getBoolean(
-            "showNeiPanelInTerminalGui",
-            Configuration.CATEGORY_GENERAL,
-            showNeiPanelInTerminalGui,
-            "打开共享终端界面时显示 NEI 的物品面板（默认 true）。一边开着终端一边查配方是常态；" + "如果嫌面板压住右侧的装备/合成栏，把它改成 false 就会临时收起。"
-                + "客户端行为，各端读各自的配置。");
+        // NEI 面板可见性：新键 terminalNeiPanel；老键 hideNeiPanelInTerminalGui
+        // 只用于一次性的「升级迁移」（true → HIDE），读完就从配置文件里摘掉。
+        // 只在老键存在、且玩家还没写过新键时才尊重老键 —— 否则玩家改过的新值会被覆盖。
+        //
+        // 合并 PR #4 时补上的第三个老键：main 这支在 1.9 前后把老键改成正向的
+        // showNeiPanelInTerminalGui（false → 收起），有人配置文件里存的是它，
+        // 所以一并迁移，同样读完就摘掉。
+        {
+            boolean legacyKeyPresent = configuration.getCategory(Configuration.CATEGORY_GENERAL)
+                .containsKey("hideNeiPanelInTerminalGui");
+            boolean legacyHide = legacyKeyPresent && configuration.getCategory(Configuration.CATEGORY_GENERAL)
+                .get("hideNeiPanelInTerminalGui")
+                .getBoolean(true);
+            boolean legacyShowKeyPresent = configuration.getCategory(Configuration.CATEGORY_GENERAL)
+                .containsKey("showNeiPanelInTerminalGui");
+            boolean legacyShow = legacyShowKeyPresent && configuration.getCategory(Configuration.CATEGORY_GENERAL)
+                .get("showNeiPanelInTerminalGui")
+                .getBoolean(true);
+            boolean newKeyPresent = configuration.getCategory(Configuration.CATEGORY_GENERAL)
+                .containsKey("terminalNeiPanel");
+
+            terminalNeiPanel = parseEnum(
+                configuration.get(
+                    Configuration.CATEGORY_GENERAL,
+                    "terminalNeiPanel",
+                    terminalNeiPanel.name(),
+                    "共享终端界面里 NEI 物品面板的可见性：SHOW=显示（与界面重叠的格子会被遮罩，不会误触界面自己的控件）；HIDE=收起（注意「搜索条跟随面板」布局下搜索条会一起收掉）。客户端行为，各端读各自的配置。")
+                    .getString(),
+                TerminalNeiPanel.class,
+                terminalNeiPanel);
+            if (legacyHide && !newKeyPresent) {
+                terminalNeiPanel = TerminalNeiPanel.HIDE;
+            }
+            if (!legacyShow && !newKeyPresent) {
+                terminalNeiPanel = TerminalNeiPanel.HIDE;
+            }
+            if (legacyKeyPresent) {
+                configuration.getCategory(Configuration.CATEGORY_GENERAL)
+                    .remove("hideNeiPanelInTerminalGui");
+            }
+            if (legacyShowKeyPresent) {
+                configuration.getCategory(Configuration.CATEGORY_GENERAL)
+                    .remove("showNeiPanelInTerminalGui");
+            }
+        }
+
+        terminalSearchMode = parseEnum(
+            configuration
+                .get(
+                    Configuration.CATEGORY_GENERAL,
+                    "terminalSearchMode",
+                    terminalSearchMode.name(),
+                    "共享终端搜索框与 NEI 的联动方式（对齐 AE2 终端的搜索模式）：" + "MANUAL=手动聚焦；AUTO=打开界面自动聚焦；"
+                        + "NEI_SYNC=输入实时同步到 NEI 搜索条；NEI_SYNC_AUTO=同步+自动聚焦。"
+                        + "未装 NEI 时 NEI_SYNC* 按 AUTO 对待。客户端行为，界面里的循环按钮会改写这一项。")
+                .getString(),
+            TerminalSearchMode.class,
+            terminalSearchMode);
 
         enableRoguelikeMap = configuration.getBoolean(
             "enableRoguelikeMap",
@@ -824,5 +907,33 @@ public class Config {
         } catch (Throwable t) {
             FutaGtnhMod.LOG.warn("保存共享终端排序偏好失败（不影响本次使用）", t);
         }
+    }
+
+    /**
+     * 运行时回写共享终端的搜索联动模式（点界面里的循环按钮时调用）。
+     * 与 {@link #saveClientGuiSort} 同一套路：重读配置、只改一项、存盘。
+     */
+    public static void saveTerminalSearchMode(TerminalSearchMode mode) {
+        terminalSearchMode = mode;
+        if (configFileRef == null) return;
+        try {
+            Configuration configuration = new Configuration(configFileRef);
+            configuration.get(Configuration.CATEGORY_GENERAL, "terminalSearchMode", mode.name())
+                .set(mode.name());
+            configuration.save();
+        } catch (Throwable t) {
+            FutaGtnhMod.LOG.warn("保存共享终端搜索联动模式失败（不影响本次使用）", t);
+        }
+    }
+
+    /** 按枚举名解析配置字符串，认不出（改名/手改坏值）时退回默认。 */
+    private static <E extends Enum<E>> E parseEnum(String value, Class<E> type, E fallback) {
+        if (value != null) {
+            for (E constant : type.getEnumConstants()) {
+                if (constant.name()
+                    .equals(value)) return constant;
+            }
+        }
+        return fallback;
     }
 }

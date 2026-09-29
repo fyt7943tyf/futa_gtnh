@@ -2,14 +2,14 @@ package com.futa_gtnh.client.nei;
 
 import net.minecraft.client.gui.inventory.GuiContainer;
 
-import com.futa_gtnh.Config;
 import com.futa_gtnh.client.GuiSharedTerminal;
 import com.futa_gtnh.client.MouseTweaksCompat;
+import com.futa_gtnh.client.NeiSearchBridge;
 
-import codechicken.nei.VisiblityData;
+import codechicken.nei.LayoutManager;
+import codechicken.nei.SearchField;
 import codechicken.nei.api.API;
 import codechicken.nei.api.GuiInfo;
-import codechicken.nei.api.INEIGuiAdapter;
 
 /**
  * NEI 联动的注册入口。
@@ -20,13 +20,17 @@ import codechicken.nei.api.INEIGuiAdapter;
  * 守卫后才调用 {@link #register()}。NEI 是可选联动，缺席时这里的一切都不存在。
  *
  * <p>
- * 注册三样东西：
+ * 注册四样东西：
  * <ol>
  * <li>终端界面的配方转移 overlay（「材料直接从共享存储取」，见
  * {@link SharedTerminalOverlayHandler}）；</li>
  * <li>2×2 配方的「幽灵材料指引」叠层对齐到终端右侧的合成栏；</li>
- * <li>终端界面打开时收起 NEI 的物品面板 —— 终端界面比原版容器宽
- * （232px，右侧还有合成栏），NEI 的面板会和它叠在一起。</li>
+ * <li><b>统一界面适配器</b> {@link FutaNeiGuiHandler}：所有实现了
+ * {@code NeiAwareGui} 的界面在这里一处生效（NEI 面板可见性、遮罩区），
+ * 不再逐个界面写 handler —— 界面默认显示 NEI 面板，收起与否交给
+ * {@code Config#terminalNeiPanel}；</li>
+ * <li>搜索推送桥的实现：把共享背包搜索框的输入实时推给 NEI 搜索条
+ * （{@code Config#terminalSearchMode} 的 NEI_SYNC* 模式），见 {@link NeiSearchBridge}。</li>
  * </ol>
  */
 public final class NeiIntegration {
@@ -88,7 +92,31 @@ public final class NeiIntegration {
         // RecipeInfo.hasOverlayHandler(gui, "crafting") —— 正是上面注册的这个键，
         // 也就是说问题不在注册这一侧，再堆注册方式只是把代码搞乱。详见 README。
 
-        API.registerNEIGuiHandler(new TerminalGuiHandler());
+        // 统一界面适配器：一个 handler 管所有实现了 NeiAwareGui 的界面
+        // （可见性 + 面板格遮罩）。默认显示 NEI 面板，收不收由用户配置决定。
+        // 它取代了原来只管共享终端的 TerminalGuiHandler（PR #4）。
+        API.registerNEIGuiHandler(FutaNeiGuiHandler.INSTANCE);
+
+        // 共享背包搜索框 → NEI 搜索条的推送实现。本体代码只认桥（NeiSearchBridge），
+        // 不认 codechicken 类；这里装上实现之后，界面的 NEI_SYNC 模式才真正有东西可推。
+        NeiSearchBridge.install(new NeiSearchBridge.Impl() {
+
+            @Override
+            public boolean searchFieldExists() {
+                return LayoutManager.searchField != null;
+            }
+
+            @Override
+            public void pushSearchText(String text) {
+                SearchField field = LayoutManager.searchField;
+                // 相等判断防回环/防重复：setText 会触发 NEI 自己的过滤重启，
+                // 对同一个词没必要跑两遍
+                if (field != null && !field.text()
+                    .equals(text)) {
+                    field.setText(text);
+                }
+            }
+        });
 
         // 共享存储面板的点击 / 滚轮 / 键盘：1.7.10 只有 NEI 这条能「消费事件」的路，
         // 所以面板在没装 NEI 时不启用
@@ -174,24 +202,6 @@ public final class NeiIntegration {
                 stationOverlayFailed = true;
                 com.futa_gtnh.FutaGtnhMod.LOG.warn("共享存储：注册合成站的 NEI 配方转移失败，材料仍然只能在当前这一页里找", t);
             }
-        }
-    }
-
-    /**
-     * 终端界面打开时是否显示 NEI 物品面板（可配，见 {@code showNeiPanelInTerminalGui}，默认显示）。
-     *
-     * <p>
-     * 只动 {@code showItemPanel}：NEI 底部的搜索条和实用按钮留着 —— 玩家经常
-     * 要一边开着终端一边查配方，全部藏掉反而更难用。
-     */
-    private static final class TerminalGuiHandler extends INEIGuiAdapter {
-
-        @Override
-        public VisiblityData modifyVisiblity(GuiContainer gui, VisiblityData currentVisibility) {
-            if (!Config.showNeiPanelInTerminalGui && gui instanceof GuiSharedTerminal) {
-                currentVisibility.showItemPanel = false;
-            }
-            return currentVisibility;
         }
     }
 }
