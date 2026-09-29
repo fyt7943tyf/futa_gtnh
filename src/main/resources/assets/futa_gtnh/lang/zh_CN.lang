@@ -116,6 +116,11 @@ futa_gtnh.gui.terminal.io.selected=已选
 futa_gtnh.gui.terminal.io.no_filter=（空 = 什么都搬）
 futa_gtnh.gui.terminal.io.empty=没有匹配的条目
 futa_gtnh.gui.terminal.io.syncing=同步中…（正在向服务端要这个终端的配置）
+futa_gtnh.gui.terminal.io.rate=节奏（这一台自己的设置）
+futa_gtnh.gui.terminal.io.rate.interval=间隔
+futa_gtnh.gui.terminal.io.rate.items=物品
+futa_gtnh.gui.terminal.io.rate.fluid=流体
+futa_gtnh.gui.terminal.io.rate.round=轮
 futa_gtnh.gui.terminal.io.preset.raw=原矿（粗矿 / 矿石方块）
 futa_gtnh.gui.terminal.io.preset.raw.short=原矿
 futa_gtnh.gui.terminal.io.preset.crushed=粉碎的矿（crushed）

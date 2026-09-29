@@ -11,7 +11,6 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidTankInfo;
 import net.minecraftforge.fluids.IFluidHandler;
 
-import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
@@ -80,7 +79,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         if (worldObj == null || worldObj.isRemote) return;
         if (!io.hasAnyMode()) return;
 
-        int interval = Math.max(1, Config.terminalIoIntervalTicks);
+        int interval = Math.max(1, io.getIntervalTicks());
         if (++ioTimer < interval) return;
         ioTimer = 0;
 
@@ -344,7 +343,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         if (outputItem != null) {
             tag.setTag("outputItem", outputItem.writeToNbt());
         }
-        if (io.hasAnyMode() || !io.isFilterEmpty()) {
+        if (io.hasAnyMode() || !io.isFilterEmpty() || io.hasCustomRates()) {
             tag.setTag("io", io.writeToNbt());
         }
     }
