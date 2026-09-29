@@ -1228,21 +1228,29 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         container.clearPageDisplay();
     }
 
-    /** 遮罩区全是静态布局常量，缓存成一份：NEI 每帧会对每个面板格子查一遍。 */
-    private static final List<int[]> NEI_MASKED_AREAS = java.util.Arrays.asList(
-        new int[] { SEARCH_FIELD_X - 1, ContainerSharedTerminal.SEARCH_Y - 1,
-            SEARCH_MODE_X + SEARCH_MODE_WIDTH - SEARCH_FIELD_X + 1, 14 },
-        new int[] { ContainerSharedTerminal.SIDEBAR_X - 1, ContainerSharedTerminal.TAB_Y,
-            ContainerSharedTerminal.GUI_WIDTH - ContainerSharedTerminal.SIDEBAR_X + 1,
-            ContainerSharedTerminal.RESULT_Y + 18 + 4 - ContainerSharedTerminal.TAB_Y });
-
     /**
-     * 要遮住 NEI 物品面板的区域：搜索行（输入框 + 联动按钮）和右侧的
-     * 装备/合成侧栏。GuiButton 不用登记 —— NEI 会自动按 buttonList 遮。
+     * 共享终端<b>不</b>登记 NEI 面板遮罩区。
+     *
+     * <p>
+     * PR #4 原本登记了两块（搜索行、右侧装备/合成侧栏），想让压在界面上的 NEI 格子
+     * 不再响应点击。实际后果是反的：NEI 拿到 true 会把那个格子记进
+     * {@code ItemsGrid.invalidSlotMap}，而绘制循环开头就把它 {@code continue} 掉 ——
+     * 遮罩等于「把这些格子从面板里删掉」。面板挂在右边时，侧栏那条遮罩把面板压住的
+     * 整片格子摘掉，玩家看到的就是「右侧不显示 NEI 物品栏了」。
+     *
+     * <p>
+     * 而这里没有折中：终端侧栏的格子和面板格子本来就是叠在同一片区域上
+     * （要么面板可见、要么格子可点），面板可见显然更重要。
+     * 界面自己的按钮不用管 —— NEI 会自动按 {@code buttonList} 遮。
+     *
+     * <p>
+     * 详见 {@link NeiAwareGui#neiMaskedAreas()} 的说明；实机依据是
+     * {@code codechicken.nei.ItemsGrid} 里那段
+     * {@code hideItemPanelSlot(...) → invalidSlotMap[i] = true}。
      */
     @Override
     public List<int[]> neiMaskedAreas() {
-        return NEI_MASKED_AREAS;
+        return null;
     }
 
     // ==================================================================

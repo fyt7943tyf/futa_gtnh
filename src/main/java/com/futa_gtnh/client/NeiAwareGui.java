@@ -34,10 +34,20 @@ public interface NeiAwareGui {
      * 要遮住 NEI 物品面板格子的区域，<b>GUI 本地坐标</b> {@code {x, y, w, h}}。
      *
      * <p>
-     * NEI 面板与界面自己的控件重叠时，压住的格子不再响应点击 —— 点击会落到
-     * 界面自己的控件上，不会误触 NEI。返回 null/空 = 没有要遮的区域。
-     * {@code GuiButton} 不用登记：NEI 会自动按 buttonList 遮，这里只登记
-     * 按钮之外的自有控件（搜索框、侧栏这类）。
+     * ⚠️ <b>想清楚再用。</b>NEI 对这个返回值的处理不是「点击穿透」，而是把这些格子
+     * <b>从面板里摘掉</b>：{@code codechicken.nei.ItemsGrid} 里拿到 true 会把该格
+     * 记进 {@code invalidSlotMap}，而那张表在绘制循环开头就被 {@code continue} 掉 ——
+     * 于是面板在这个位置会真的<b>空掉/看不见</b>。
+     *
+     * <p>
+     * 共享终端踩过这个坑：面板挂在右边时，侧栏那条遮罩把面板上对应的格子整片摘掉，
+     * 表现就是「右侧不显示 NEI 物品栏了」。而按界面的实际排布，遮罩压住的多半正是
+     * 面板本身（终端侧栏和装备/合成格都是要点的槽位，没法只遮一半），
+     * 所以共享终端<b>最终没有用这个机制</b> —— 面板能看见比「格子点不点到」重要得多。
+     * {@code GuiButton} 不用登记：NEI 会自动按 buttonList 遮。
+     *
+     * <p>
+     * 返回 null/空 = 没有要遮的区域。
      */
     default List<int[]> neiMaskedAreas() {
         return null;
