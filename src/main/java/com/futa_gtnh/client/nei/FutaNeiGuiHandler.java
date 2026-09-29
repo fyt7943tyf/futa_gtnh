@@ -35,7 +35,8 @@ public final class FutaNeiGuiHandler extends INEIGuiAdapter {
         // 只在界面明确要求时才收面板；默认（SHOW）什么都不做，
         // NEI 的物品面板和搜索条照常显示 —— 搜索条在「跟随面板」布局下
         // 会随面板一起被 NEI 收掉，这正是以前「搜索栏不见了」的根源。
-        if (currentVisibility.showItemPanel && gui instanceof NeiAwareGui && ((NeiAwareGui) gui).hideNeiItemPanel()) {
+        boolean hide = gui instanceof NeiAwareGui && ((NeiAwareGui) gui).hideNeiItemPanel();
+        if (currentVisibility.showItemPanel && hide) {
             currentVisibility.showItemPanel = false;
         }
         return currentVisibility;
