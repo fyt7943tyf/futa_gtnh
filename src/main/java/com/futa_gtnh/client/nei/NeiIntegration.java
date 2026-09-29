@@ -56,6 +56,38 @@ public final class NeiIntegration {
             SharedTerminalOverlayHandler.OVERLAY_OFFSET_Y);
         API.registerGuiOverlayHandler(GuiSharedTerminal.class, handler, "crafting2x2");
 
+        // 关键补登记：真正被打开的是 MouseTweaks 那个<b>子类</b>
+        // （{@code MouseTweaksCompat.Gui extends GuiSharedTerminal}），而 NEI 判定
+        // 「这个界面认不认这个 overlay」是按 {@code gui.getClass()} 查的
+        // （{@code RecipeInfo.hasOverlayHandler(gui, "crafting")}）—— 只登记父类等于没登记，
+        // 「+」按钮于是显示 Mismatch Crafting Grid。匠魂合成站没这问题，因为它的界面就是它登记的那个类。
+        //
+        // 这坑我们自己的注释早就警告过（MouseTweaksCompat 里写着「那边要把这个子类也登记一遍」），
+        // 只是当初那句话落实在了 GuiInfo.customSlotGuis 上，overlay 和 handler 这两处漏了。
+        Class<? extends GuiContainer> actualGui = MouseTweaksCompat.guiClass();
+        if (actualGui != GuiSharedTerminal.class) {
+            API.registerGuiOverlay(
+                actualGui,
+                "crafting",
+                SharedTerminalOverlayHandler.OVERLAY_OFFSET_X,
+                SharedTerminalOverlayHandler.OVERLAY_OFFSET_Y);
+            API.registerGuiOverlayHandler(actualGui, handler, "crafting");
+            API.registerGuiOverlay(
+                actualGui,
+                "crafting2x2",
+                SharedTerminalOverlayHandler.OVERLAY_OFFSET_X,
+                SharedTerminalOverlayHandler.OVERLAY_OFFSET_Y);
+            API.registerGuiOverlayHandler(actualGui, handler, "crafting2x2");
+            com.futa_gtnh.FutaGtnhMod.LOG.info("共享存储：NEI 合成栏处理器已登记到实际界面类 {}", actualGui.getSimpleName());
+        }
+
+        // 这里<b>不再</b>注册 ""/null 之类的兜底标识了。
+        // 试过（空标识、null、LoadComplete 之后再注册一遍、IConfigureNEI 插件类），「+」按钮
+        // 始终显示 Mismatch Crafting Grid；埋点证明 NEI 根本没把问题问到我们这个处理器上。
+        // 反汇编的结果是：有序/无序合成处理器判断「这个界面有没有 overlay」用的是
+        // RecipeInfo.hasOverlayHandler(gui, "crafting") —— 正是上面注册的这个键，
+        // 也就是说问题不在注册这一侧，再堆注册方式只是把代码搞乱。详见 README。
+
         API.registerNEIGuiHandler(new TerminalGuiHandler());
 
         // 共享存储面板的点击 / 滚轮 / 键盘：1.7.10 只有 NEI 这条能「消费事件」的路，
@@ -146,7 +178,7 @@ public final class NeiIntegration {
     }
 
     /**
-     * 终端界面打开时收起 NEI 物品面板（可配，见 {@code hideNeiPanelInTerminalGui}）。
+     * 终端界面打开时是否显示 NEI 物品面板（可配，见 {@code showNeiPanelInTerminalGui}，默认显示）。
      *
      * <p>
      * 只动 {@code showItemPanel}：NEI 底部的搜索条和实用按钮留着 —— 玩家经常
@@ -156,7 +188,7 @@ public final class NeiIntegration {
 
         @Override
         public VisiblityData modifyVisiblity(GuiContainer gui, VisiblityData currentVisibility) {
-            if (Config.hideNeiPanelInTerminalGui && gui instanceof GuiSharedTerminal) {
+            if (!Config.showNeiPanelInTerminalGui && gui instanceof GuiSharedTerminal) {
                 currentVisibility.showItemPanel = false;
             }
             return currentVisibility;

@@ -5,7 +5,6 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockContainer;
 import net.minecraft.block.BlockDoublePlant;
 import net.minecraft.block.BlockGrass;
 import net.minecraft.block.BlockTallGrass;
@@ -28,15 +27,28 @@ public final class SwiftStepGrowthAura {
 
     /** 作物光环每 5 秒触发一次；动物光环根据强度缩短触发间隔。 */
     private static final int TICK_INTERVAL = 100;
+    /** CropsNH 的作物杆方块实体（它的生长走自己的刻度，不吃原版随机方块刻度）。 */
     private static final String CROPS_NH_CROP_STICK_API = "com.gtnewhorizon.cropsnh.api.ICropStickTile";
+    /** IC2 的作物方块实体（同样是自己在长）。 */
+    private static final String IC2_CROP_TILE = "ic2.core.crop.TileEntityCrop";
 
     private static boolean cropsNhApiResolved;
     private static Class<?> cropsNhCropStickType;
     private static Method cropsNhHasCrop;
     private static Method cropsNhIsMature;
     private static Method cropsNhIsSick;
+    private static Method cropsNhGrowthReady;
     private static Method cropsNhGrowthTick;
     private static boolean cropsNhIntegrationDisabled;
+
+    private static boolean ic2ApiResolved;
+    private static Class<?> ic2CropType;
+    private static Method ic2Tick;
+    private static Method ic2GrowthRate;
+    private static Method ic2GetCrop;
+    /** {@code TileEntityCrop.ticker}：它的生长节流计时器（tickRate 一般 256）。 */
+    private static java.lang.reflect.Field ic2Ticker;
+    private static boolean ic2IntegrationDisabled;
 
     private SwiftStepGrowthAura() {}
 
@@ -106,7 +118,8 @@ public final class SwiftStepGrowthAura {
                     if (y < 0 || y >= 256) continue;
 
                     Block block = world.getBlock(x, y, z);
-                    if (tickCropsNh(world, block, x, y, z, growthTicks)) continue;
+                    if (block.isAir(world, x, y, z)) continue;
+                    if (tickCropTiles(world, x, y, z, growthTicks)) continue;
                     if (isGrowthBlock(block)) {
                         for (int tick = 0; tick < growthTicks && world.getBlock(x, y, z) == block; tick++) {
                             block.updateTick(world, x, y, z, world.rand);
@@ -117,11 +130,32 @@ public final class SwiftStepGrowthAura {
         }
     }
 
-    /** CropsNH grows through its crop-stick tile entity rather than Minecraft random block ticks. */
-    private static boolean tickCropsNh(World world, Block block, int x, int y, int z, int growthTicks) {
-        if (!(block instanceof BlockContainer) || cropsNhIntegrationDisabled) return false;
+    /**
+     * 先试 CropsNH、再试 IC2 —— 两边的作物都是<b>方块实体自己在长</b>，不走原版的随机方块刻度，
+     * 所以上面那条 {@code updateTick} 的路对它们完全无效。
+     *
+     * <p>
+     * 这里刻意<b>不拿方块类型当门槛</b>（既不用 {@code instanceof BlockContainer}，也不用
+     * {@code hasTileEntity}）：IC2 的 {@code BlockCrop} 继承的是它自己的 {@code BlockBase}
+     * （直接 {@code extends Block}），方块实体走 IC2 自己那套登记，{@code hasTileEntity}
+     * 返回 false；CropsNH 同理。拿类型当门槛的结果就是两边一起被挡在门外，而且一声不响。
+     * {@code world.getTileEntity} 只是区块里的一次数组查表，一个脉冲扫几千格无所谓。
+     *
+     * @return true 表示这一格的方块实体归我们管（无论有没有真的加速），调用方不必再当普通作物处理
+     */
+    private static boolean tickCropTiles(World world, int x, int y, int z, int growthTicks) {
+        if (!cropsNhApiResolved) resolveCropsNhApi();
+        if (!ic2ApiResolved) resolveIc2Api();
+        // 两边都没有（没装 / 接口对不上）：不值得为每一格去查方块实体
+        if (cropsNhCropStickType == null && ic2CropType == null) return false;
 
-        resolveCropsNhApi();
+        if (tickCropsNh(world, x, y, z, growthTicks)) return true;
+        return tickIc2Crop(world, x, y, z, growthTicks);
+    }
+
+    /** CropsNH 的作物长在作物杆的方块实体上，不吃原版随机方块刻度。 */
+    private static boolean tickCropsNh(World world, int x, int y, int z, int growthTicks) {
+        if (cropsNhIntegrationDisabled) return false;
         if (cropsNhCropStickType == null) return false;
 
         TileEntity tile = world.getTileEntity(x, y, z);
@@ -132,6 +166,11 @@ public final class SwiftStepGrowthAura {
                 || (Boolean) cropsNhIsSick.invoke(tile)) {
                 return true;
             }
+
+            // 光 / 水 / 土壤不满足时，CropsNH 的生长刻度会让作物<b>生病</b>（它的
+            // calcGrowthRate() 会返回负数）。加速光环不该承担「催出病害」的后果，
+            // 所以条件不满足就跳过这一格。
+            if (!((Boolean) cropsNhGrowthReady.invoke(tile))) return true;
 
             for (int tick = 0; tick < growthTicks; tick++) {
                 cropsNhGrowthTick.invoke(tile);
@@ -147,6 +186,42 @@ public final class SwiftStepGrowthAura {
         return true;
     }
 
+    /**
+     * IC2 的作物：{@code ic2.core.crop.TileEntityCrop.tick()} 就是它的生长刻度。
+     *
+     * <p>
+     * 和 CropsNH 那条路一样，先把「这一下到底会不会长」问清楚再动手：
+     * {@code calcGrowthRate()} 在光 / 养分 / 水不够时返回 0，这时候硬催只会让作物长杂草，
+     * 不是玩家想要的「加速生长」。
+     *
+     * <p>
+     * 它的 {@code ticker} 字段是个节流计时器（tickRate 一般 256），不清掉的话
+     * N 次调用里只有一两次真的做生长判定 —— 正是「开了光环却几乎没效果」的来源。
+     * 每 tick 前把它清零，一次调用就等于一次完整生长判定。
+     */
+    private static boolean tickIc2Crop(World world, int x, int y, int z, int growthTicks) {
+        if (ic2IntegrationDisabled) return false;
+        if (ic2CropType == null) return false;
+
+        TileEntity tile = world.getTileEntity(x, y, z);
+        if (tile == null || !ic2CropType.isInstance(tile)) return false;
+
+        try {
+            if (ic2GetCrop.invoke(tile) == null) return true;
+            if (((Number) ic2GrowthRate.invoke(tile)).intValue() <= 0) return true;
+
+            for (int tick = 0; tick < growthTicks; tick++) {
+                ic2Ticker.setChar(tile, (char) 0);
+                ic2Tick.invoke(tile);
+                if (ic2GetCrop.invoke(tile) == null) break;
+            }
+        } catch (IllegalAccessException | InvocationTargetException | ClassCastException e) {
+            ic2IntegrationDisabled = true;
+            FutaGtnhMod.LOG.warn("迅步：IC2 作物加速调用失败，已停用本次运行的联动", e);
+        }
+        return true;
+    }
+
     private static void resolveCropsNhApi() {
         if (cropsNhApiResolved) return;
         synchronized (SwiftStepGrowthAura.class) {
@@ -157,11 +232,36 @@ public final class SwiftStepGrowthAura {
                 cropsNhHasCrop = cropsNhCropStickType.getMethod("hasCrop");
                 cropsNhIsMature = cropsNhCropStickType.getMethod("isMature");
                 cropsNhIsSick = cropsNhCropStickType.getMethod("isSick");
+                cropsNhGrowthReady = cropsNhCropStickType.getMethod("areGrowthRequirementsMet");
                 cropsNhGrowthTick = cropsNhCropStickType.getMethod("onGrowthTick");
+                FutaGtnhMod.LOG.info("迅步：已接管 CropsNH 作物加速（ICropStickTile.onGrowthTick）");
             } catch (ClassNotFoundException | NoSuchMethodException | LinkageError e) {
                 cropsNhCropStickType = null;
+                // 缺席是常态（没装 CropsNH），但也可能是 API 改名了 —— 两种都得留一行，
+                // 否则「光环对这个模组的作物无效」永远查不出原因
+                FutaGtnhMod.LOG.info("迅步：没有可用的 CropsNH 作物接口（{}）", e.toString());
             } finally {
                 cropsNhApiResolved = true;
+            }
+        }
+    }
+
+    private static void resolveIc2Api() {
+        if (ic2ApiResolved) return;
+        synchronized (SwiftStepGrowthAura.class) {
+            if (ic2ApiResolved) return;
+            try {
+                ic2CropType = Class.forName(IC2_CROP_TILE, false, SwiftStepGrowthAura.class.getClassLoader());
+                ic2Tick = ic2CropType.getMethod("tick");
+                ic2GrowthRate = ic2CropType.getMethod("calcGrowthRate");
+                ic2GetCrop = ic2CropType.getMethod("getCrop");
+                ic2Ticker = ic2CropType.getField("ticker");
+                FutaGtnhMod.LOG.info("迅步：已接管 IC2 作物加速（TileEntityCrop.tick）");
+            } catch (ClassNotFoundException | NoSuchMethodException | NoSuchFieldException | LinkageError e) {
+                ic2CropType = null;
+                FutaGtnhMod.LOG.info("迅步：没有可用的 IC2 作物接口（{}）", e.toString());
+            } finally {
+                ic2ApiResolved = true;
             }
         }
     }

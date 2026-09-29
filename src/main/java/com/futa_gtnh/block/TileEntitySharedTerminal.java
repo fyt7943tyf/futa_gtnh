@@ -62,6 +62,16 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         return io;
     }
 
+    /**
+     * 六个面里哪几个面挨着能搬东西的方块（位掩码），给配置界面画那圈半透明方块用。
+     *
+     * @param fluid true = 看流体（储罐/机器），false = 看物品（箱子/机器）
+     */
+    public int getTargetMask(boolean fluid) {
+        if (worldObj == null) return 0;
+        return TerminalIoEngine.targetMask(worldObj, xCoord, yCoord, zCoord, fluid);
+    }
+
     /** 配置改了之后调一次：存档要重新落盘。 */
     public void onIoChanged() {
         markDirty();

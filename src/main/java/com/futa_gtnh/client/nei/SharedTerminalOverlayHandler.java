@@ -84,6 +84,28 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
     // 填入 / 自动合成
     // ==================================================================
 
+    /**
+     * NEI 的「填入合成栏」手势：<b>只把配方摆进合成栏，绝不动手合成。</b>
+     *
+     * <p>
+     * 摆料和开做分成两步是刻意的：
+     * <ol>
+     * <li>「+」（按住 Shift 点）＝ 把这条配方从共享存储摆进 3×3，玩家先看清配方对不对；</li>
+     * <li>在终端合成栏的<b>产物格上按 Shift</b> ＝ 才开始一直做下去
+     * （{@code GuiSharedTerminal#handleCraftResultClick} → 服务端 {@code CraftFiller}）。</li>
+     * </ol>
+     * 点一下「+」就把材料一路做成成品、连配方长什么样都没看见，那不是
+     * 「填入合成栏」该有的语义。
+     *
+     * <p>
+     * NEI 给这个按钮定的规则是「按住 Shift 点才真的填」
+     * （{@code GuiOverlayButton.requireShiftForOverlayRecipe()}）：不按 Shift 的点击
+     * 只画一层幽灵材料，压根走不到我们这儿。真正填料时
+     * {@code GuiOverlayButton#overlayRecipe} 传给 {@code fillCraftingGrid} 的倍率是
+     * <b>写死的 0</b>，{@code fillCraftingGrid} 再按「{@code multiplier != 1}」算出
+     * {@code maxTransfer} —— 所以 Shift 点过来永远是 {@code maxTransfer = true}；
+     * 倍率 0 在这里只表示「尽量多填」（服务端按每格 64 封顶），不是「开做」。
+     */
     @Override
     public void overlayRecipe(GuiContainer gui, IRecipeHandler recipe, int recipeIndex, boolean maxTransfer) {
         transferRecipe(gui, recipe, recipeIndex, maxTransfer ? 0 : 1);
@@ -92,6 +114,11 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
     /**
      * 发「填合成栏」请求。返回值语义沿用基类（实际倍率），
      * 但服务端是异步执行的，这里返回的是<b>请求</b>的倍率。
+     *
+     * <p>
+     * <b>不管倍率是多少都只填栏。</b>NEI 自己的自动合成按钮走的是另一条路
+     * （{@link #craft}，整个 NEI 里只有 {@code AutoCraftingManager} 会调它），
+     * 玩家点「+」永远不该直接开做。
      */
     @Override
     public int transferRecipe(GuiContainer gui, IRecipeHandler recipe, int recipeIndex, int multiplier) {
@@ -102,10 +129,22 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
 
         NetworkHandler.INSTANCE
             .sendToServer(PacketStorageAction.craft(PacketStorageAction.FILL_CRAFT_MATRIX, layout, multiplier));
+
+        // 「点了一下没反应」这种反馈只能靠日志分辨：这条能说清是哪条手势、要几格
+        com.futa_gtnh.FutaGtnhMod.LOG.info(
+            "共享存储：NEI 「填入合成栏」—— 只填栏（倍率 {}，布局 {} 格）",
+            multiplier,
+            layout.getTagList("slots", 10)
+                .tagCount());
         return multiplier;
     }
 
-    /** NEI 的合成按钮：把「填栏 + 连续合成」整个交给服务端循环。 */
+    /**
+     * NEI 的自动合成入口（{@code AutoCraftingManager} 调的）：填栏 + 连续合成。
+     *
+     * <p>
+     * 和「+」的区别就在这里 —— 这个是玩家明确要求「做」，那个只是「摆」。
+     */
     @Override
     public boolean craft(GuiContainer gui, IRecipeHandler recipe, int recipeIndex, int multiplier) {
         if (!(gui instanceof GuiSharedTerminal)) return false;
@@ -118,6 +157,99 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
         return true;
     }
 
+    /**
+     * <b>不经过 NEI 的界面</b>，直接对着一个产物填合成栏 —— 终端界面里 Ctrl+左键点存储面板条目走的就是这里。
+     *
+     * <p>
+     * 为什么需要它：NEI 那个「+」按钮在我们这个界面上永远显示 Mismatch Crafting Grid
+     * （它判断「这个界面有没有 overlay」用的是 {@code RecipeInfo.hasOverlayHandler(gui, "crafting")}，
+     * 我们注册了同样的键也取不到，埋点证明它压根没把问题问到我们的处理器上）。与其继续在 NEI
+     * 的注册侧碰运气，不如自己拿配方。
+     *
+     * <p>
+     * 实现上刻意<b>复用 NEI 的配方读取</b>：{@code ShapedRecipeHandler}/{@code ShapelessRecipeHandler}
+     * 的缓存是按产物加载的（{@code loadCraftingRecipes("item", 产物)}），加载完索引 0 就是我们要的配方；
+     * 拿到之后走的是和「+」完全相同的打包（{@link #buildLayout}）与发包路径 ——
+     * 服务端 {@code CraftFiller} 那边一行都不用改。
+     *
+     * <p>
+     * 之所以要 NEI 在场：配方读取用的是它的处理器（它顺带把矿辞、GT 的工具矿辞都归一化好了，
+     * 这部分自己写一遍既长又容易漏）。NEI 不在时这个方法不会被调用（调用点已经判过）。
+     *
+     * @param output 要合成的产物（面板里点的那一条）
+     * @return 是否已经把「填栏」请求发出去
+     */
+    public boolean fillCraftingGridFor(ItemStack output) {
+        if (output == null) return false;
+
+        codechicken.nei.recipe.TemplateRecipeHandler[] handlers = { new codechicken.nei.recipe.ShapedRecipeHandler(),
+            new codechicken.nei.recipe.ShapelessRecipeHandler() };
+
+        // 同一个产物 NEI 往往给出好几条配方（有序/无序、不同矿辞置换、不同模组各注册一份），
+        // 所以不能无脑取第一个：优先挑「材料在共享存储里凑得齐」的那一条，
+        // 都不齐时才退回第一个能打包的（让服务端那边去报缺料，而不是干脆没反应）。
+        NBTTagCompound fallback = null;
+        for (codechicken.nei.recipe.TemplateRecipeHandler handler : handlers) {
+            handler.loadCraftingRecipes("item", output);
+            for (int index = 0; index < handler.arecipes.size(); index++) {
+                if (!materialsInStorage(handler, index)) continue;
+                NBTTagCompound layout = buildLayout(handler, index);
+                if (layout == null) continue;
+                fallback = layout;
+                break;
+            }
+            if (fallback != null) break;
+        }
+
+        if (fallback == null) {
+            for (codechicken.nei.recipe.TemplateRecipeHandler handler : handlers) {
+                if (handler.arecipes.isEmpty()) continue;
+                fallback = buildLayout(handler, 0);
+                if (fallback != null) break;
+            }
+        }
+        if (fallback == null) return false;
+
+        NetworkHandler.INSTANCE
+            .sendToServer(PacketStorageAction.craft(PacketStorageAction.FILL_CRAFT_MATRIX, fallback, 1));
+        return true;
+    }
+
+    /**
+     * 这条配方要的材料，共享存储凑得齐吗。
+     *
+     * <p>
+     * 只核共享存储，不管玩家背包 —— 这条路本来就是「从仓库取料」，
+     * 判定口径和 {@code presenceOverlay}（绿/红提示）保持一致：每个材料位只要有
+     * 任意一个候选（含 GT 的 craftingTool 矿辞工具）在库里就算齐。
+     */
+    private boolean materialsInStorage(IRecipeHandler recipe, int recipeIndex) {
+        List<PositionedStack> ingredients = recipe.getIngredientStacks(recipeIndex);
+        if (ingredients == null || ingredients.isEmpty()) return false;
+
+        for (PositionedStack positioned : ingredients) {
+            if (positioned == null || positioned.items == null) continue;
+
+            boolean satisfied = false;
+            for (ItemStack candidate : positioned.items) {
+                if (candidate == null) continue;
+                if (storageAvailabilityOf(candidate) != null || hasStoredCraftingTool(candidate)) {
+                    satisfied = true;
+                    break;
+                }
+            }
+            if (!satisfied) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 我们从共享存储取料，不走 NEI 的点击模拟，所以「能不能填」永远是能。
+     *
+     * <p>
+     * （NEI 那边最终没把问题问到这儿来 —— 「+」显示 Mismatch Crafting Grid 是因为
+     * {@code RecipeInfo.hasOverlayHandler} 取不到我们注册的处理器，与这里的返回值无关。见 README。）
+     */
     @Override
     public boolean canFillCraftingGrid(GuiContainer firstGui, IRecipeHandler recipe, int recipeIndex) {
         return true;

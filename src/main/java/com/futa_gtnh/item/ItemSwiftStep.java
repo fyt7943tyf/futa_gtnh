@@ -89,17 +89,29 @@ public class ItemSwiftStep extends Item implements IBauble {
     public static final int MIN_GROWTH_AURA_RADIUS = 1;
     public static final int MAX_GROWTH_AURA_RADIUS = 16;
 
-    /** 生长光环强度表示每次触发时补充的生长刻度次数。 */
+    /**
+     * 生长光环强度表示每次触发时补充的生长刻度次数。
+     *
+     * <p>
+     * 上限 1000 = 每 tick 补 10 次刻度（强度除以 {@code TICK_INTERVAL} 就是每 tick 的次数）。
+     * 这是玩家自己承担代价的设置：强度越高，光圈里每一格每 tick 要跑的生长刻度就越多，
+     * 作物成片时是实打实的服务端开销。
+     */
     public static final int DEFAULT_GROWTH_AURA_SPEED = 1;
     public static final int MIN_GROWTH_AURA_SPEED = 1;
-    public static final int MAX_GROWTH_AURA_SPEED = 100;
+    public static final int MAX_GROWTH_AURA_SPEED = 1000;
 
-    /** 恢复效果默认开启，速度 1 为每 10 秒恢复一次。 */
+    /**
+     * 恢复效果默认开启，速度 1 为每 10 秒恢复一次。
+     *
+     * <p>
+     * 上限 1000 = 间隔 200/1000 夹到 1 tick，也就是每 tick 回 1 点生命 + 1 点饱食度。
+     */
     public static final boolean DEFAULT_HEALTH_RECOVERY_ENABLED = true;
     public static final boolean DEFAULT_FOOD_RECOVERY_ENABLED = true;
     public static final int DEFAULT_RECOVERY_SPEED = 1;
     public static final int MIN_RECOVERY_SPEED = 1;
-    public static final int MAX_RECOVERY_SPEED = 10;
+    public static final int MAX_RECOVERY_SPEED = 1000;
     public static final int RECOVERY_INTERVAL_TICKS = 200;
 
     /** 掉落物吸附默认关闭，半径范围为 1~1000 格。 */

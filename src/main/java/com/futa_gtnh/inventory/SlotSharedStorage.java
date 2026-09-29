@@ -34,10 +34,45 @@ public class SlotSharedStorage extends Slot {
         return viewIndex;
     }
 
-    /** 当前这一页在这一格显示的物品（共享存储里条目的展示形态）。 */
+    /** 上一次算过的那一份显示栈，以及它的「只画图标」副本（引用比较用来判失效）。 */
+    private ItemStack cachedDisplay;
+    private ItemStack cachedRenderView;
+
+    /**
+     * 当前这一页在这一格显示的物品（共享存储里条目的展示形态）。
+     *
+     * <p>
+     * <b>交给原版渲染的这一份永远是 {@code stackSize == 1}。</b>原版
+     * {@code RenderItem.renderItemOverlayIntoGUI} 会给数量大于 1 的堆叠在右下角画一行
+     * 数字，而我们自己画的也是右下角那行「真实数量」—— 流体条目正好踩在这上面：
+     * GT 的流体显示物品把数量也放进了 {@code stackSize}（托盘里那一叠就是「N 份」），
+     * 于是原版那行数字和我们这行叠在同一格，看起来就是「两个数字重叠」。
+     *
+     * <p>
+     * <b>数量一个都没丢</b>：图标还是那一个；真实数量由 {@code GuiSharedTerminal} 自己画
+     * （它读的是 {@code StorageViewEntry}，不是这个槽位），悬停提示、点击取料的语义
+     * 也全走 {@code StorageViewEntry} / {@code pageItemKeys} / {@code pageFluidKeys}。
+     * 这里改的只是「原版会不会顺手再画一遍数字」。
+     *
+     * <p>
+     * 副本按引用缓存：{@code getStack} 每帧每格都会被调到，而 {@code ItemStack.copy()}
+     * 连 NBT 一起复制（流体显示物品都带 NBT），每帧复制 45 次没必要。
+     */
     @Override
     public ItemStack getStack() {
-        return ghost.getDisplay(viewIndex);
+        ItemStack display = ghost.getDisplay(viewIndex);
+        if (display == cachedDisplay) return cachedRenderView;
+
+        cachedDisplay = display;
+        if (display == null || display.stackSize <= 1) {
+            cachedRenderView = display;
+        } else {
+            // 改的是副本：ghost 里那一份还要给 tooltip 和取料判断用，不能就地改小
+            ItemStack single = display.copy();
+            single.stackSize = 1;
+            cachedRenderView = single;
+        }
+        return cachedRenderView;
     }
 
     /**

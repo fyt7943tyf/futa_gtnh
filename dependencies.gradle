@@ -92,6 +92,28 @@ dependencies {
     // 运行时它本来就随整合包/GT5 一起进来，所以这里只需要 compileOnly。
     compileOnly("com.github.GTNewHorizons:TinkersConstruct:1.14.111-GTNH:dev")
 
+    // ---- CropsNH（可选联动：迅步的生长光环）----
+    // GTNH 的作物系统。它的作物长在<b>作物杆的方块实体</b>上，不走原版随机方块刻度，
+    // 所以迅步那边的加速是反射调 ICropStickTile.onGrowthTick()
+    // （见 common/SwiftStepGrowthAura.java，代码里一个 CropsNH 类型都不引用）。
+    // 因为不参与编译，这里只需要运行时那一份：目的是让 runClient17 里真的有 CropsNH 作物
+    // 可以验证，真实整合包里本来就带它。
+    //
+    // 版本核对过：2.0.133 声明的是 GT5U 5.09.54.154 / GTNHLib 0.11.48，
+    // 都低于本工程现有的 5.09.54.175 / 0.11.51，取高版本即可，不会冲突。
+    //
+    // ★ 它还必须和下面那条 Better Builder's Wands 一起装：CropsNH 的 postInit
+    //   会无条件引用 BBW 的类，缺了就 NoClassDefFoundError 崩在 postInit，
+    //   整个 dev 环境起不来。两条要一起加、一起删。
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:CropsNH:2.0.133:dev")
+
+    // ---- Better Builder's Wands ----
+    // 不是本模组的联动，而是 CropsNH 的硬前提：它的 postInit 会直接引用
+    // portablejim.bbw.core.conversion.ICustomMapping，只要这个类不在场就
+    // NoClassDefFoundError 崩在 postInit（它的 mcmod.info 里依赖列表是空的，
+    // 属于漏判）。真实整合包里本来就装着它，所以这里补上、只为让 dev 环境能起来。
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:BetterBuildersWands:0.13.12-GTNH:dev")
+
     // ---- NotEnoughCharacters（NEChar，可选联动）----
     // 拼音/模糊音搜索复用它的 PinIn 上下文（net.moecraft.nechar.NecharUtils），
     // 装了就自动启用、没装退回自研 pinyin.txt（见 client/NecharBridge.java）。
