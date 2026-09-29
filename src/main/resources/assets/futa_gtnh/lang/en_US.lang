@@ -104,6 +104,7 @@ item.futa_gtnh.locator_wand.name=Locator Wand
 item.futa_gtnh.locator_wand.tip.gui=Right-click: open the selection screen
 item.futa_gtnh.locator_wand.tip.clear=Sneak + right-click: stop tracking
 item.futa_gtnh.locator_wand.tip.bauble=Can be equipped in Baubles; keeps the current locator beam visible
+item.futa_gtnh.locator_wand.tip.worn=While worn: break the tracked block yourself and you are sent to the next one automatically
 
 # ---------------------------------------------------------------- Minigame Helper
 item.futa_gtnh.minigame_helper.name=Minigame Helper
@@ -180,6 +181,9 @@ futa_gtnh.locator.msg.no_safe_spot_protected=Every carveable spot nearby is bloc
 futa_gtnh.locator.msg.arrived=Teleported near the target (tracking is kept, the beam still guides you)
 futa_gtnh.locator.msg.teleport_used=This result has already been used for one teleport: tracking is still active, pick the target again to teleport once more
 futa_gtnh.locator.msg.no_result=No result available, please search again
+futa_gtnh.locator.msg.auto_failed=Wand: no safe spot near the next target, so no teleport (tracking is kept, you can press Teleport yourself)
+futa_gtnh.locator.msg.auto_failed_protected=Wand: reaching the next target would require destroying ore, so no teleport (tracking is kept, you can press Teleport yourself)
+futa_gtnh.locator.msg.auto_no_more=Wand: no more targets of this kind nearby, tracking ended
 
 futa_gtnh.station.chest=Shared Storage
 futa_gtnh.station.title.items= · %s items

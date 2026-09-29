@@ -76,5 +76,62 @@ public class ItemLocatorWand extends Item {
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.locator_wand.tip.clear"));
         tooltip.add(
             EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.locator_wand.tip.bauble"));
+        tooltip
+            .add(EnumChatFormatting.DARK_GRAY + StatCollector.translateToLocal("item.futa_gtnh.locator_wand.tip.worn"));
+    }
+
+    /**
+     * 玩家的饰品栏里有没有这根魔杖。
+     *
+     * <p>
+     * 服务端用它决定「追踪的方块被挖掉之后，要不要自动把人送到下一处」
+     * （见 {@code LocatorManager}）。那条自动行为<b>只在戴着的时候</b>生效：
+     * 戴着是一个明确的「我现在就在用它」的表态，而手里拿着魔杖挖矿是常态 ——
+     * 那种情况下自动传送会变成惊吓。
+     *
+     * <p>
+     * Baubles 是软依赖，没装的时候这个方法恒为 false。探测实现放在
+     * {@link WornCheck} 这个<b>单独的类</b>里，只有确认 Baubles 在场才会被加载：
+     * 直接写在方法体里的话，没装 Baubles 时本类一加载就会因为找不到
+     * {@code baubles.api} 而炸（和 {@code client.TinkersScreens} 同一个套路）。
+     */
+    public static boolean isWornBy(EntityPlayer player) {
+        if (player == null || !baublesLoaded()) return false;
+        try {
+            return WornCheck.check(player);
+        } catch (Throwable t) {
+            // Baubles 版本对不上之类的意外：当作没戴，绝不能影响扫描主流程
+            return false;
+        }
+    }
+
+    private static boolean baublesLoaded() {
+        if (baublesChecked == null) {
+            baublesChecked = Boolean.valueOf(
+                cpw.mods.fml.common.Loader.isModLoaded("Baubles|Expanded")
+                    || cpw.mods.fml.common.Loader.isModLoaded("Baubles"));
+        }
+        return baublesChecked.booleanValue();
+    }
+
+    /** 三态缓存：null = 还没探过。和 {@code CommonProxy} 注册饰品时用的是同一套判断。 */
+    private static Boolean baublesChecked;
+
+    /** Baubles 在场时才会被加载的实现。 */
+    private static final class WornCheck {
+
+        static boolean check(EntityPlayer player) {
+            // 局部变量别叫 baubles：那会遮住同名的包名，baubles.api.* 就解析不到了
+            net.minecraft.inventory.IInventory worn = baubles.api.BaublesApi.getBaubles(player);
+            if (worn == null) return false;
+
+            for (int slot = 0; slot < worn.getSizeInventory(); slot++) {
+                ItemStack stack = worn.getStackInSlot(slot);
+                // 用 instanceof 而不是 == 比较物品实例：可佩戴的那份是子类
+                // （ItemLocatorWandBauble），而注册进去的到底是哪一个取决于是不是装了 Baubles
+                if (stack != null && stack.getItem() instanceof ItemLocatorWand) return true;
+            }
+            return false;
+        }
     }
 }

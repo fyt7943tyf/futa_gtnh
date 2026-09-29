@@ -165,6 +165,35 @@ public class Config {
      */
     public static boolean locatorTeleportCarve = true;
 
+    /**
+     * 追踪的方块被<b>自己挖掉</b>之后，戴着魔杖时是否自动传送到下一处。
+     *
+     * <p>
+     * 触发条件刻意收得很紧，四条同时成立才算数：
+     * <ol>
+     * <li>魔杖<b>戴在饰品栏里</b>（拿在手上挖矿是常态，戴着才是「我正在用它扫矿」）；</li>
+     * <li>挖掉的正好是<b>当前追踪的那一格</b>（挖别的方块不算）；</li>
+     * <li>是<b>玩家自己</b>挖的 —— 别人挖了、爆炸炸了只会让光束换个目标，不会把人挪走；</li>
+     * <li>这个开关开着。</li>
+     * </ol>
+     *
+     * <p>
+     * 传送本身和手动点「传送」走同一段代码：一样的找安全落点、一样可以就地开两格
+     * （见 {@link #locatorTeleportCarve}），一样<b>绝不碰矿石</b>。
+     * 失败时不会消耗「这次结果只能用一次传送」的额度，结果和坐标都留着，
+     * 玩家可以自己再点一次。
+     */
+    public static boolean locatorAutoAdvance = true;
+
+    /**
+     * 自动追下一处的最小距离（格）。新目标比这更近就只把追踪切过去、不传送。
+     *
+     * <p>
+     * 挖矿时「下一个」常常就在隔壁一两格 —— 为这个把人挪一下既没意义又晃眼
+     * （而且可能顺手在原地开洞）。0 表示不设阈值，每次都传。
+     */
+    public static int locatorAutoAdvanceMinDistance = 4;
+
     // ------------------------------------------------------------------
     // 小游戏助手（lootgames 联动）
     // ------------------------------------------------------------------
@@ -566,6 +595,21 @@ public class Config {
             "传送找不到现成落脚点时，是否允许就地清掉玩家身体那两格。" + "只清「没用的方块」（石头/泥土/沙子这类），并且永不碰矿石和木头/玻璃/金属/机器；"
                 + "不碰目标方块本身，也不掉落物品。"
                 + "矿脉大多整个埋在石头里，关掉它传送在矿洞里基本用不了。");
+
+        locatorAutoAdvance = configuration.getBoolean(
+            "locatorAutoAdvance",
+            Configuration.CATEGORY_GENERAL,
+            locatorAutoAdvance,
+            "追踪的方块被自己挖掉后，戴着魔杖时是否自动传送到下一处（同样的目标、从当前位置重搜）。" + "只在魔杖戴在饰品栏、且挖掉的正是当前追踪那一格时触发；别人挖掉或爆炸炸掉只会让光束换目标，不会传送。"
+                + "传送规则和手动传送完全一致（找安全落点、允许就地开两格、绝不碰矿石）。");
+
+        locatorAutoAdvanceMinDistance = configuration.getInt(
+            "locatorAutoAdvanceMinDistance",
+            Configuration.CATEGORY_GENERAL,
+            locatorAutoAdvanceMinDistance,
+            0,
+            256,
+            "自动追下一处的最小距离（格）：新目标比这更近就只把追踪切过去、不传送。" + "挖矿时下一个常常就在隔壁一两格，为这个挪一下既没意义又晃眼。0 = 每次都传。");
 
         enableMinigameHelper = configuration.getBoolean(
             "enableMinigameHelper",

@@ -100,6 +100,7 @@ item.futa_gtnh.locator_wand.name=寻物魔杖
 item.futa_gtnh.locator_wand.tip.gui=右键：打开选择界面
 item.futa_gtnh.locator_wand.tip.clear=潜行 + 右键：取消当前追踪
 item.futa_gtnh.locator_wand.tip.bauble=装有 Baubles 时可佩戴；佩戴后持续显示当前追踪光线
+item.futa_gtnh.locator_wand.tip.worn=佩戴时：自己挖掉追踪的那一格，自动送去下一处
 
 # ---------------------------------------------------------------- 小游戏助手
 item.futa_gtnh.minigame_helper.name=小游戏助手
@@ -176,6 +177,9 @@ futa_gtnh.locator.msg.no_safe_spot_protected=附近能开洞的位置全被矿�
 futa_gtnh.locator.msg.arrived=已传送到目标附近（追踪保留着，光束继续指路）
 futa_gtnh.locator.msg.teleport_used=这个结果已经传送过一次了：追踪还在，想再传送请重新选一次目标
 futa_gtnh.locator.msg.no_result=没有可用的结果，请重新搜索
+futa_gtnh.locator.msg.auto_failed=魔杖：下一处目标附近找不到能站人的地方，没有传送（追踪还在，可以自己点「传送」再试）
+futa_gtnh.locator.msg.auto_failed_protected=魔杖：下一处只有拆掉矿石才站得进去，没有传送（追踪还在，可以自己点「传送」再试）
+futa_gtnh.locator.msg.auto_no_more=魔杖：附近已经没有同类目标了，追踪结束
 
 futa_gtnh.station.chest=共享存储
 futa_gtnh.station.title.items= · %s 项
