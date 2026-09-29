@@ -807,11 +807,25 @@ public class ContainerSharedTerminal extends Container {
 
     /** 从玩家背包里找出指定物品存入；数量由服务端再次按实际背包内容封顶。 */
     public void requestDepositMatching(ItemStack stack, long amount) {
-        if (!isClient(player) || stack == null) return;
-        ItemKey key = ItemKey.of(stack);
-        if (key == null) return;
-        // 语义是「从玩家背包里扣除这么多个再存进去」，而不是「凭空存这么多」。
-        // 数量由服务端按背包实际内容封顶，所以外部模组无论传什么都不可能刷物品。
+        if (stack == null) return;
+        requestDepositMatching(ItemKey.of(stack), amount);
+    }
+
+    /**
+     * 按<b>条目键</b>从玩家背包里凑出来存入（{@code amount <= 0} = 有多少存多少）。
+     *
+     * <p>
+     * 和上面那个「拿一个物品栈来描述要存什么」的版本是同一件事，区别只在于怎么描述。
+     * <b>Shift + 双击那条路必须用这个版本</b>：双击的第二下发生在第一下已经把那一格
+     * 存走之后，那时候槽位里已经没有东西可以拿来描述「要存的是哪一种」了
+     * （见 {@code GuiSharedTerminal.handleShiftDoubleClick}）。
+     *
+     * <p>
+     * 语义仍然是「<b>先从背包里扣，再存进共享存储</b>」，数量由服务端按背包实际内容封顶，
+     * 所以客户端传 0 或者传一个天文数字都不可能凭空造出物品。
+     */
+    public void requestDepositMatching(ItemKey key, long amount) {
+        if (!isClient(player) || key == null) return;
         NetworkHandler.INSTANCE
             .sendToServer(PacketStorageAction.item(PacketStorageAction.DEPOSIT_MATCHING, key, amount));
     }
