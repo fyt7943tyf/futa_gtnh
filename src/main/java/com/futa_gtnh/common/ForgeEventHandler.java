@@ -93,4 +93,28 @@ public class ForgeEventHandler {
     public void onChunkLoad(net.minecraftforge.event.world.ChunkEvent.Load event) {
         com.futa_gtnh.lootassist.LootassistManager.onChunkLoad(event.getChunk());
     }
+
+    /**
+     * 玩家破坏方块 —— 寻物魔杖「自动追下一处」的扳机（见
+     * {@link com.futa_gtnh.locator.LocatorManager#noteBlockBroken}）。
+     *
+     * <p>
+     * 为什么用这个事件而不是「每隔几 tick 看看目标还在不在」：那个巡检只能回答
+     * 「方块没了」，回答不了「是谁弄没的」。而自动传送这种事，只有玩家<b>自己</b>
+     * 挖掉追踪的那一格才该发生 —— 别人挖了、爆炸炸了都只该让光束换个目标。
+     *
+     * <p>
+     * 事件在方块真正消失<b>之前</b>触发（而且可被取消），所以这里只记一笔账，
+     * 真正的重搜留给下一 tick 的巡检去做。这里也不做任何过滤以外的判断：
+     * 配置、是否戴着魔杖、挖的是不是当前追踪那一格，全在
+     * {@code LocatorManager} 里判断。
+     */
+    @SubscribeEvent
+    public void onBlockBreak(net.minecraftforge.event.world.BlockEvent.BreakEvent event) {
+        if (event.getPlayer() == null) return;
+        if (!(event.getPlayer() instanceof net.minecraft.entity.player.EntityPlayerMP)) return;
+
+        com.futa_gtnh.locator.LocatorManager
+            .noteBlockBroken((net.minecraft.entity.player.EntityPlayerMP) event.getPlayer(), event.x, event.y, event.z);
+    }
 }

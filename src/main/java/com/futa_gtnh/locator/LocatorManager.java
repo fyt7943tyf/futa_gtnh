@@ -13,6 +13,9 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.MathHelper;
 import net.minecraft.world.biome.BiomeGenBase;
 
+import com.futa_gtnh.Config;
+import com.futa_gtnh.FutaGtnhMod;
+import com.futa_gtnh.item.ItemLocatorWand;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketLocatorResult;
 
@@ -35,11 +38,23 @@ public final class LocatorManager {
     private static final class Job {
 
         final LocatorScan scan;
+        /**
+         * 扫完之后要不要自动把玩家送过去。
+         *
+         * <p>
+         * 只有「<b>玩家自己</b>把上次命中的那个方块挖掉、于是按同一条件自动重搜」
+         * 这条路上的任务才为 true，而且要求他<b>戴着</b>魔杖
+         * （见 {@link #noteBlockBroken}）。手动点一次目标永远是手动传送 ——
+         * 自动传送只应该是「我在用魔杖扫矿」的副产品，不能因为别人挖了那块矿
+         * 就把人凭空挪走。
+         */
+        final boolean autoAdvance;
         /** 进度包的节流计时，免得每 tick 都往客户端推包。 */
         int progressTimer;
 
-        Job(LocatorScan scan) {
+        Job(LocatorScan scan, boolean autoAdvance) {
             this.scan = scan;
+            this.autoAdvance = autoAdvance;
         }
     }
 
@@ -47,6 +62,17 @@ public final class LocatorManager {
     private static final Map<UUID, int[]> RESULTS = new HashMap<>();
     /** 最近一次找到目标的扫描条件，用于目标被挖掉后继续找同类目标。 */
     private static final Map<UUID, LocatorScan> TRACKING = new HashMap<>();
+    /**
+     * 「玩家<b>自己</b>刚挖掉了当前追踪的那一格」。
+     *
+     * <p>
+     * 由方块破坏事件写入（{@link #noteBlockBroken}），由下一次重搜消费掉。
+     * 之所以要这么绕一圈：方块「没了」这件事本身是被动的（可能是别的玩家挖的、
+     * 爆炸炸的、甚至是区块没加载），而只有玩家自己动手那一次才该触发自动传送。
+     * 破坏事件在方块真正消失<b>之前</b>触发，所以这里先记一笔，
+     * 等下一 tick 的巡检发现那一格真的空了再去搜。
+     */
+    private static final Set<UUID> SELF_BROKEN = new HashSet<>();
     /**
      * 哪些玩家的<b>当前这个结果</b>已经用掉过一次传送。
      *
@@ -76,6 +102,7 @@ public final class LocatorManager {
         RESULTS.remove(id);
         TRACKING.remove(id);
         TELEPORTED.remove(id);
+        SELF_BROKEN.remove(id);
 
         submit(
             player,
@@ -96,6 +123,7 @@ public final class LocatorManager {
         RESULTS.remove(id);
         TRACKING.remove(id);
         TELEPORTED.remove(id);
+        SELF_BROKEN.remove(id);
 
         submit(
             player,
@@ -123,6 +151,7 @@ public final class LocatorManager {
         RESULTS.remove(id);
         TRACKING.remove(id);
         TELEPORTED.remove(id);
+        SELF_BROKEN.remove(id);
 
         OreVeinCatalog.Entry vein = OreVeinCatalog.byKey(veinKey);
         if (vein == null) {
@@ -150,6 +179,7 @@ public final class LocatorManager {
         RESULTS.remove(id);
         TRACKING.remove(id);
         TELEPORTED.remove(id);
+        SELF_BROKEN.remove(id);
 
         BiomeGenBase[] biomes = BiomeGenBase.getBiomeGenArray();
         if (biomeId < 0 || biomeId >= biomes.length || biomes[biomeId] == null) {
@@ -170,6 +200,13 @@ public final class LocatorManager {
     }
 
     private static void submit(EntityPlayerMP player, UUID id, LocatorScan scan) {
+        submit(player, id, scan, false);
+    }
+
+    /**
+     * @param autoAdvance 扫到结果之后要不要自动把玩家送过去（见 {@link Job#autoAdvance}）
+     */
+    private static void submit(EntityPlayerMP player, UUID id, LocatorScan scan, boolean autoAdvance) {
         if (!scan.isValid()) {
             // 目标类型不支持或矿脉数据已失效。
             // 理论上界面只列可搜的，但客户端不可信。
@@ -177,7 +214,7 @@ public final class LocatorManager {
             return;
         }
 
-        JOBS.put(id, new Job(scan));
+        JOBS.put(id, new Job(scan, autoAdvance));
         send(player, PacketLocatorResult.running(0.0F));
     }
 
@@ -187,6 +224,7 @@ public final class LocatorManager {
         RESULTS.remove(id);
         TRACKING.remove(id);
         TELEPORTED.remove(id);
+        SELF_BROKEN.remove(id);
         send(player, PacketLocatorResult.cancelled());
     }
 
@@ -207,33 +245,120 @@ public final class LocatorManager {
         if (target == null) return TeleportResult.NO_RESULT;
         if (TELEPORTED.contains(id)) return TeleportResult.ALREADY_USED;
 
+        TeleportResult result = teleportTo(player, target, TRACKING.get(id));
+        if (result != TeleportResult.OK && result != TeleportResult.OK_CARVED) return result;
+
+        // 真送到了才算用掉：失败时结果当然要留着让玩家再试（换个角度、或者自己走过去）
+        TELEPORTED.add(id);
+        send(player, PacketLocatorResult.arrived());
+        return result;
+    }
+
+    /**
+     * 传送的公共部分：手动点「传送」和自动追下一处走的是同一段。
+     *
+     * <p>
+     * 抽出来是为了保证两边<b>规矩完全一致</b>：生物群系目标的落点要先按地表高度算，
+     * 安全落点由 {@link TeleportHelper} 找（包括「找不到就就地开两格、
+     * 但绝不碰矿石」那一套），这些一条都不能因为「是自动的」就少。
+     */
+    private static TeleportResult teleportTo(EntityPlayerMP player, int[] target, LocatorScan scan) {
         int targetY = target[1];
-        LocatorScan scan = TRACKING.get(id);
         if (scan != null && scan.isBiomeSearch()) {
             if (scan.getWorld() != player.worldObj) return TeleportResult.NO_RESULT;
             targetY = scan.prepareBiomeTeleportY(target[0], target[2]);
             if (targetY < 0) return TeleportResult.NO_SAFE_SPOT;
         }
 
-        TeleportResult result;
         switch (TeleportHelper.teleportNear(player, target[0], targetY, target[2])) {
             case NATURAL:
-                result = TeleportResult.OK;
-                break;
+                return TeleportResult.OK;
             case CARVED:
-                result = TeleportResult.OK_CARVED;
-                break;
+                return TeleportResult.OK_CARVED;
             case FAILED_PROTECTED:
                 return TeleportResult.NO_SAFE_SPOT_PROTECTED;
             case FAILED:
             default:
                 return TeleportResult.NO_SAFE_SPOT;
         }
+    }
 
-        // 真送到了才算用掉：失败时结果当然要留着让玩家再试（换个角度、或者自己走过去）
-        TELEPORTED.add(id);
-        send(player, PacketLocatorResult.arrived());
-        return result;
+    /**
+     * 玩家<b>自己</b>破坏了一个方块。挂在这个位置的是「自动追下一处」的扳机。
+     *
+     * <p>
+     * 只有四件事同时成立才算数：
+     * <ol>
+     * <li>他正追踪着某个结果（追踪已经结束的不算）；</li>
+     * <li>挖掉的<b>就是那一格</b>（挖别的方块不算）；</li>
+     * <li>配置里开着 {@link Config#locatorAutoAdvance}；</li>
+     * <li>他<b>戴着</b>魔杖（{@link ItemLocatorWand#isWornBy}）——
+     * 拿在手上挖矿是常态，戴着才是「我正在用它扫矿」的表态。</li>
+     * </ol>
+     *
+     * <p>
+     * 这里<b>只记一笔</b>，不立刻搜：事件是在方块真正消失之前触发的
+     * （而且可能被别的模组取消）。真正的重搜由 {@link #restartDestroyedTargets}
+     * 在下一 tick 巡检到「那一格真的空了」时发起，那时候才把这一笔记账消费掉。
+     * 结果是：别人挖掉那块矿、或者被爆炸炸掉，都只会让光束换目标，不会把人挪走。
+     */
+    public static void noteBlockBroken(EntityPlayerMP player, int x, int y, int z) {
+        if (player == null || !Config.locatorAutoAdvance) return;
+
+        UUID id = player.getUniqueID();
+        int[] target = RESULTS.get(id);
+        if (target == null || target[0] != x || target[1] != y || target[2] != z) return;
+        if (TRACKING.get(id) == null) return;
+        if (!ItemLocatorWand.isWornBy(player)) return;
+
+        SELF_BROKEN.add(id);
+    }
+
+    /**
+     * 自动追到刚搜出来的下一处。
+     *
+     * <p>
+     * 和手动传送共用 {@link #teleportTo}，所以安全落点、就地开洞、不碰矿石这些
+     * 规矩一条不少。三点不同：
+     * <ul>
+     * <li>成功<b>不吭声</b>：每挖掉一块矿就说一句会把聊天栏刷爆，位置变了玩家自己看得见；</li>
+     * <li>失败要说清楚，而且<b>不消耗这次传送机会</b>（{@link #TELEPORTED} 不动）——
+     * 结果和坐标都留着，玩家可以自己点「传送」再试一次；</li>
+     * <li>目标离得太近就不传送，只把追踪切过去。挖矿时「下一个」常常就在隔壁一两格，
+     * 为这个把人挪一下既没意义又晃眼；阈值见
+     * {@link Config#locatorAutoAdvanceMinDistance}。</li>
+     * </ul>
+     */
+    private static void autoAdvance(EntityPlayerMP player, UUID id, int[] target, LocatorScan scan) {
+        if (!farEnoughToBother(player, target)) return;
+
+        switch (teleportTo(player, target, scan)) {
+            case OK:
+            case OK_CARVED:
+                TELEPORTED.add(id);
+                send(player, PacketLocatorResult.arrived());
+                break;
+            case NO_SAFE_SPOT:
+                FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.auto_failed");
+                break;
+            case NO_SAFE_SPOT_PROTECTED:
+                FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.auto_failed_protected");
+                break;
+            default:
+                // NO_RESULT：换维度之类的情况，什么都不做（结果还在，玩家可以手动传送）
+                break;
+        }
+    }
+
+    /** @return 新目标离玩家够不够远，值得为它传送一次 */
+    private static boolean farEnoughToBother(EntityPlayerMP player, int[] target) {
+        int minimum = Config.locatorAutoAdvanceMinDistance;
+        if (minimum <= 0) return true;
+
+        double dx = player.posX - (target[0] + 0.5D);
+        double dy = player.posY - (target[1] + 0.5D);
+        double dz = player.posZ - (target[2] + 0.5D);
+        return dx * dx + dy * dy + dz * dz >= (double) minimum * (double) minimum;
     }
 
     public enum TeleportResult {
@@ -258,6 +383,7 @@ public final class LocatorManager {
         RESULTS.remove(id);
         TRACKING.remove(id);
         TELEPORTED.remove(id);
+        SELF_BROKEN.remove(id);
     }
 
     // ==================================================================
@@ -295,9 +421,21 @@ public final class LocatorManager {
                     send(
                         player,
                         PacketLocatorResult.found(position[0], position[1], position[2], job.scan.getBestDistance()));
-                } else {
-                    TRACKING.remove(entry.getKey());
-                    send(player, PacketLocatorResult.notFound(1.0F));
+                    iterator.remove();
+
+                    // 自动追下一处：先把任务摘掉再动（传送会改 RESULTS/TELEPORTED）
+                    if (job.autoAdvance) {
+                        autoAdvance(player, entry.getKey(), position, job.scan);
+                    }
+                    continue;
+                }
+
+                TRACKING.remove(entry.getKey());
+                send(player, PacketLocatorResult.notFound(1.0F));
+                if (job.autoAdvance) {
+                    // 是自动追的目标却一处都没搜到：得说一声，否则玩家只会看到
+                    // 光束突然没了、人也没动，不知道发生了什么
+                    FutaGtnhMod.proxy.notifyPlayer(player, "futa_gtnh.locator.msg.auto_no_more");
                 }
                 iterator.remove();
             }
@@ -337,13 +475,18 @@ public final class LocatorManager {
             iterator.remove();
             RESULTS.remove(id);
             TELEPORTED.remove(id);
+
+            // 这一笔记账只有在「玩家自己挖掉了那一格」时才会有（见 noteBlockBroken），
+            // 消费掉它，然后把「扫完自动送过去」交给这次重搜
+            boolean autoAdvance = SELF_BROKEN.remove(id);
             submit(
                 player,
                 id,
                 previousScan.restartAt(
                     MathHelper.floor_double(player.posX),
                     MathHelper.floor_double(player.posY),
-                    MathHelper.floor_double(player.posZ)));
+                    MathHelper.floor_double(player.posZ)),
+                autoAdvance);
         }
     }
 
