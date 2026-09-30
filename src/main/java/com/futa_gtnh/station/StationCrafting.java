@@ -43,18 +43,17 @@ public final class StationCrafting {
     /**
      * 处理来自客户端界面的「填合成栏 / 自动合成」请求。
      *
-     * @return 是否处理了（false 表示这个容器不是我们的合成站）
+     * @return 实际完成的合成次数；{@code -1} 表示这个容器不是我们的合成站
      */
-    public static boolean handleCraft(EntityPlayerMP player, Container open, PacketStorageAction packet,
+    public static int handleCraft(EntityPlayerMP player, Container open, PacketStorageAction packet,
         SharedStorage storage, DeltaRecorder recorder) {
-        if (!(open instanceof CraftingStationContainer)) return false;
+        if (!(open instanceof CraftingStationContainer)) return -1;
 
         CraftingStationContainer station = (CraftingStationContainer) open;
         IInventory matrix = station.craftMatrix;
-        if (matrix == null) return false;
+        if (matrix == null) return -1;
 
-        CraftFiller.handle(player, station, matrix, new StationResultTaker(station), packet, storage, recorder);
-        return true;
+        return CraftFiller.handle(player, station, matrix, new StationResultTaker(station), packet, storage, recorder);
     }
 
     /** 收尾：把这次改动的增量广播出去，并同步真实槽位（和终端那边的收尾一致）。 */

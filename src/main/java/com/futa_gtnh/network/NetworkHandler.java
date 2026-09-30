@@ -67,5 +67,7 @@ public final class NetworkHandler {
         // 返回 true 后原生 C08 点击包不再发送，服务端动作必须自己带包过去。
         // 合并 PR #4 时这条原本也写的 26，和上面的 PacketTerminalIoSync 撞号了 —— 改成 27。
         INSTANCE.registerMessage(PacketSolarDescalerUse.Handler.class, PacketSolarDescalerUse.class, 27, Side.SERVER);
+        // NEI 自动合成：服务端执行完当前一步后的回执。
+        INSTANCE.registerMessage(PacketCraftResult.Handler.class, PacketCraftResult.class, 28, Side.CLIENT);
     }
 }

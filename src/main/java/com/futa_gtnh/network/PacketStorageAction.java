@@ -158,6 +158,8 @@ public class PacketStorageAction implements IMessage {
     private byte kind;
     private int invSlot;
     private long amount;
+    /** NEI 自动合成步骤的请求编号；普通存储操作为 0。 */
+    private long requestId;
     private NBTTagCompound keyTag;
 
     public PacketStorageAction() {}
@@ -214,6 +216,12 @@ public class PacketStorageAction implements IMessage {
         return this;
     }
 
+    /** 设置 NEI 自动合成步骤的请求编号。 */
+    public PacketStorageAction withRequestId(long requestId) {
+        this.requestId = requestId;
+        return this;
+    }
+
     /**
      * NEI 合成联动用的构造：布局 NBT 直接放进 {@link #keyTag}，倍率放 {@link #amount}。
      *
@@ -262,6 +270,11 @@ public class PacketStorageAction implements IMessage {
         return amount;
     }
 
+    /** @return NEI 自动合成步骤的请求编号；普通操作为 0。 */
+    public long getRequestId() {
+        return requestId;
+    }
+
     /** 合成联动动作携带的布局 NBT（见 {@link #craft}）；别的动作返回 null。 */
     public NBTTagCompound getLayoutTag() {
         return keyTag;
@@ -281,6 +294,7 @@ public class PacketStorageAction implements IMessage {
         kind = buf.readByte();
         invSlot = buf.readInt();
         amount = buf.readLong();
+        requestId = buf.readLong();
         keyTag = buf.readBoolean() ? ByteBufUtils.readTag(buf) : null;
     }
 
@@ -290,6 +304,7 @@ public class PacketStorageAction implements IMessage {
         buf.writeByte(kind);
         buf.writeInt(invSlot);
         buf.writeLong(amount);
+        buf.writeLong(requestId);
         buf.writeBoolean(keyTag != null);
         if (keyTag != null) {
             ByteBufUtils.writeTag(buf, keyTag);

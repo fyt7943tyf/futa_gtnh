@@ -26,8 +26,8 @@ import com.futa_gtnh.shared.SharedStorage;
 
 /**
  * NEI 合成联动的服务端半边：按客户端发来的布局填充终端界面的 3×3 合成栏，
- * 材料优先从玩家背包取、不够的从共享存储取；自动合成则在此基础上反复
- * 「取产物进背包 → 补材料」。
+ * 材料优先从玩家背包取、不够的从共享存储取；自动合成则只执行当前 NEI 请求的
+ * 这一批配方次数，不在服务端继续推导或推进整条合成链。
  *
  * <p>
  * <b>为什么用服务端直填而不是照抄 NEI 的 {@code DefaultOverlayHandler}。</b>
@@ -98,8 +98,7 @@ public final class CraftFiller {
     }
 
     /**
-     * 按客户端发来的布局填合成栏；{@code AUTOCRAFT} 还会接着反复
-     * 「取产物进背包 → 补回消耗掉的料」。
+     * 按客户端发来的布局填合成栏；{@code AUTOCRAFT} 只执行当前请求的一批次数。
      *
      * <p>
      * 容器/合成栏/产物收法都从外面传进来，是因为终端和匠魂合成站共用这一套逻辑：
@@ -109,20 +108,25 @@ public final class CraftFiller {
      * <p>
      * 两个动作对<b>已有合成栏内容</b>的态度不同，见方法体里的注释：填栏先倒空
      * （配方说了算），自动合成原样保留（玩家摆的就是配方）。
+     *
+     * @return 本次实际完成的合成次数；填栏动作或请求无效时返回 0
      */
-    public static void handle(EntityPlayerMP player, Container container, IInventory matrix, ResultTaker resultTaker,
+    public static int handle(EntityPlayerMP player, Container container, IInventory matrix, ResultTaker resultTaker,
         PacketStorageAction packet, SharedStorage storage, DeltaRecorder recorder) {
         NBTTagCompound tag = packet.getLayoutTag();
-        if (tag == null || matrix == null || resultTaker == null) return;
+        if (tag == null || matrix == null || resultTaker == null) return 0;
 
         boolean autocraft = packet.getAction() == PacketStorageAction.AUTOCRAFT;
         long requested = packet.getAmount();
-        // 请求量 0 = 「有多少做多少」：填料的倍率照旧封顶在 64，合成次数走另一个上限
-        int fillMultiplier = requested <= 0L ? MAX_MULTIPLIER : (int) Math.min(requested, MAX_MULTIPLIER);
+        // 自动合成按「每次合成」补料。把 requested 次数一次性填进格子，再在每轮补满
+        // 会把同一轮的原料扣两遍；每次只填一轮，完成后只补下一轮需要的那一份。
+        // 普通「填入合成栏」仍保留原来的批量填充语义。
+        int fillMultiplier = requested <= 0L ? (autocraft ? 1 : MAX_MULTIPLIER)
+            : (autocraft ? 1 : (int) Math.min(requested, MAX_MULTIPLIER));
         int craftLimit = requested <= 0L ? MAX_AUTOCRAFT : (int) Math.min(requested, MAX_AUTOCRAFT);
 
         Target[] targets = parseTargets(tag);
-        if (targets == null) return;
+        if (targets == null) return 0;
 
         // 合成栏要不要先倒空，由布局里的 keep 决定，不看动作：
         //
@@ -160,7 +164,7 @@ public final class CraftFiller {
                     unfillable,
                     player.getCommandSenderName(),
                     describeMissingCells(player, storage, targets, plan));
-                return;
+                return 0;
             }
 
             // 再试摆一遍：这一步挡住的是「材料摆进去了、原版却合不出东西」。
@@ -174,7 +178,7 @@ public final class CraftFiller {
                     countTargets(targets),
                     describePlan(plan),
                     player.getCommandSenderName());
-                return;
+                return 0;
             }
 
             for (int i = 0; i < CRAFT_SLOTS; i++) {
@@ -183,29 +187,23 @@ public final class CraftFiller {
             unfillable = fillAll(player, matrix, storage, recorder, targets, fillMultiplier);
         }
 
+        int crafted = 0;
         if (autocraft) {
-            // 反复「取产物进背包」，直到合成栏里的料用完或背包放不下
-            int crafted = 0;
+            // 反复「取产物进背包」，直到当前请求的次数完成、材料断了或背包放不下。
             while (crafted < craftLimit) {
                 // 产物放不进背包（防蒸发判断拦住）或产物格没东西（材料断了）都返回 null
                 if (resultTaker.takeOnce(player) == null) break;
                 crafted++;
-                // 合成途中<b>不</b>补料：一次点击最多消耗掉玩家摆进格子的那些
-                // （见上面 keepGrid 的说明）。NEI 那条「按配方做」的除外 —— 它的料
-                // 本来就该从仓库出。
-                if (!keepGrid) fillAll(player, matrix, storage, recorder, targets, fillMultiplier);
+                // 玩家自己摆的合成栏不能中途补料。NEI 的一步请求则只补回这一轮刚
+                // 消耗的配方用量，并且最后一轮不再补，避免把尚未请求的材料留进格子。
+                if (!keepGrid && crafted < craftLimit) {
+                    fillAll(player, matrix, storage, recorder, targets, fillMultiplier);
+                }
             }
 
-            // 做完了再把合成栏补回原样：原料够的话，下一次 Shift 点就能接着做，
-            // 不用自己一趟趟搬料。
-            //
-            // 补的<b>量</b>按布局来（{@code perCraft}）：玩家摆 8 个就补回 8 个、
-            // NEI 配方一格配 1 个就补回 1 个 —— 补回他刚才那个样子，而不是擅自
-            // 塞满一整叠。「原料够不够」由 gather 那边按背包 + 仓库实际存量封顶。
-            //
-            // 只有真的做成过（crafted > 0）才补：一次都没做成说明这个摆法合不出来，
-            // 这时候往格子里搬料只会让玩家更糊涂。
-            if (crafted > 0) {
+            // 终端手动 Shift 点产物格的语义是「做完后保留一轮摆法，下一次还能接着做」。
+            // NEI 的一步请求不能额外预取下一轮，否则本地链计算看到的是未请求材料。
+            if (crafted > 0 && keepGrid && requested <= 0L) {
                 fillAll(player, matrix, storage, recorder, targets, 1);
             }
 
@@ -229,6 +227,7 @@ public final class CraftFiller {
         // 合成栏/背包/产物格是真实槽位，全靠这一句同步回客户端。
         // 幂等，多调无害。
         container.detectAndSendChanges();
+        return crafted;
     }
 
     /**
