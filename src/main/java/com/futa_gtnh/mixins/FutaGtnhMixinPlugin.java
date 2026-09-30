@@ -44,6 +44,12 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
     /** lootgames 目标的 mixin 全部收在这个子包里，按包前缀分流探测。 */
     private static final String LOOTGAMES_MIXIN_PACKAGE = "com.futa_gtnh.mixins.lootgames.";
 
+    /** NEI 自动合成库存统计的可选目标。 */
+    private static final String NEI_MIXIN = "com.futa_gtnh.mixins.MixinAutoCraftingManager";
+
+    /** NEI 的探测类。 */
+    private static final String NEI_PROBE = "codechicken.nei.recipe.AutoCraftingManager";
+
     /**
      * 目标是原版类、任何时候都该生效的 mixin。
      *
@@ -64,6 +70,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
     private static boolean present;
 
     private static boolean lootgamesPresent;
+
+    private static boolean neiPresent;
 
     private static boolean tinkersPresent() {
         if (present) return true;
@@ -116,6 +124,32 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         return false;
     }
 
+    /** NEI 是可选依赖；缺席时不能让客户端 mixin 配置去解析 NEI 类。 */
+    private static boolean neiPresent() {
+        if (neiPresent) return true;
+
+        try {
+            if (Loader.isModLoaded("NotEnoughItems")) {
+                neiPresent = true;
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // 启动早期走类查找兜底
+        }
+
+        try {
+            if (Launch.classLoader != null
+                && Launch.classLoader.getResource(NEI_PROBE.replace('.', '/') + ".class") != null) {
+                neiPresent = true;
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // 缺席时保持 false
+        }
+
+        return false;
+    }
+
     @Override
     public void onLoad(String mixinPackage) {}
 
@@ -126,6 +160,7 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (NEI_MIXIN.equals(mixinClassName)) return neiPresent();
         // lootgames 目标的 mixin：装了 lootgames 才应用，没装连碰都不碰
         if (mixinClassName.startsWith(LOOTGAMES_MIXIN_PACKAGE)) return lootgamesPresent();
         // 原版目标的 mixin（俯瞰远程 GUI 的距离校验放宽等）无条件生效

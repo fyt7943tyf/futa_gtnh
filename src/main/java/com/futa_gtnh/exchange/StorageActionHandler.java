@@ -13,6 +13,7 @@ import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
+import com.futa_gtnh.network.PacketCraftResult;
 import com.futa_gtnh.network.PacketStorageAction;
 import com.futa_gtnh.network.PacketStorageDelta;
 import com.futa_gtnh.network.PacketTerminalFluid;
@@ -63,8 +64,15 @@ public final class StorageActionHandler {
     /** 玩家 UUID -> [上次记录的 ticksExisted, 本 tick 已处理的操作数] */
     private static final Map<UUID, int[]> RATE_LIMIT = new HashMap<>();
 
+    /** 玩家 UUID -> 最近一次 NEI 步骤回执，用来防止重复包重复扣料。 */
+    private static final Map<UUID, CraftReceipt> LAST_CRAFT_REQUESTS = new HashMap<>();
+
     public static void handle(EntityPlayerMP player, PacketStorageAction packet) {
         if (player == null || packet == null) return;
+
+        // 网络层通常不会重复投递，但 NEI 步骤是「扣料 + 合成」操作，不能把这个
+        // 假设当成守恒条件。相同请求编号只回放上一次结果，不再执行一次合成。
+        if (replayCraftRequest(player, packet)) return;
 
         Container open = player.openContainer;
 
@@ -73,8 +81,14 @@ public final class StorageActionHandler {
         // （理由见 station/StationCrafting），同样要求玩家真的开着那个界面。
         boolean terminal = open instanceof ContainerSharedTerminal;
         boolean station = !terminal && futa$isSharedChestStation(open);
-        if (!terminal && !station) return;
-        if (isFlooding(player)) return;
+        if (!terminal && !station) {
+            completeCraftRequest(player, packet, 0);
+            return;
+        }
+        if (isFlooding(player)) {
+            completeCraftRequest(player, packet, 0);
+            return;
+        }
 
         SharedStorage storage = SharedStorageManager.getStorage();
         PacketStorageDelta delta = new PacketStorageDelta();
@@ -85,22 +99,28 @@ public final class StorageActionHandler {
             // 合成站只认「填合成栏 / 自动合成」两个动作，其它动作（终端界面专用的）直接忽略
             byte action = packet.getAction();
             if (action != PacketStorageAction.FILL_CRAFT_MATRIX && action != PacketStorageAction.AUTOCRAFT) {
+                completeCraftRequest(player, packet, 0);
                 return;
             }
+            int crafted = -1;
             try {
-                if (StationCrafting.handleCraft(player, open, packet, storage, recorder)) {
+                crafted = StationCrafting.handleCraft(player, open, packet, storage, recorder);
+                if (crafted >= 0) {
                     StationCrafting.broadcast(open, delta);
                 }
             } catch (Throwable t) {
                 FutaGtnhMod.LOG.error("共享存储：处理玩家 {} 的合成站配方直填时出错，将重发全量以对齐状态", player.getCommandSenderName(), t);
                 SharedStorageManager.resyncAll();
                 open.detectAndSendChanges();
+                crafted = 0;
             }
+            completeCraftRequest(player, packet, Math.max(0, crafted));
             return;
         }
 
         ContainerSharedTerminal container = (ContainerSharedTerminal) open;
         boolean forceContainerSync = false;
+        int crafted = 0;
 
         try {
             switch (packet.getAction()) {
@@ -246,13 +266,14 @@ public final class StorageActionHandler {
                     // 产物<b>直接进共享存储</b>：从仓库拿的料，做出来的东西回仓库 ——
                     // 一次 Shift 点下去，玩家背包一个格子都不用占。
                     // （不带 Shift 的普通点击仍然走原版，产物照旧留在光标/背包上。）
-                    CraftFiller.handle(player, container, container.getCraftMatrix(), new CraftFiller.ResultTaker() {
+                    crafted = CraftFiller
+                        .handle(player, container, container.getCraftMatrix(), new CraftFiller.ResultTaker() {
 
-                        @Override
-                        public ItemStack takeOnce(EntityPlayerMP who) {
-                            return container.transferCraftResultToStorage(who, storage, recorder);
-                        }
-                    }, packet, storage, recorder);
+                            @Override
+                            public ItemStack takeOnce(EntityPlayerMP who) {
+                                return container.transferCraftResultToStorage(who, storage, recorder);
+                            }
+                        }, packet, storage, recorder);
                     forceContainerSync = true;
                     break;
                 }
@@ -271,6 +292,7 @@ public final class StorageActionHandler {
                 .error("共享存储：处理玩家 {} 的操作 {} 时出错，将重发全量以对齐状态", player.getCommandSenderName(), packet.getAction(), t);
             SharedStorageManager.resyncAll();
             container.detectAndSendChanges();
+            completeCraftRequest(player, packet, 0);
             return;
         }
 
@@ -279,6 +301,7 @@ public final class StorageActionHandler {
             // 改用全量快照 —— 那条路径是按字节分片的，体积可控。
             SharedStorageManager.resyncAll();
             container.detectAndSendChanges();
+            completeCraftRequest(player, packet, crafted);
             return;
         }
 
@@ -289,6 +312,7 @@ public final class StorageActionHandler {
         if (forceContainerSync || !delta.isEmpty()) {
             container.detectAndSendChanges();
         }
+        completeCraftRequest(player, packet, crafted);
     }
 
     private static void handleSetTerminalFluid(EntityPlayerMP player, ContainerSharedTerminal container, FluidKey key) {
@@ -344,6 +368,56 @@ public final class StorageActionHandler {
         return Math.min(amount, MAX_AMOUNT_PER_ACTION);
     }
 
+    /** 只有带编号的 AUTOCRAFT 才是 NEI 的同步步骤请求。 */
+    private static boolean isCraftRequest(PacketStorageAction packet) {
+        return packet != null && packet.getAction() == PacketStorageAction.AUTOCRAFT && packet.getRequestId() != 0L;
+    }
+
+    /**
+     * 重放相同请求的权威结果。
+     *
+     * <p>
+     * 同一个客户端只允许一个 NEI 步骤在途，所以保存最近一次结果即可；玩家重新登录
+     * 时由 {@link #forget} 清掉。旧编号不再执行，避免迟到包把已经完成的步骤再做一次。
+     */
+    private static boolean replayCraftRequest(EntityPlayerMP player, PacketStorageAction packet) {
+        if (!isCraftRequest(packet)) return false;
+
+        CraftReceipt previous = LAST_CRAFT_REQUESTS.get(player.getUniqueID());
+        if (previous == null) return false;
+
+        if (previous.requestId == packet.getRequestId()) {
+            PacketCraftResult.send(player, previous.requestId, previous.crafted, previous.status);
+            return true;
+        }
+
+        if (packet.getRequestId() < previous.requestId) {
+            PacketCraftResult.send(player, packet.getRequestId(), 0, PacketCraftResult.FAILED);
+            return true;
+        }
+        return false;
+    }
+
+    /** 在所有存储/容器同步包发出之后发送 NEI 步骤回执。 */
+    private static void completeCraftRequest(EntityPlayerMP player, PacketStorageAction packet, int crafted) {
+        if (!isCraftRequest(packet)) return;
+
+        int actual = Math.max(0, crafted);
+        long requested = packet.getAmount();
+        byte status;
+        if (actual <= 0) {
+            status = PacketCraftResult.FAILED;
+        } else if (requested > 0L && actual < requested) {
+            status = PacketCraftResult.PARTIAL;
+        } else {
+            status = PacketCraftResult.COMPLETED;
+        }
+
+        CraftReceipt receipt = new CraftReceipt(packet.getRequestId(), actual, status);
+        LAST_CRAFT_REQUESTS.put(player.getUniqueID(), receipt);
+        PacketCraftResult.send(player, receipt.requestId, receipt.crafted, receipt.status);
+    }
+
     /**
      * 简单令牌桶：同一个 tick 内的操作数超过阈值就丢弃后续请求。
      *
@@ -375,7 +449,22 @@ public final class StorageActionHandler {
 
     public static void forget(EntityPlayerMP player) {
         if (player != null) {
-            RATE_LIMIT.remove(player.getUniqueID());
+            UUID id = player.getUniqueID();
+            RATE_LIMIT.remove(id);
+            LAST_CRAFT_REQUESTS.remove(id);
+        }
+    }
+
+    private static final class CraftReceipt {
+
+        private final long requestId;
+        private final int crafted;
+        private final byte status;
+
+        private CraftReceipt(long requestId, int crafted, byte status) {
+            this.requestId = requestId;
+            this.crafted = crafted;
+            this.status = status;
         }
     }
 

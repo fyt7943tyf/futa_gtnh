@@ -50,7 +50,7 @@ public final class ClientStorageCache {
         return ready;
     }
 
-    public static int getRevision() {
+    public static synchronized int getRevision() {
         return revision;
     }
 
@@ -69,7 +69,7 @@ public final class ClientStorageCache {
      * NEI 的配方转移联动（「材料够不够」的绿红提示）用：判定时把背包和共享存储
      * 加在一起算。数量是增量同步来的绝对值，最多短暂滞后一个包。
      */
-    public static long getItemAmount(ItemStack stack) {
+    public static synchronized long getItemAmount(ItemStack stack) {
         if (stack == null || !ready) return 0L;
         ItemKey key = ItemKey.of(stack);
         if (key == null) return 0L;
@@ -78,12 +78,49 @@ public final class ClientStorageCache {
     }
 
     /** 共享存储里这种流体有多少毫巴（客户端视角）。 */
-    public static long getFluidAmount(net.minecraftforge.fluids.FluidStack fluid) {
+    public static synchronized long getFluidAmount(net.minecraftforge.fluids.FluidStack fluid) {
         if (fluid == null || !ready) return 0L;
         FluidKey key = FluidKey.of(fluid);
         if (key == null) return 0L;
         StorageViewEntry entry = FLUID_INDEX.get(key);
         return entry == null ? 0L : entry.getAmount();
+    }
+
+    /**
+     * 给 NEI 合成链使用的共享物品快照。
+     *
+     * <p>
+     * NEI 的合成计算在后台线程运行，而网络增量在客户端线程更新缓存，不能把可变的
+     * {@link #ITEMS} 直接交给后台线程遍历。这里复制成「键 + 数量」的不可变快照，
+     * 让 NEI 看到的是同一个时刻的存量。
+     */
+    public static synchronized List<ItemAmount> itemAmounts() {
+        List<ItemAmount> result = new ArrayList<>(ITEMS.size());
+        for (StorageViewEntry entry : ITEMS) {
+            if (entry == null || entry.getItemKey() == null || entry.getAmount() <= 0L) continue;
+            result.add(new ItemAmount(entry.getItemKey(), entry.getAmount()));
+        }
+        return result;
+    }
+
+    /** NEI 合成链需要的共享物品键和权威数量。 */
+    public static final class ItemAmount {
+
+        private final ItemKey key;
+        private final long amount;
+
+        private ItemAmount(ItemKey key, long amount) {
+            this.key = key;
+            this.amount = amount;
+        }
+
+        public ItemKey getKey() {
+            return key;
+        }
+
+        public long getAmount() {
+            return amount;
+        }
     }
 
     // ==================================================================
@@ -97,7 +134,7 @@ public final class ClientStorageCache {
      * {@code transferId} 变了就丢弃上一轮没拼完的残片：服务端连续发两次快照时
      * （比如玩家反复开关界面），旧的那次没必要再拼，也无从判断它是否完整。
      */
-    public static void receiveChunk(int transferId, int chunkIndex, int chunkCount, byte[] data) {
+    public static synchronized void receiveChunk(int transferId, int chunkIndex, int chunkCount, byte[] data) {
         if (chunkCount <= 0 || chunkCount > 4096) return;
 
         if (transferId != incomingTransferId) {
@@ -191,7 +228,7 @@ public final class ClientStorageCache {
      * 丢一条、重复一条都不会让客户端和服务端长期不一致，
      * 最多是短暂显示错误，下一条就会纠正过来。
      */
-    public static void applyDelta(List<PacketStorageDelta.Change> changes) {
+    public static synchronized void applyDelta(List<PacketStorageDelta.Change> changes) {
         if (changes == null || changes.isEmpty()) return;
 
         for (PacketStorageDelta.Change change : changes) {

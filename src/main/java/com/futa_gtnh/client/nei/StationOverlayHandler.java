@@ -91,9 +91,7 @@ public class StationOverlayHandler extends SharedTerminalOverlayHandler {
         NBTTagCompound layout = buildLayout(recipe, recipeIndex);
         if (layout == null) return false;
 
-        NetworkHandler.INSTANCE
-            .sendToServer(PacketStorageAction.craft(PacketStorageAction.AUTOCRAFT, layout, multiplier));
-        return true;
+        return NeiCraftStep.request(layout, multiplier);
     }
 
     @Override

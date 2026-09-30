@@ -140,7 +140,7 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
     }
 
     /**
-     * NEI 的自动合成入口（{@code AutoCraftingManager} 调的）：填栏 + 连续合成。
+     * NEI 的自动合成入口（{@code AutoCraftingManager} 调的）：请求服务端执行当前一步。
      *
      * <p>
      * 和「+」的区别就在这里 —— 这个是玩家明确要求「做」，那个只是「摆」。
@@ -152,9 +152,7 @@ public class SharedTerminalOverlayHandler extends DefaultOverlayHandler {
         NBTTagCompound layout = buildLayout(recipe, recipeIndex);
         if (layout == null) return false;
 
-        NetworkHandler.INSTANCE
-            .sendToServer(PacketStorageAction.craft(PacketStorageAction.AUTOCRAFT, layout, multiplier));
-        return true;
+        return NeiCraftStep.request(layout, multiplier);
     }
 
     /**
