@@ -47,6 +47,41 @@ tasks.register<JavaExec>("verifySharedStorageReadApi") {
 tasks.named("check") {
     dependsOn(tasks.named("verifySharedStorageReadApi"))
     dependsOn(tasks.named("verifyDisassembler"))
+    dependsOn(tasks.named("verifyTerminalClicks"))
+}
+
+// Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.
+val compileTerminalClickChecks = tasks.register<JavaCompile>("compileTerminalClickChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/terminal-click-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output +
+        sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("terminal-click-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+// LWJGL 2 seals its packages; unpack its classes so test-only input fixtures can share those packages.
+val extractTerminalClickLwjgl = tasks.register<Sync>("extractTerminalClickLwjgl") {
+    from(sourceSets["main"].compileClasspath.filter {
+        it.name.startsWith("lwjgl-2") || it.name.startsWith("lwjgl_util-2")
+    }.map { zipTree(it) })
+    exclude("META-INF/**")
+    into(layout.buildDirectory.dir("terminal-click-check/lwjgl"))
+}
+
+tasks.register<JavaExec>("verifyTerminalClicks") {
+    group = "verification"
+    description = "Checks terminal Shift click/release dispatch, cursor collection and backpack double-click deposits"
+    dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.client.TerminalClickRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 
 tasks.register<JavaExec>("verifyDisassembler") {
