@@ -51,7 +51,7 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // after:enhancedlootbags / after:vendingmachine 同理：自选抽奖机要复用
     // ELB 已加载完的战利品组配置；VendingMachine 的团队钱包数据也是初始化好
     // 之后再读更稳妥。都是软依赖，缺席时只是不注册/不可用。
-    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine")
+    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";
@@ -144,6 +144,7 @@ public class FutaGtnhMod {
      */
     @Mod.EventHandler
     public void loadComplete(cpw.mods.fml.common.event.FMLLoadCompleteEvent event) {
+        com.futa_gtnh.disassembler.DisassemblerRegistration.loadComplete();
         com.futa_gtnh.locator.OreVeinCatalog.isAvailable();
         // NEI 是在这个阶段才加载各模组插件的，所以「盖过别的模组注册的 NEI handler」
         // 这种事要等它之后再补一次（实现只在客户端，见 CommonProxy#lateInit）

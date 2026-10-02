@@ -81,6 +81,7 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void lateInit() {
         if (cpw.mods.fml.common.Loader.isModLoaded("NotEnoughItems")) {
+            if (Config.enableDisassembler) com.futa_gtnh.client.nei.DisassemblerRecipeHandler.register();
             com.futa_gtnh.client.nei.NeiIntegration.installStationOverlay();
         }
     }
