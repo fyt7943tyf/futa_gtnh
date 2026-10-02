@@ -1,6 +1,6 @@
 # futa_gtnh 只读仓库 API v1
 
-适用版本：futa_gtnh `1.21.0`。本 API 提供唯一的全服物品/流体仓库快照，不依赖 AE2、AE2-WEB、玩家在线状态、终端方块或队伍系统。
+首次提供版本：futa_gtnh `1.21.0`；当前 `1.22.0` 保持 API v1 不变。本 API 提供唯一的全服物品/流体仓库快照，不依赖 AE2、AE2-WEB、玩家在线状态、终端方块或队伍系统。
 
 ## 调用入口
 
@@ -84,4 +84,4 @@ $env:GRADLE_OPTS = "-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=1081 -Dhttps.pro
 
 该脚本仅用于缓存路径异常的环境；正常环境可以直接运行仓库既有构建命令。格式化器加载 Equo 库时脚本使用其缓存路径覆盖机制，缓存不会提交到仓库。
 
-下游 AE2-WEB 在开发时以 `build/libs/futa_gtnh-1.21.0-dev.jar` 作为 compileOnly 依赖；正式服务端安装的是 `futa_gtnh-1.21.0.jar`。本次只完成 futa 侧桥接，AE2-WEB 的适配器、HTTP API 和前端来源选择仍需另行开发。
+下游 AE2-WEB 在开发时以 `build/libs/futa_gtnh-1.22.0-dev.jar` 作为 compileOnly 依赖；正式服务端安装的是 `futa_gtnh-1.22.0.jar`。原 `1.21.0` 开发包仍提供相同的 API v1。本仓库只提供 futa 侧桥接，AE2-WEB 的适配器、HTTP API 和前端来源选择由下游项目实现。
