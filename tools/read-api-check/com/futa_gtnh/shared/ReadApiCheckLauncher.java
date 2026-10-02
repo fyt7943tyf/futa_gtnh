@@ -23,7 +23,7 @@ public final class ReadApiCheckLauncher {
             Launch.blackboard = new HashMap<>();
             Thread.currentThread().setContextClassLoader(loader);
             try {
-                Class.forName("com.futa_gtnh.shared.SharedStorageReadApiRegression", true, loader)
+                Class.forName(args.length == 0 ? "com.futa_gtnh.shared.SharedStorageReadApiRegression" : args[0], true, loader)
                     .getMethod("main", String[].class)
                     .invoke(null, (Object) args);
             } catch (InvocationTargetException error) {

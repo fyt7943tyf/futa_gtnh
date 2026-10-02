@@ -46,4 +46,15 @@ tasks.register<JavaExec>("verifySharedStorageReadApi") {
 
 tasks.named("check") {
     dependsOn(tasks.named("verifySharedStorageReadApi"))
+    dependsOn(tasks.named("verifyDisassembler"))
+}
+
+tasks.register<JavaExec>("verifyDisassembler") {
+    group = "verification"
+    description = "Checks reverse batches, conflict rejection, real output capacity and persisted atomic processing"
+    dependsOn(compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.disassembler.DisassemblerRegression")
+    classpath = files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }

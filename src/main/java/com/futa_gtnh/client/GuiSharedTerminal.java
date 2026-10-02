@@ -973,12 +973,12 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         }
 
         Slot slot = hoveredContainerSlot(mouseX, mouseY);
-        if (!isTransferSlot(slot) || slot.getStack() == null) return false;
-
         if (isSpaceDown()) {
-            container.sendDepositAll(InventoryExchange.SCOPE_ALL);
+            if (mouseButton != 0 || !isBackpackSlot(slot)) return false;
+            container.sendDepositAll(InventoryExchange.SCOPE_MAIN);
             return true;
         }
+        if (!isTransferSlot(slot) || slot.getStack() == null) return false;
         if (isAltDown() && isPlayerInventorySlot(slot)) {
             container.requestDepositMatching(slot.getStack(), 0L);
             return true;

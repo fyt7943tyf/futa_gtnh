@@ -98,11 +98,14 @@ public class CommonProxy {
     }
 
     public void init(FMLInitializationEvent event) {
-        // 注册配方、事件监听
+        // GT and GT++ finish machine registration before our postInit.
     }
 
     public void postInit(FMLPostInitializationEvent event) {
-        // 处理与其他模组（例如 GregTech / NEI）的联动
+        com.futa_gtnh.disassembler.DisassemblerRegistration.register(
+            Loader.instance()
+                .getConfigDir());
+        com.futa_gtnh.disassembler.DisassemblerRegistration.addCraftingRecipe();
     }
 
     /**

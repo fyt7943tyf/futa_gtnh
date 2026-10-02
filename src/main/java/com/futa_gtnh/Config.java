@@ -248,6 +248,9 @@ public class Config {
     /** 是否注册太阳能除钙剂（右键蒸汽太阳能锅炉重置钙化进度的永久工具）。 */
     public static boolean enableSolarDescaler = true;
 
+    public static boolean enableDisassembler = true;
+    public static int disassemblerMetaTileId = 32700;
+
     // ------------------------------------------------------------------
     // 界面（客户端行为）
     // ------------------------------------------------------------------
@@ -600,6 +603,19 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             enableSolarDescaler,
             "是否注册太阳能除钙剂（右键蒸汽太阳能锅炉，重置其钙化进度；永久工具不消耗）。");
+
+        enableDisassembler = configuration.getBoolean(
+            "enableDisassembler",
+            Configuration.CATEGORY_GENERAL,
+            enableDisassembler,
+            "注册 LV 单步拆解机（固定 32 EU/t、1A、2 秒）。客户端和服务端需一致。");
+        disassemblerMetaTileId = configuration.getInt(
+            "disassemblerMetaTileId",
+            Configuration.CATEGORY_GENERAL,
+            disassemblerMetaTileId,
+            1,
+            32766,
+            "拆解机的稳定 GT MTE ID；冲突时修改，已有世界不可随意更换。客户端和服务端需一致。");
 
         tinkersAutoFill = configuration.getBoolean(
             "tinkersAutoFill",
