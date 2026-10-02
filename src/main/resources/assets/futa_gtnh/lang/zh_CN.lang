@@ -104,7 +104,7 @@ futa_gtnh.gui.store.terminal_io=面配置
 # ------------------------------------------------- 终端方块的主动搬运（面配置）
 futa_gtnh.gui.terminal.io.title=终端自动化
 futa_gtnh.gui.terminal.io.tab.faces=面配置
-futa_gtnh.gui.terminal.io.tab.filter=筛选
+futa_gtnh.gui.terminal.io.tab.filter=输出筛选
 futa_gtnh.gui.terminal.io.tab.rate=节奏
 futa_gtnh.gui.terminal.io.items=物品
 futa_gtnh.gui.terminal.io.fluids=流体
@@ -131,10 +131,11 @@ futa_gtnh.gui.terminal.io.search=搜索（拼音 / @模组 / *矿辞）
 futa_gtnh.gui.terminal.io.prefix=矿辞前缀（回车生效）
 futa_gtnh.gui.terminal.io.prefix.title=矿辞前缀
 futa_gtnh.gui.terminal.io.preset.title=矿辞预设
-futa_gtnh.gui.terminal.io.clear=清空筛选
+futa_gtnh.gui.terminal.io.clear=清空白名单
 futa_gtnh.gui.terminal.io.done=完成
 futa_gtnh.gui.terminal.io.selected=已选
-futa_gtnh.gui.terminal.io.no_filter=（空 = 什么都搬）
+futa_gtnh.gui.terminal.io.no_filter=（空 = 禁止输出）
+futa_gtnh.gui.terminal.io.filter.hint=只筛选输出；输入不筛选
 futa_gtnh.gui.terminal.io.empty=没有匹配的条目
 futa_gtnh.gui.terminal.io.syncing=同步中…（正在向服务端要这个终端的配置）
 futa_gtnh.gui.terminal.io.rate=节奏（这一台自己的设置）
@@ -159,9 +160,8 @@ futa_gtnh.msg.craft.fill_missing_more=　…还有更多格缺料，详见服务
 futa_gtnh.msg.craft.not_craftable=共享存储：这条配方不是手工合成配方（NEI 的按钮只对手工合成有效），合成栏没动
 futa_gtnh.msg.craft.dumped=共享存储：合成栏里的 %s 个原料已返还仓库
 
-futa_gtnh.gui.status.remote=远程访问 —— 放置共享终端方块才能设置管道输出
-futa_gtnh.gui.status.output=管道输出（中键设置）：%s
-futa_gtnh.gui.status.output.none=未设置
+futa_gtnh.gui.status.remote=远程访问 —— 方块终端可配置每面输出
+futa_gtnh.gui.status.output=输出：按每面白名单提供
 
 # ---------------------------------------------------------------- 寻物魔杖
 item.futa_gtnh.locator_wand.name=寻物魔杖

@@ -1,0 +1,22 @@
+// Run with gradlew -I tools/terminal-io-check/verify.init.gradle verifyTerminalIo --no-configuration-cache.
+gradle.projectsEvaluated {
+    def project = gradle.rootProject
+    def main = project.sourceSets.main
+    def compileChecks = project.tasks.register('compileTerminalIoChecks', JavaCompile) {
+        dependsOn(project.tasks.named('classes'))
+        source(project.fileTree('tools/terminal-io-check') { include '**/*.java' })
+        classpath = main.output + main.compileClasspath.filter { !it.name.startsWith('jabel-') }
+        destinationDirectory.set(project.layout.buildDirectory.dir('terminal-io-check/classes'))
+        sourceCompatibility = '1.8'
+        targetCompatibility = '1.8'
+        options.encoding = 'UTF-8'
+        options.compilerArgs.add('-proc:none')
+    }
+    project.tasks.register('verifyTerminalIo', JavaExec) {
+        group = 'verification'
+        description = 'Checks per-face active/passive output whitelists, input behavior and quantity conservation'
+        dependsOn(compileChecks)
+        mainClass.set('com.futa_gtnh.block.TerminalIoCheckLauncher')
+        classpath = project.files(compileChecks.flatMap { it.destinationDirectory }) + main.runtimeClasspath + main.compileClasspath
+    }
+}

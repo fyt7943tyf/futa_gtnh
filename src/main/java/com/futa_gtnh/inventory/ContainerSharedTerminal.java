@@ -978,14 +978,7 @@ public class ContainerSharedTerminal extends Container {
         if (fluidKey != null) {
             long amount = shift ? -1L : Config.fluidClickAmount;
 
-            if (mouseButton == 2) {
-                // 中键：把这个流体设为方块终端的输出（远程打开的界面没有终端，忽略）
-                if (terminal != null) {
-                    NetworkHandler.INSTANCE
-                        .sendToServer(PacketStorageAction.fluid(PacketStorageAction.SET_TERMINAL_FLUID, fluidKey, 0L));
-                }
-                return;
-            }
+            if (mouseButton == 2) return;
             if (mouseButton == 1) {
                 // 右键：取 GT 流体显示物品
                 NetworkHandler.INSTANCE
@@ -1005,15 +998,6 @@ public class ContainerSharedTerminal extends Container {
         ItemKey itemKey = viewIndex < pageItemKeys.length ? pageItemKeys[viewIndex] : null;
         if (itemKey == null) itemKey = ItemKey.of(display);
         if (itemKey == null) return;
-
-        if (mouseButton == 2) {
-            // 方块终端中键选择物品管道的输出；远程打开的共享存储仍保留原本的整组取出语义。
-            if (terminal != null) {
-                NetworkHandler.INSTANCE
-                    .sendToServer(PacketStorageAction.item(PacketStorageAction.SET_TERMINAL_ITEM, itemKey, 0L));
-                return;
-            }
-        }
 
         long amount;
         if (dragging) {

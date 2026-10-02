@@ -12,8 +12,6 @@ import com.futa_gtnh.inventory.ContainerLootMachine;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketAutoStoreSync;
-import com.futa_gtnh.network.PacketTerminalFluid;
-import com.futa_gtnh.network.PacketTerminalItem;
 import com.futa_gtnh.shared.SharedStorageManager;
 
 import cpw.mods.fml.common.network.IGuiHandler;
@@ -52,13 +50,6 @@ public class GuiHandler implements IGuiHandler {
 
         if (player instanceof EntityPlayerMP) {
             EntityPlayerMP serverPlayer = (EntityPlayerMP) player;
-
-            // 把这个终端选择的物品/流体输出告诉客户端。
-            // 它们是每个方块各自的状态，不跟着全服共用的存储快照走，所以单独发小包。
-            NetworkHandler.INSTANCE
-                .sendTo(new PacketTerminalFluid(terminal == null ? null : terminal.getOutputFluid()), serverPlayer);
-            NetworkHandler.INSTANCE
-                .sendTo(new PacketTerminalItem(terminal == null ? null : terminal.getOutputItem()), serverPlayer);
 
             // 「拾取自动入库」是每个玩家各自的状态，同理单独下发
             NetworkHandler.INSTANCE.sendTo(new PacketAutoStoreSync(AutoStore.isEnabled(serverPlayer)), serverPlayer);

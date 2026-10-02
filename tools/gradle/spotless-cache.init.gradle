@@ -1,0 +1,13 @@
+// Optional local build workaround: keep Equo formatter caches inside this workspace.
+// Invoke with -I tools/gradle/spotless-cache.init.gradle when user.home resolves to C:\.
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin('com.diffplug.spotless') {
+        def pluginLoader = project.plugins.getPlugin('com.diffplug.spotless').class.classLoader
+        def locations = pluginLoader.loadClass('dev.equo.solstice.p2.CacheLocations')
+        def cacheRoot = new File(project.rootDir, '.gradle/spotless-p2')
+        locations.getField('override_p2data').set(null, cacheRoot)
+        def cachedLocation = locations.getDeclaredField('p2data')
+        cachedLocation.accessible = true
+        cachedLocation.set(null, cacheRoot)
+    }
+}

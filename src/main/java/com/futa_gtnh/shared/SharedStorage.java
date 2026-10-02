@@ -1,5 +1,6 @@
 package com.futa_gtnh.shared;
 
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -8,6 +9,9 @@ import java.util.Map;
 
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
+
+import com.futa_gtnh.api.SharedStorageReadStatus;
+import com.futa_gtnh.api.SharedStorageSnapshot;
 
 /**
  * 全服共享的无限存储池。物品和流体各一张表，<b>数量用 long 记</b>，
@@ -208,11 +212,44 @@ public class SharedStorage {
 
     /** @return 物品条目的独立副本，可以安全地在锁外遍历 */
     public synchronized List<Map.Entry<ItemKey, Long>> snapshotItems() {
-        return new ArrayList<>(items.entrySet());
+        List<Map.Entry<ItemKey, Long>> result = new ArrayList<>(items.size());
+        for (Map.Entry<ItemKey, Long> entry : items.entrySet()) {
+            result.add(new AbstractMap.SimpleImmutableEntry<>(entry));
+        }
+        return result;
     }
 
     public synchronized List<Map.Entry<FluidKey, Long>> snapshotFluids() {
-        return new ArrayList<>(fluids.entrySet());
+        List<Map.Entry<FluidKey, Long>> result = new ArrayList<>(fluids.size());
+        for (Map.Entry<FluidKey, Long> entry : fluids.entrySet()) {
+            result.add(new AbstractMap.SimpleImmutableEntry<>(entry));
+        }
+        return result;
+    }
+
+    /** Captures revision, items and fluids atomically; called by the server-thread read API. */
+    synchronized SharedStorageSnapshot snapshotForReadApi(String generation) {
+        List<SharedStorageSnapshot.ItemEntry> itemRows = new ArrayList<>(items.size());
+        for (Map.Entry<ItemKey, Long> entry : items.entrySet()) {
+            itemRows.add(
+                new SharedStorageSnapshot.ItemEntry(
+                    entry.getKey()
+                        .prototype(),
+                    entry.getValue()));
+        }
+        List<SharedStorageSnapshot.FluidEntry> fluidRows = new ArrayList<>(fluids.size());
+        for (Map.Entry<FluidKey, Long> entry : fluids.entrySet()) {
+            fluidRows.add(
+                new SharedStorageSnapshot.FluidEntry(
+                    entry.getKey()
+                        .prototype(),
+                    entry.getValue()));
+        }
+        SharedStorageReadStatus status = new SharedStorageReadStatus(
+            SharedStorageReadStatus.State.READY,
+            generation,
+            revision);
+        return new SharedStorageSnapshot(status, itemRows, fluidRows);
     }
 
     /** @return 只读视图，仅限已持有本对象锁的场景使用（例如序列化时） */
