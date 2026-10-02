@@ -102,10 +102,7 @@ public class PacketStorageAction implements IMessage {
     public static final byte WITHDRAW_ALL = 24;
 
     // ---- 终端 ----
-    /** 设置方块终端往相邻管道/流体罐输出的流体。 */
-    public static final byte SET_TERMINAL_FLUID = 20;
-    /** 设置方块终端往物品管道输出的物品。 */
-    public static final byte SET_TERMINAL_ITEM = 21;
+    // 20、21 是已移除的中键输出选择动作，不再复用。
     /**
      * 设置方块终端「六个面怎么主动搬东西」的配置。
      *

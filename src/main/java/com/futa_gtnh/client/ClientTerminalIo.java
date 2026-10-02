@@ -87,7 +87,7 @@ public final class ClientTerminalIo {
         present = false;
         itemMask = 0;
         fluidMask = 0;
-        CONFIG.clearFilter();
+        CONFIG.clearFilters();
         for (net.minecraftforge.common.util.ForgeDirection face : net.minecraftforge.common.util.ForgeDirection.VALID_DIRECTIONS) {
             CONFIG.setMode(face, false, TerminalIoConfig.Mode.OFF);
             CONFIG.setMode(face, true, TerminalIoConfig.Mode.OFF);

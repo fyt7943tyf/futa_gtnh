@@ -2,7 +2,9 @@ package com.futa_gtnh.shared;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.MinecraftServer;
@@ -10,6 +12,8 @@ import net.minecraft.world.WorldServer;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
+import com.futa_gtnh.api.SharedStorageReadStatus;
+import com.futa_gtnh.api.SharedStorageSnapshot;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageDelta;
@@ -31,6 +35,11 @@ public final class SharedStorageManager {
     private static SharedStorage storage = new SharedStorage();
     private static File worldDirectory;
     private static boolean loaded;
+
+    /** Published on startup; read API calls must use this server thread. */
+    private static volatile Thread readApiThread;
+    private static String readApiGeneration = UUID.randomUUID()
+        .toString();
 
     private static int autosaveTicker;
     private static int transferCounter;
@@ -59,6 +68,31 @@ public final class SharedStorageManager {
         return loaded;
     }
 
+    /** Internal implementation for SharedStorageReadApi; does not copy the warehouse. */
+    public static SharedStorageReadStatus getReadApiStatus() {
+        checkReadApiThread();
+        return new SharedStorageReadStatus(
+            loaded ? SharedStorageReadStatus.State.READY : SharedStorageReadStatus.State.NOT_READY,
+            readApiGeneration,
+            loaded ? storage.getRevision() : 0);
+    }
+
+    /** Internal implementation for SharedStorageReadApi; never returns the temporary startup pool. */
+    public static SharedStorageSnapshot getReadApiSnapshot() {
+        checkReadApiThread();
+        if (!loaded) {
+            return new SharedStorageSnapshot(getReadApiStatus(), Collections.emptyList(), Collections.emptyList());
+        }
+        return storage.snapshotForReadApi(readApiGeneration);
+    }
+
+    private static void checkReadApiThread() {
+        Thread serverThread = readApiThread;
+        if (serverThread != null && Thread.currentThread() != serverThread) {
+            throw new IllegalStateException("SharedStorageReadApi must be called on the server thread");
+        }
+    }
+
     /**
      * 服务端启动完成时调用。重复调用（单人模式换存档）会先把上一份存盘再重新载入。
      */
@@ -66,6 +100,11 @@ public final class SharedStorageManager {
         if (loaded) {
             saveNow();
         }
+
+        readApiThread = Thread.currentThread();
+        readApiGeneration = UUID.randomUUID()
+            .toString();
+        loaded = false;
 
         File dir = resolveWorldDirectory(server);
         if (dir == null) {
@@ -93,8 +132,14 @@ public final class SharedStorageManager {
 
     /** 服务端停止时调用：无条件落盘。 */
     public static void onServerStopping() {
-        saveNow();
-        loaded = false;
+        try {
+            saveNow();
+        } finally {
+            loaded = false;
+            readApiGeneration = UUID.randomUUID()
+                .toString();
+            invalidateSnapshot();
+        }
     }
 
     /**
@@ -278,6 +323,8 @@ public final class SharedStorageManager {
 
         SharedStorage fresh = SharedStorageFile.load(worldDirectory);
         storage = fresh;
+        readApiGeneration = UUID.randomUUID()
+            .toString();
         invalidateSnapshot();
         resyncAll();
         return fresh.itemTypeCount() + fresh.fluidTypeCount();

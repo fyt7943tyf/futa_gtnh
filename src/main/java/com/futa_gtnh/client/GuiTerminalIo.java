@@ -26,6 +26,7 @@ import com.futa_gtnh.CommonProxy;
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.block.BlockSharedTerminal;
 import com.futa_gtnh.block.TerminalIoConfig;
+import com.futa_gtnh.block.TerminalOutputFilter;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageAction;
@@ -41,7 +42,7 @@ import com.futa_gtnh.shared.ItemKey;
  * <li><b>面配置</b>：中间一个 <b>3D 小方块</b>（EIO 那套做法），贴的就是方块在世界上
  * 用的那六个材质 —— 世界里看到的点数记号，和这里点的是同一套。
  * 点一个面选中它，右边用「关 / 抽入 / 输出」两组按钮分别设它的物品和流体方向；</li>
- * <li><b>筛选</b>：物品/流体条目 + 矿辞预设 + 自定义前缀；</li>
+ * <li><b>筛选</b>：每面独立的输出白名单：物品/流体条目 + 矿辞预设 + 自定义前缀；</li>
  * <li><b>节奏</b>：这台终端自己的间隔与每轮数量。</li>
  * </ul>
  *
@@ -72,6 +73,7 @@ public class GuiTerminalIo extends GuiScreen {
     private static final int BTN_KIND = 30;
     private static final int BTN_CLEAR = 31;
     private static final int BTN_DONE = 32;
+    private static final int BTN_FILTER_FACE = 33;
     private static final int BTN_PRESET_BASE = 40; // 40..44
     private static final int BTN_RATE_BASE = 50; // 50..55：三行 × 减/加
 
@@ -213,6 +215,8 @@ public class GuiTerminalIo extends GuiScreen {
 
         buttonList.clear();
         faceModeButtons.clear();
+        searchField = null;
+        prefixField = null;
 
         // ---- 页签 ----
         for (int i = 0; i < TAB_COUNT; i++) {
@@ -256,12 +260,14 @@ public class GuiTerminalIo extends GuiScreen {
     }
 
     private void buildFilterTab() {
+        buttonList.add(new FlatButton(BTN_FILTER_FACE, guiLeft + 210, guiTop + 20, 82, 16, ""));
         buttonList.add(new FlatButton(BTN_KIND, guiLeft + 8, guiTop + 40, 76, 16, ""));
         searchField = new GuiTextField(fontRendererObj, guiLeft + 90, guiTop + 40, 202, 16);
         searchField.setMaxStringLength(48);
         searchField.setText(lastQuery.equals("\u0000") ? "" : lastQuery);
 
-        TerminalIoConfig.Preset[] presets = TerminalIoConfig.Preset.values();
+        TerminalIoConfig.Preset[] presets = fluidTab ? new TerminalIoConfig.Preset[0]
+            : TerminalIoConfig.Preset.values();
         for (int i = 0; i < presets.length; i++) {
             int col = i % 3;
             int row = i / 3;
@@ -269,9 +275,11 @@ public class GuiTerminalIo extends GuiScreen {
                 .add(new FlatButton(BTN_PRESET_BASE + i, guiLeft + 200 + col * 32, guiTop + 88 + row * 20, 32, 18, ""));
         }
 
-        prefixField = new GuiTextField(fontRendererObj, guiLeft + 200, guiTop + 146, 92, 16);
-        prefixField.setMaxStringLength(64);
-        prefixField.setText(joinPrefixes());
+        if (!fluidTab) {
+            prefixField = new GuiTextField(fontRendererObj, guiLeft + 200, guiTop + 146, 92, 16);
+            prefixField.setMaxStringLength(64);
+            prefixField.setText(joinPrefixes());
+        }
 
         buttonList.add(new FlatButton(BTN_CLEAR, guiLeft + 8, guiTop + 168, 60, 16, ""));
     }
@@ -287,12 +295,16 @@ public class GuiTerminalIo extends GuiScreen {
 
     private String joinPrefixes() {
         StringBuilder builder = new StringBuilder();
-        for (String prefix : ClientTerminalIo.get()
-            .getCustomPrefixes()) {
+        for (String prefix : currentFilter().getCustomPrefixes()) {
             if (builder.length() > 0) builder.append(' ');
             builder.append(prefix);
         }
         return builder.toString();
+    }
+
+    private TerminalOutputFilter currentFilter() {
+        return ClientTerminalIo.get()
+            .getOutputFilter(ForgeDirection.getOrientation(selectedFace));
     }
 
     @Override
@@ -387,9 +399,10 @@ public class GuiTerminalIo extends GuiScreen {
             if (button instanceof FlatButton) ((FlatButton) button).setMarked(i == tab);
         }
 
-        boolean faces = tab == TAB_FACES;
-        boolean filter = tab == TAB_FILTER;
-        boolean rate = tab == TAB_RATE;
+        boolean ready = configReady();
+        boolean faces = tab == TAB_FACES && ready;
+        boolean filter = tab == TAB_FILTER && ready;
+        boolean rate = tab == TAB_RATE && ready;
 
         // 面配置：选中面的两组方向按钮。
         // 注意 faceModeButtons 只在面配置页签下才建得出来（见 initGui），别的页签时它是空的 ——
@@ -415,14 +428,21 @@ public class GuiTerminalIo extends GuiScreen {
         // 筛选页
         setEnabled(BTN_KIND, filter);
         setEnabled(BTN_CLEAR, filter);
-        if (searchField != null) searchField.setVisible(filter);
-        if (prefixField != null) prefixField.setVisible(filter);
+        setEnabled(BTN_FILTER_FACE, filter);
+        if (searchField != null) {
+            searchField.setVisible(tab == TAB_FILTER);
+            searchField.setEnabled(filter);
+        }
+        if (prefixField != null) {
+            prefixField.setVisible(tab == TAB_FILTER && !fluidTab);
+            prefixField.setEnabled(filter && !fluidTab);
+        }
         TerminalIoConfig.Preset[] presets = TerminalIoConfig.Preset.values();
         for (int i = 0; i < presets.length; i++) {
             GuiButton button = findButton(BTN_PRESET_BASE + i);
             if (button == null) continue;
-            button.enabled = filter;
-            boolean on = config.getPresets()
+            button.enabled = filter && !fluidTab;
+            boolean on = currentFilter().getPresets()
                 .contains(presets[i]);
             button.displayString = shortPresetName(presets[i]);
             if (button instanceof FlatButton) ((FlatButton) button).setMarked(on);
@@ -434,6 +454,9 @@ public class GuiTerminalIo extends GuiScreen {
         }
         GuiButton clearButton = findButton(BTN_CLEAR);
         if (clearButton != null) clearButton.displayString = tr("futa_gtnh.gui.terminal.io.clear");
+
+        GuiButton filterFaceButton = findButton(BTN_FILTER_FACE);
+        if (filterFaceButton != null) filterFaceButton.displayString = faceName(face) + " (" + pipCount(face) + ") >";
 
         // 节奏页
         for (int i = 0; i < 6; i++) {
@@ -977,8 +1000,22 @@ public class GuiTerminalIo extends GuiScreen {
             fontRendererObj.drawString(tr("futa_gtnh.gui.terminal.io.prefix"), guiLeft + 203, guiTop + 150, 0x707070);
         }
 
-        fontRendererObj.drawString(tr("futa_gtnh.gui.terminal.io.preset.title"), guiLeft + 200, guiTop + 74, 0xC0C0C0);
-        fontRendererObj.drawString(tr("futa_gtnh.gui.terminal.io.prefix.title"), guiLeft + 200, guiTop + 134, 0xC0C0C0);
+        if (!fluidTab) {
+            fontRendererObj
+                .drawString(tr("futa_gtnh.gui.terminal.io.preset.title"), guiLeft + 200, guiTop + 74, 0xC0C0C0);
+            fontRendererObj
+                .drawString(tr("futa_gtnh.gui.terminal.io.prefix.title"), guiLeft + 200, guiTop + 134, 0xC0C0C0);
+        }
+        String summary = tr("futa_gtnh.gui.terminal.io.selected") + " "
+            + selectedCount()
+            + (currentFilter().isEmpty(fluidTab) ? tr("futa_gtnh.gui.terminal.io.no_filter") : "");
+        fontRendererObj
+            .drawString(fontRendererObj.trimStringToWidth(summary, 184), guiLeft + 8, guiTop + 145, 0xA0A0A0);
+        fontRendererObj.drawString(
+            fontRendererObj.trimStringToWidth(tr("futa_gtnh.gui.terminal.io.filter.hint"), 184),
+            guiLeft + 8,
+            guiTop + 156,
+            0x909090);
     }
 
     private void drawFilterGrid(int mouseX, int mouseY) {
@@ -1016,7 +1053,7 @@ public class GuiTerminalIo extends GuiScreen {
     }
 
     private boolean isSelected(StorageViewEntry entry) {
-        TerminalIoConfig config = ClientTerminalIo.get();
+        TerminalOutputFilter config = currentFilter();
         if (entry.isFluid()) {
             FluidKey key = entry.getFluidKey();
             return key != null && config.containsFluid(key);
@@ -1046,25 +1083,18 @@ public class GuiTerminalIo extends GuiScreen {
             fontRendererObj.drawString(value, guiLeft + 200 - fontRendererObj.getStringWidth(value), y + 5, 0xFFFF55);
         }
 
-        fontRendererObj.drawString(
-            tr("futa_gtnh.gui.terminal.io.selected") + " "
-                + selectedCount()
-                + (config.isFilterEmpty() ? tr("futa_gtnh.gui.terminal.io.no_filter") : ""),
-            guiLeft + 8,
-            guiTop + 166,
-            0xA0A0A0);
     }
 
     private int selectedCount() {
-        TerminalIoConfig config = ClientTerminalIo.get();
-        return config.getItems()
+        TerminalOutputFilter filter = currentFilter();
+        return fluidTab ? filter.getFluids()
             .size()
-            + config.getFluids()
+            : filter.getItems()
                 .size()
-            + config.getPresets()
-                .size()
-            + config.getCustomPrefixes()
-                .size();
+                + filter.getPresets()
+                    .size()
+                + filter.getCustomPrefixes()
+                    .size();
     }
 
     private void drawTooltips(int mouseX, int mouseY) {
@@ -1109,6 +1139,15 @@ public class GuiTerminalIo extends GuiScreen {
             return;
         }
 
+        if (button.id != BTN_DONE && !configReady()) return;
+
+        if (button.id == BTN_FILTER_FACE) {
+            applyPrefixes();
+            selectedFace = (selectedFace + 1) % TerminalIoConfig.FACES;
+            initGui();
+            return;
+        }
+
         if (button.id == BTN_FACE_RESET) {
             cube.reset();
             selectedFace = ForgeDirection.SOUTH.ordinal();
@@ -1127,7 +1166,7 @@ public class GuiTerminalIo extends GuiScreen {
         }
 
         if (button.id >= BTN_PRESET_BASE && button.id < BTN_PRESET_BASE + TerminalIoConfig.Preset.values().length) {
-            config.togglePreset(TerminalIoConfig.Preset.values()[button.id - BTN_PRESET_BASE]);
+            currentFilter().togglePreset(TerminalIoConfig.Preset.values()[button.id - BTN_PRESET_BASE]);
             refreshLabels();
             pushConfig();
             return;
@@ -1142,14 +1181,14 @@ public class GuiTerminalIo extends GuiScreen {
 
         switch (button.id) {
             case BTN_KIND:
+                applyPrefixes();
                 fluidTab = !fluidTab;
                 shown.clear();
-                refreshFilter();
-                refreshLabels();
+                initGui();
                 break;
             case BTN_CLEAR:
-                config.clearFilter();
-                prefixField.setText("");
+                currentFilter().clear(fluidTab);
+                if (prefixField != null && !fluidTab) prefixField.setText("");
                 refreshLabels();
                 pushConfig();
                 break;
@@ -1181,17 +1220,16 @@ public class GuiTerminalIo extends GuiScreen {
             return;
         }
 
-        if (tab != TAB_FILTER || mouseButton != 0) return;
+        if (tab != TAB_FILTER || mouseButton != 0 || !configReady()) return;
 
         int index = gridIndexAt(mouseX, mouseY);
         if (index < 0) return;
 
         StorageViewEntry entry = shown.get(index);
-        TerminalIoConfig config = ClientTerminalIo.get();
         if (entry.isFluid()) {
-            config.toggleFluid(entry.getFluidKey());
+            currentFilter().toggleFluid(entry.getFluidKey());
         } else {
-            config.toggleItem(entry.getItemKey());
+            currentFilter().toggleItem(entry.getItemKey());
         }
         pushConfig();
     }
@@ -1284,9 +1322,10 @@ public class GuiTerminalIo extends GuiScreen {
 
     /** 前缀是「回车才生效」的，切页签 / 关界面时补一次。 */
     private void applyPrefixes() {
-        if (prefixField == null || !prefixField.getVisible()) return;
-        ClientTerminalIo.get()
-            .setCustomPrefixes(prefixField.getText());
+        if (tab != TAB_FILTER || fluidTab || prefixField == null || !prefixField.getVisible() || !configReady()) return;
+        if (prefixField.getText()
+            .equals(joinPrefixes())) return;
+        currentFilter().setCustomPrefixes(prefixField.getText());
         refreshLabels();
         pushConfig();
     }

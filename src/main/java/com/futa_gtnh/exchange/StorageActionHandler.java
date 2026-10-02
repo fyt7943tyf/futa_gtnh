@@ -12,13 +12,10 @@ import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
-import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketCraftResult;
 import com.futa_gtnh.network.PacketStorageAction;
 import com.futa_gtnh.network.PacketStorageDelta;
-import com.futa_gtnh.network.PacketTerminalFluid;
 import com.futa_gtnh.network.PacketTerminalIoSync;
-import com.futa_gtnh.network.PacketTerminalItem;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -216,14 +213,6 @@ public final class StorageActionHandler {
                     InventoryExchange.drainCursorContainer(player, storage, recorder);
                     break;
                 }
-                case PacketStorageAction.SET_TERMINAL_FLUID: {
-                    handleSetTerminalFluid(player, container, packet.getFluidKey());
-                    return;
-                }
-                case PacketStorageAction.SET_TERMINAL_ITEM: {
-                    handleSetTerminalItem(player, container, packet.getItemKey());
-                    return;
-                }
                 case PacketStorageAction.SET_TERMINAL_IO: {
                     // 六个面怎么主动搬东西：整份配置在 keyTag 里。
                     // 客户端算出来的任何东西都不被信任 —— 配置只影响「搬什么、往哪搬」，
@@ -313,33 +302,6 @@ public final class StorageActionHandler {
             container.detectAndSendChanges();
         }
         completeCraftRequest(player, packet, crafted);
-    }
-
-    private static void handleSetTerminalFluid(EntityPlayerMP player, ContainerSharedTerminal container, FluidKey key) {
-        TileEntitySharedTerminal terminal = container.getTerminal();
-        if (terminal == null) return;
-        if (key != null && !SharedStorageManager.getStorage()
-            .hasFluid(key)) {
-            return;
-        }
-        terminal.setOutputFluid(key);
-        NetworkHandler.INSTANCE.sendTo(new PacketTerminalFluid(key), player);
-    }
-
-    private static void handleSetTerminalItem(EntityPlayerMP player, ContainerSharedTerminal container, ItemKey key) {
-        TileEntitySharedTerminal terminal = container.getTerminal();
-        if (terminal == null) return;
-
-        ItemKey selected = key;
-        if (key != null && key.equals(terminal.getOutputItem())) {
-            selected = null;
-        } else if (key != null && !SharedStorageManager.getStorage()
-            .hasItem(key)) {
-                return;
-            }
-
-        terminal.setOutputItem(selected);
-        NetworkHandler.INSTANCE.sendTo(new PacketTerminalItem(selected), player);
     }
 
     /**

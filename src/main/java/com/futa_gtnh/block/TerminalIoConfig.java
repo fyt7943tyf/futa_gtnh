@@ -1,23 +1,10 @@
 package com.futa_gtnh.block;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
-import net.minecraft.nbt.NBTTagString;
 import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.FluidStack;
-import net.minecraftforge.oredict.OreDictionary;
-
-import com.futa_gtnh.shared.FluidKey;
-import com.futa_gtnh.shared.ItemKey;
 
 /**
  * 「共享终端方块往哪个面主动搬东西」的配置：方向 + 筛选。
@@ -33,10 +20,8 @@ import com.futa_gtnh.shared.ItemKey;
  * （GT 的覆盖板也是这么分的）。
  *
  * <p>
- * <b>筛选是一张白名单，两个方向都管</b>：列表为空表示什么都搬；一旦选了东西，
- * 就只搬符合条件的那几种。之所以抽取也管，是因为「别把垃圾吸进来」和
- * 「只输出这几种」是同一个诉求的两面 —— 只对输出生效的话，玩家还得再找一个开关
- * 去挡抽取，反而多了个概念。
+ * <b>每面独立的输出白名单</b>：主动推送和被动抽取都受它限制，空白名单不输出。
+ * 物品和流体分别匹配；主动抽入和被动接收不使用筛选。
  *
  * <p>
  * 筛选条件有三种，<b>任意一种命中就算通过</b>：
@@ -149,23 +134,14 @@ public final class TerminalIoConfig {
     private final Mode[] itemModes = new Mode[FACES];
     private final Mode[] fluidModes = new Mode[FACES];
 
-    private final Set<ItemKey> items = new HashSet<>();
-    private final Set<FluidKey> fluids = new HashSet<>();
-    private final Set<Preset> presets = new HashSet<>();
-    /** 自己敲的矿辞前缀，一律转小写保存。 */
-    private final List<String> customPrefixes = new ArrayList<>();
-
-    /** 筛选条件变一次加一；匹配结果的小缓存靠它失效。 */
-    private int revision = 1;
-
-    /** 物品匹配结果缓存：一次搬运要问几百次同一个键，矿辞查表不值得反复做。 */
-    private final Map<ItemKey, Boolean> itemCache = new HashMap<>();
-    private int itemCacheRevision = -1;
+    private int modeRevision;
+    private final TerminalOutputFilter[] outputFilters = new TerminalOutputFilter[FACES];
 
     public TerminalIoConfig() {
         for (int i = 0; i < FACES; i++) {
             itemModes[i] = Mode.OFF;
             fluidModes[i] = Mode.OFF;
+            outputFilters[i] = new TerminalOutputFilter();
         }
     }
 
@@ -180,7 +156,8 @@ public final class TerminalIoConfig {
 
     public void setMode(ForgeDirection face, boolean fluid, Mode mode) {
         int index = index(face);
-        if (index < 0 || mode == null) return;
+        if (index < 0 || mode == null || getMode(face, fluid) == mode) return;
+        modeRevision++;
         if (fluid) {
             fluidModes[index] = mode;
         } else {
@@ -302,181 +279,40 @@ public final class TerminalIoConfig {
     // 筛选
     // ==================================================================
 
-    public boolean isFilterEmpty() {
-        return items.isEmpty() && fluids.isEmpty() && presets.isEmpty() && customPrefixes.isEmpty();
+    /** 仅有效的六个面拥有筛选；UNKNOWN 不对应可抽取的输出。 */
+    public TerminalOutputFilter getOutputFilter(ForgeDirection face) {
+        int index = index(face);
+        if (index < 0) throw new IllegalArgumentException("Output filters require a valid terminal face");
+        return outputFilters[index];
     }
 
-    public Set<ItemKey> getItems() {
-        return items;
+    public boolean matchesOutput(ForgeDirection face, ItemStack stack) {
+        int index = index(face);
+        return index >= 0 && outputFilters[index].matches(stack);
     }
 
-    public Set<FluidKey> getFluids() {
-        return fluids;
+    public boolean matchesOutput(ForgeDirection face, FluidStack stack) {
+        int index = index(face);
+        return index >= 0 && outputFilters[index].matches(stack);
     }
 
-    public Set<Preset> getPresets() {
-        return presets;
+    /** 输出槽位索引缓存同时跟踪方向与白名单变化。 */
+    public int getOutputRevision() {
+        int revision = modeRevision;
+        for (TerminalOutputFilter filter : outputFilters) revision += filter.getRevision();
+        return revision;
     }
 
-    public List<String> getCustomPrefixes() {
-        return customPrefixes;
-    }
-
-    public boolean containsItem(ItemKey key) {
-        return key != null && items.contains(key);
-    }
-
-    public boolean containsFluid(FluidKey key) {
-        return key != null && fluids.contains(key);
-    }
-
-    public void toggleItem(ItemKey key) {
-        if (key == null) return;
-        if (!items.remove(key)) items.add(key);
-        touch();
-    }
-
-    public void toggleFluid(FluidKey key) {
-        if (key == null) return;
-        if (!fluids.remove(key)) fluids.add(key);
-        touch();
-    }
-
-    public void togglePreset(Preset preset) {
-        if (preset == null) return;
-        if (!presets.remove(preset)) presets.add(preset);
-        touch();
-    }
-
-    /**
-     * 换掉自定义前缀（界面里的输入框按回车/失焦时调一次）。
-     *
-     * <p>
-     * 允许用空格、逗号、分号分隔，全部转小写 —— 矿辞名的前缀本身就是大小写混排
-     * （{@code crushedPurified}），但玩家不会记得住，匹配时也一律按小写比。
-     */
-    public void setCustomPrefixes(String text) {
-        customPrefixes.clear();
-        if (text != null) {
-            for (String piece : text.split("[\\s,;]+")) {
-                String trimmed = piece.trim()
-                    .toLowerCase(Locale.ROOT);
-                if (!trimmed.isEmpty() && !customPrefixes.contains(trimmed)) {
-                    customPrefixes.add(trimmed);
-                }
-            }
-        }
-        touch();
-    }
-
-    public void clearFilter() {
-        items.clear();
-        fluids.clear();
-        presets.clear();
-        customPrefixes.clear();
-        touch();
-    }
-
-    private void touch() {
-        revision++;
-    }
-
-    /** @return 这个物品能不能搬（过滤条件为空 = 什么都行） */
-    public boolean matches(ItemStack stack) {
-        if (isFilterEmpty()) return true;
-        if (stack == null || stack.getItem() == null) return false;
-
-        ItemKey key = ItemKey.of(stack);
-        if (key == null) return false;
-        if (items.contains(key)) return true;
-
-        if (itemCacheRevision != revision) {
-            itemCache.clear();
-            itemCacheRevision = revision;
-        }
-        Boolean cached = itemCache.get(key);
-        if (cached != null) return cached.booleanValue();
-
-        boolean allowed = matchesOreDict(key.prototype());
-        itemCache.put(key, Boolean.valueOf(allowed));
-        return allowed;
-    }
-
-    /** @return 这种流体能不能搬 */
-    public boolean matches(FluidStack stack) {
-        if (isFilterEmpty()) return true;
-        if (stack == null || stack.getFluid() == null) return false;
-
-        FluidKey key = FluidKey.of(stack);
-        // 流体没有矿辞，只能按条目选
-        return key != null && fluids.contains(key);
-    }
-
-    private boolean matchesOreDict(ItemStack stack) {
-        String[] names = oreNames(stack);
-        for (String name : names) {
-            String classified = classify(name);
-            if (classified != null && isPrefixEnabled(classified)) return true;
+    public boolean hasAnyFilter() {
+        for (TerminalOutputFilter filter : outputFilters) {
+            if (!filter.isEmpty()) return true;
         }
         return false;
     }
 
-    /**
-     * 找出这个名字归到哪个前缀。
-     *
-     * <p>
-     * 返回<b>最长</b>的那个匹配 —— 这就是「按最具体的前缀归类」，
-     * 也是 {@code crushedIron} 和 {@code crushedPurifiedIron} 能被分开的原因。
-     */
-    private String classify(String lowerName) {
-        String best = null;
-        for (Preset preset : Preset.values()) {
-            for (String prefix : preset.getPrefixes()) {
-                String lower = prefix.toLowerCase(Locale.ROOT);
-                if (lowerName.startsWith(lower) && (best == null || lower.length() > best.length())) {
-                    best = lower;
-                }
-            }
-        }
-        for (String prefix : customPrefixes) {
-            if (lowerName.startsWith(prefix) && (best == null || prefix.length() > best.length())) {
-                best = prefix;
-            }
-        }
-        return best;
+    public void clearFilters() {
+        for (TerminalOutputFilter filter : outputFilters) filter.clear();
     }
-
-    private boolean isPrefixEnabled(String lowerPrefix) {
-        for (String prefix : customPrefixes) {
-            if (prefix.equals(lowerPrefix)) return true;
-        }
-        for (Preset preset : presets) {
-            for (String prefix : preset.getPrefixes()) {
-                if (prefix.toLowerCase(Locale.ROOT)
-                    .equals(lowerPrefix)) return true;
-            }
-        }
-        return false;
-    }
-
-    private static String[] oreNames(ItemStack stack) {
-        try {
-            int[] ids = OreDictionary.getOreIDs(stack);
-            if (ids == null || ids.length == 0) return EMPTY_NAMES;
-
-            String[] names = new String[ids.length];
-            for (int i = 0; i < ids.length; i++) {
-                String name = OreDictionary.getOreName(ids[i]);
-                names[i] = name == null ? "" : name.toLowerCase(Locale.ROOT);
-            }
-            return names;
-        } catch (Throwable t) {
-            // 矿辞是别的模组在填，条目本身可能有毛病；判断不出来就当不匹配
-            return EMPTY_NAMES;
-        }
-    }
-
-    private static final String[] EMPTY_NAMES = new String[0];
 
     // ==================================================================
     // 存档 / 网络
@@ -498,41 +334,30 @@ public final class TerminalIoConfig {
         tag.setInteger("itemsPerOperation", itemsPerOperation);
         tag.setInteger("fluidPerOperation", fluidPerOperation);
 
-        NBTTagList itemList = new NBTTagList();
-        for (ItemKey key : items) {
-            itemList.appendTag(key.writeToNbt());
+        tag.setInteger("filterVersion", 2);
+        NBTTagList filters = new NBTTagList();
+        for (int i = 0; i < FACES; i++) {
+            NBTTagCompound filter = outputFilters[i].writeToNbt();
+            filter.setInteger("face", i);
+            filters.appendTag(filter);
         }
-        tag.setTag("items", itemList);
-
-        NBTTagList fluidList = new NBTTagList();
-        for (FluidKey key : fluids) {
-            fluidList.appendTag(key.writeToNbt());
-        }
-        tag.setTag("fluids", fluidList);
-
-        NBTTagList presetList = new NBTTagList();
-        for (Preset preset : presets) {
-            presetList.appendTag(new NBTTagString(preset.name()));
-        }
-        tag.setTag("presets", presetList);
-
-        NBTTagList prefixList = new NBTTagList();
-        for (String prefix : customPrefixes) {
-            prefixList.appendTag(new NBTTagString(prefix));
-        }
-        tag.setTag("prefixes", prefixList);
+        tag.setTag("faceFilters", filters);
 
         return tag;
     }
 
     public void readFromNbt(NBTTagCompound tag) {
-        if (tag == null) return;
-
-        clearFilter();
+        modeRevision++;
+        clearFilters();
+        intervalTicks = 5;
+        itemsPerOperation = 16;
+        fluidPerOperation = 1000;
         for (int i = 0; i < FACES; i++) {
             itemModes[i] = Mode.OFF;
             fluidModes[i] = Mode.OFF;
         }
+
+        if (tag == null) return;
 
         // 节奏：存档里读出来的、以及客户端发上来的一律先吸附到档位。
         // 客户端发的那份不能信，这一步就是那道闸门（落在档位之间的值会被夹回来）
@@ -553,39 +378,17 @@ public final class TerminalIoConfig {
             }
         }
 
-        NBTTagList itemList = tag.getTagList("items", 10);
-        for (int i = 0; i < itemList.tagCount(); i++) {
-            ItemKey key = ItemKey.readFromNbt(itemList.getCompoundTagAt(i));
-            if (key != null) items.add(key);
-        }
-
-        NBTTagList fluidList = tag.getTagList("fluids", 10);
-        for (int i = 0; i < fluidList.tagCount(); i++) {
-            FluidKey key = FluidKey.readFromNbt(fluidList.getCompoundTagAt(i));
-            if (key != null) fluids.add(key);
-        }
-
-        NBTTagList presetList = tag.getTagList("presets", 8);
-        for (int i = 0; i < presetList.tagCount(); i++) {
-            String name = presetList.getStringTagAt(i);
-            for (Preset preset : Preset.values()) {
-                if (preset.name()
-                    .equals(name)) {
-                    presets.add(preset);
-                    break;
-                }
+        if (tag.hasKey("faceFilters", 9)) {
+            NBTTagList filters = tag.getTagList("faceFilters", 10);
+            for (int i = 0; i < filters.tagCount(); i++) {
+                NBTTagCompound filter = filters.getCompoundTagAt(i);
+                if (!filter.hasKey("face", 3)) continue;
+                int face = filter.getInteger("face");
+                if (face >= 0 && face < FACES) outputFilters[face].readFromNbt(filter);
             }
+        } else {
+            // 旧版的全局白名单复制给六个面。空白名单按新版规则禁止输出。
+            for (TerminalOutputFilter filter : outputFilters) filter.readFromNbt(tag);
         }
-
-        NBTTagList prefixList = tag.getTagList("prefixes", 8);
-        for (int i = 0; i < prefixList.tagCount(); i++) {
-            String prefix = prefixList.getStringTagAt(i)
-                .toLowerCase(Locale.ROOT);
-            if (!prefix.isEmpty() && !customPrefixes.contains(prefix)) {
-                customPrefixes.add(prefix);
-            }
-        }
-
-        touch();
     }
 }

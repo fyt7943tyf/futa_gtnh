@@ -107,7 +107,7 @@ futa_gtnh.gui.store.terminal_io=Faces
 # ------------------------------------------------- Terminal block active IO (face config)
 futa_gtnh.gui.terminal.io.title=Terminal automation
 futa_gtnh.gui.terminal.io.tab.faces=Faces
-futa_gtnh.gui.terminal.io.tab.filter=Filter
+futa_gtnh.gui.terminal.io.tab.filter=Output filter
 futa_gtnh.gui.terminal.io.tab.rate=Pace
 futa_gtnh.gui.terminal.io.items=Items
 futa_gtnh.gui.terminal.io.fluids=Fluids
@@ -134,10 +134,11 @@ futa_gtnh.gui.terminal.io.search=Search (pinyin / @mod / *oredict)
 futa_gtnh.gui.terminal.io.prefix=Ore dict prefix (press Enter)
 futa_gtnh.gui.terminal.io.prefix.title=Ore dict prefixes
 futa_gtnh.gui.terminal.io.preset.title=Ore dict presets
-futa_gtnh.gui.terminal.io.clear=Clear filter
+futa_gtnh.gui.terminal.io.clear=Clear list
 futa_gtnh.gui.terminal.io.done=Done
 futa_gtnh.gui.terminal.io.selected=Selected
-futa_gtnh.gui.terminal.io.no_filter=(empty = move everything)
+futa_gtnh.gui.terminal.io.no_filter= (empty = no output)
+futa_gtnh.gui.terminal.io.filter.hint=Filters outputs only; inputs are unfiltered
 futa_gtnh.gui.terminal.io.empty=Nothing matches
 futa_gtnh.gui.terminal.io.syncing=Syncing... (asking the server for this terminal's config)
 futa_gtnh.gui.terminal.io.rate=Pace (this terminal's own setting)
@@ -162,9 +163,8 @@ futa_gtnh.msg.craft.fill_missing_more=  ...more cells are short; see the server 
 futa_gtnh.msg.craft.not_craftable=Shared storage: this is not a hand-crafting recipe - the grid was left untouched
 futa_gtnh.msg.craft.dumped=Shared storage: returned %s item(s) from the crafting grid
 
-futa_gtnh.gui.status.remote=Remote access - place a terminal to configure pipe output
-futa_gtnh.gui.status.output=Pipe output (middle-click to set): %s
-futa_gtnh.gui.status.output.none=not set
+futa_gtnh.gui.status.remote=Remote access - place a terminal to configure each output face
+futa_gtnh.gui.status.output=Output: whitelist per face
 
 # ---------------------------------------------------------------- Locator Wand
 item.futa_gtnh.locator_wand.name=Locator Wand

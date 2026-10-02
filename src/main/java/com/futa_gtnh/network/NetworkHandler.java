@@ -28,10 +28,9 @@ public final class NetworkHandler {
         // 服务端 -> 客户端
         INSTANCE.registerMessage(PacketStorageSync.Handler.class, PacketStorageSync.class, 0, Side.CLIENT);
         INSTANCE.registerMessage(PacketStorageDelta.Handler.class, PacketStorageDelta.class, 1, Side.CLIENT);
-        INSTANCE.registerMessage(PacketTerminalFluid.Handler.class, PacketTerminalFluid.class, 4, Side.CLIENT);
+        // 4、18 是已移除的中键输出选择同步包，保留空号。
         INSTANCE.registerMessage(PacketAutoStoreSync.Handler.class, PacketAutoStoreSync.class, 6, Side.CLIENT);
         INSTANCE.registerMessage(PacketLocatorResult.Handler.class, PacketLocatorResult.class, 8, Side.CLIENT);
-        INSTANCE.registerMessage(PacketTerminalItem.Handler.class, PacketTerminalItem.class, 18, Side.CLIENT);
 
         // 客户端 -> 服务端
         INSTANCE.registerMessage(PacketStorageAction.Handler.class, PacketStorageAction.class, 2, Side.SERVER);
@@ -52,7 +51,7 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketRtsUndoRedo.Handler.class, PacketRtsUndoRedo.class, 16, Side.SERVER);
         INSTANCE.registerMessage(PacketRtsRotate.Handler.class, PacketRtsRotate.class, 17, Side.SERVER);
         // 小游戏助手（lootgames 联动）：操作 / 快照 / 增量 / 进度
-        // discriminator 在同一个 SimpleNetworkWrapper 内必须唯一；18 已用于 PacketTerminalItem。
+        // discriminator 在同一个 SimpleNetworkWrapper 内必须唯一；旧包号保留，不重新编号。
         INSTANCE.registerMessage(PacketLootassistAction.Handler.class, PacketLootassistAction.class, 22, Side.SERVER);
         INSTANCE.registerMessage(PacketLootassistSync.Handler.class, PacketLootassistSync.class, 19, Side.CLIENT);
         INSTANCE.registerMessage(PacketLootassistDelta.Handler.class, PacketLootassistDelta.class, 20, Side.CLIENT);

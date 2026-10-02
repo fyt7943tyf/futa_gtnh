@@ -77,7 +77,7 @@ final class TerminalIoEngine {
             if (itemMode == TerminalIoConfig.Mode.OFF && fluidMode == TerminalIoConfig.Mode.OFF) continue;
 
             TileEntity neighbour = world.getTileEntity(x + face.offsetX, y + face.offsetY, z + face.offsetZ);
-            if (neighbour == null) continue;
+            if (neighbour == null || neighbour instanceof TileEntitySharedTerminal) continue;
 
             // 邻居看我们的方向：Forge 的接口要的是「从哪一面来的」
             ForgeDirection side = face.getOpposite();
@@ -87,7 +87,7 @@ final class TerminalIoEngine {
                 if (itemMode == TerminalIoConfig.Mode.PULL) {
                     pullItems(inventory, side, config);
                 } else {
-                    pushItems(inventory, side, config);
+                    pushItems(inventory, side, config, face);
                 }
             }
 
@@ -96,7 +96,7 @@ final class TerminalIoEngine {
                 if (fluidMode == TerminalIoConfig.Mode.PULL) {
                     pullFluid(handler, side, config);
                 } else {
-                    pushFluid(handler, side, config);
+                    pushFluid(handler, side, config, face);
                 }
             }
         }
@@ -106,7 +106,7 @@ final class TerminalIoEngine {
     // 物品
     // ==================================================================
 
-    /** 从相邻容器里把符合条件的东西抽进共享存储。 */
+    /** 从相邻容器里把东西抽进共享存储。 */
     private static void pullItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
@@ -115,7 +115,6 @@ final class TerminalIoEngine {
             ItemStack stack = inventory.getStackInSlot(slot);
             if (stack == null || stack.getItem() == null || stack.stackSize <= 0) continue;
             if (!canExtract(inventory, slot, stack, side)) continue;
-            if (!config.matches(stack)) continue;
 
             ItemKey key = ItemKey.of(stack);
             if (key == null) continue;
@@ -159,7 +158,10 @@ final class TerminalIoEngine {
      * 在只筛了一种物品时会被卡在 64 个，档位就成了摆设。
      * 循环的终止条件是目标收不下了或者额度用完，两件事都是当场问出来的。
      */
-    private static void pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
+    private static void pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config,
+        ForgeDirection face) {
+        if (config.getOutputFilter(face)
+            .isEmpty(false)) return;
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
 
@@ -175,7 +177,7 @@ final class TerminalIoEngine {
 
             ItemStack prototype = key.prototype();
             if (prototype == null || prototype.getItem() == null) continue;
-            if (!config.matches(prototype)) continue;
+            if (!config.matchesOutput(face, prototype)) continue;
 
             int maxSize = Math.max(1, prototype.getMaxStackSize());
 
@@ -221,7 +223,7 @@ final class TerminalIoEngine {
             if (existing == null || existing.getItem() == null || existing.stackSize <= 0) {
                 if (!canInsert(inventory, slot, prototype, side)) continue;
                 space += maxSize;
-            } else if (sameItem(existing, prototype)) {
+            } else if (sameItem(existing, prototype) && canInsert(inventory, slot, prototype, side)) {
                 space += Math.max(0, Math.min(maxSize, existing.getMaxStackSize()) - existing.stackSize);
             }
             if (space >= stopAt) break;
@@ -247,6 +249,7 @@ final class TerminalIoEngine {
         // 两趟：先并入已有的同类堆，再找空格。和原版 addItemStackToInventory 一个顺序
         for (int pass = 0; pass < 2 && remaining > 0; pass++) {
             for (int slot = 0; slot < inventory.getSizeInventory() && remaining > 0; slot++) {
+                if (!canInsert(inventory, slot, stack, side)) continue;
                 ItemStack existing = inventory.getStackInSlot(slot);
 
                 if (pass == 0) {
@@ -282,29 +285,37 @@ final class TerminalIoEngine {
 
     private static boolean canInsert(IInventory inventory, int slot, ItemStack stack, ForgeDirection side) {
         if (inventory instanceof ISidedInventory) {
-            return ((ISidedInventory) inventory).canInsertItem(slot, stack, side.ordinal());
+            return isAccessible((ISidedInventory) inventory, slot, side)
+                && ((ISidedInventory) inventory).canInsertItem(slot, stack, side.ordinal());
         }
         return inventory.isItemValidForSlot(slot, stack);
     }
 
     private static boolean canExtract(IInventory inventory, int slot, ItemStack stack, ForgeDirection side) {
         if (inventory instanceof ISidedInventory) {
-            return ((ISidedInventory) inventory).canExtractItem(slot, stack, side.ordinal());
+            return isAccessible((ISidedInventory) inventory, slot, side)
+                && ((ISidedInventory) inventory).canExtractItem(slot, stack, side.ordinal());
         }
         return true;
+    }
+
+    private static boolean isAccessible(ISidedInventory inventory, int slot, ForgeDirection side) {
+        for (int accessible : inventory.getAccessibleSlotsFromSide(side.ordinal())) {
+            if (accessible == slot) return true;
+        }
+        return false;
     }
 
     // ==================================================================
     // 流体
     // ==================================================================
 
-    /** 从相邻容器里把符合条件的流体抽进共享存储。 */
+    /** 从相邻容器里把流体抽进共享存储。 */
     private static void pullFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config) {
         int budget = Math.max(1, config.getFluidPerOperation());
 
         FluidStack preview = handler.drain(side, budget, false);
         if (preview == null || preview.getFluid() == null || preview.amount <= 0) return;
-        if (!config.matches(preview)) return;
 
         FluidStack drained = handler.drain(side, preview.amount, true);
         if (drained == null || drained.getFluid() == null || drained.amount <= 0) return;
@@ -332,7 +343,10 @@ final class TerminalIoEngine {
      * 「2000 万 mB/轮」在只筛了一种流体时会被卡在一次 fill 的量上。
      * 每轮循环至少推进 1 mB，所以额度用完一定停得下来。
      */
-    private static void pushFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config) {
+    private static void pushFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config,
+        ForgeDirection face) {
+        if (config.getOutputFilter(face)
+            .isEmpty(true)) return;
         int budget = Math.max(1, config.getFluidPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
 
@@ -346,7 +360,7 @@ final class TerminalIoEngine {
 
             FluidStack prototype = key.prototype();
             if (prototype == null || prototype.getFluid() == null) continue;
-            if (!config.matches(prototype)) continue;
+            if (!config.matchesOutput(face, prototype)) continue;
 
             while (budget > 0 && available > 0L) {
                 int want = (int) Math.min((long) budget, available);

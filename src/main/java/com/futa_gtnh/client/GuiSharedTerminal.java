@@ -23,7 +23,6 @@ import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketAutoStore;
 import com.futa_gtnh.network.PacketStorageAction;
-import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 
 /**
@@ -677,16 +676,8 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         String status;
         if (container.isRemoteAccess()) {
             status = EnumChatFormatting.GRAY + tr("futa_gtnh.gui.status.remote");
-        } else if (tab == TAB_ITEMS) {
-            ItemKey output = ClientTerminalState.getOutputItem();
-            status = EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
-                "futa_gtnh.gui.status.output",
-                output == null ? tr("futa_gtnh.gui.status.output.none") : safeItemName(output));
         } else {
-            FluidKey output = ClientTerminalState.getOutputFluid();
-            status = EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
-                "futa_gtnh.gui.status.output",
-                output == null ? tr("futa_gtnh.gui.status.output.none") : safeFluidName(output));
+            status = EnumChatFormatting.GRAY + tr("futa_gtnh.gui.status.output");
         }
         // 状态行只占左区宽度：GUI 变宽是因为右边多了侧栏，
         // 状态文字要是按整幅宽度去截，长物品名会横穿到侧栏上面去
@@ -1293,24 +1284,6 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
         int index = scrollRow * ContainerSharedTerminal.COLS + row * ContainerSharedTerminal.COLS + col;
         return index < filtered.size() ? filtered.get(index) : null;
-    }
-
-    private static String safeItemName(ItemKey key) {
-        try {
-            return key.prototype()
-                .getDisplayName();
-        } catch (Throwable t) {
-            return String.valueOf(key);
-        }
-    }
-
-    private static String safeFluidName(FluidKey key) {
-        try {
-            return key.getFluid()
-                .getLocalizedName(key.prototype());
-        } catch (Throwable t) {
-            return String.valueOf(key.getFluid());
-        }
     }
 
     /** 数量量级后缀，和 {@link #formatShort} 的循环一一对应。 */
