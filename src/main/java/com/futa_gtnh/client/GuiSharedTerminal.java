@@ -144,6 +144,8 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     private boolean pendingResort = true;
     /** 按钮上当前显示的自动入库状态，用来判断服务端回包后要不要重画文字 */
     private boolean autoStoreShown;
+    /** 共享格的 Shift 点击已在按下时处理，对应松开事件不再进入原版双击转移。 */
+    private int sharedShiftClickButtons;
 
     public GuiSharedTerminal(ContainerSharedTerminal container) {
         super(container);
@@ -759,6 +761,10 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) {
+        if (mouseButton == 0 || mouseButton == 1) {
+            // 若窗口外松开时丢了事件，新一次按下不能继承上一次的释放标记。
+            sharedShiftClickButtons &= ~(1 << mouseButton);
+        }
         // 搜索联动按钮的右键反向循环：原版按钮只认左键，这里自己接。
         // 在 super 之前消费掉，避免这记右键继续落进容器/搜索框。
         if (mouseButton == 1 && isHoveringButton(searchModeButton, mouseX, mouseY)) {
@@ -774,6 +780,10 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         // 我们自己的服务端权威动作，普通点击仍交给 GuiContainer。
         if (handleShortcutClick(mouseX, mouseY, mouseButton)) return;
         if (handleShiftDoubleClick(mouseX, mouseY, mouseButton)) return;
+        if (handleSharedShiftClick(mouseX, mouseY, mouseButton)) {
+            updateSearchFocus(mouseX, mouseY, mouseButton);
+            return;
+        }
 
         // 「Shift + 按住左键滑动存入」只从背包上按下才算数：这样
         // 「Shift 点共享格取出 → 顺手划过背包」不会把刚取出来的东西又存回去。
@@ -786,6 +796,10 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         }
 
         super.mouseClicked(mouseX, mouseY, mouseButton);
+        updateSearchFocus(mouseX, mouseY, mouseButton);
+    }
+
+    private void updateSearchFocus(int mouseX, int mouseY, int mouseButton) {
         if (searchField != null) {
             // FutaSearchField 自己处理聚焦/失焦/右键清空；文本真的变了的话
             // 变更回调已经置过 viewDirty，这里只补「焦点切换」的旧逻辑
@@ -793,6 +807,26 @@ public class GuiSharedTerminal extends FutaGuiContainer {
             searchField.mouseClicked(mouseX, mouseY, mouseButton);
             if (before != searchField.isFocused()) viewDirty = true;
         }
+    }
+
+    /**
+     * 虚拟槽位取出后仍有显示栈，原版 Shift 双击会在松开时再转移一次。
+     * 因此共享格的空手 Shift 点击直接派发一次，并消费对应的释放事件。
+     * 普通点击和玩家背包的双击仍沿用各自的处理路径。
+     */
+    private boolean handleSharedShiftClick(int mouseX, int mouseY, int mouseButton) {
+        if ((mouseButton != 0 && mouseButton != 1) || !isShiftKeyDown()
+            || mc.thePlayer.inventory.getItemStack() != null) return false;
+        // 18×18 网格单元包含原版槽位命中的一像素边缘，边缘点击也必须走同一条路径。
+        int index = hoveredGhostIndex(mouseX, mouseY);
+        if (index < 0) return false;
+        Slot slot = container.getSlot(index);
+
+        sweepArmed = false;
+        sweepSlot = -1;
+        sharedShiftClickButtons |= 1 << mouseButton;
+        handleMouseClick(slot, slot.slotNumber, mouseButton, 1);
+        return true;
     }
 
     // ==================================================================
@@ -875,6 +909,8 @@ public class GuiSharedTerminal extends FutaGuiContainer {
      */
     @Override
     protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
+        if ((clickedMouseButton == 0 || clickedMouseButton == 1)
+            && (sharedShiftClickButtons & (1 << clickedMouseButton)) != 0) return;
         super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
 
         if (!sweepArmed || clickedMouseButton != 0 || !isShiftKeyDown()) return;
@@ -893,6 +929,12 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
     @Override
     protected void mouseMovedOrUp(int mouseX, int mouseY, int state) {
+        if ((state == 0 || state == 1) && (sharedShiftClickButtons & (1 << state)) != 0) {
+            sharedShiftClickButtons &= ~(1 << state);
+            sweepArmed = false;
+            sweepSlot = -1;
+            return;
+        }
         super.mouseMovedOrUp(mouseX, mouseY, state);
         // 松开鼠标 = 这一轮滑动结束（state 是松开的那个键）
         sweepArmed = false;
