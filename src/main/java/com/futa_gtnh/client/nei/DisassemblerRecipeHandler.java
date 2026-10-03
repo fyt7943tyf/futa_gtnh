@@ -1,5 +1,6 @@
 package com.futa_gtnh.client.nei;
 
+import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -39,7 +40,14 @@ public final class DisassemblerRecipeHandler extends TemplateRecipeHandler {
 
     @Override
     public String getGuiTexture() {
-        return "";
+        // TemplateRecipeHandler also binds this texture before drawing the foreground.
+        return "minecraft:textures/gui/container/inventory.png";
+    }
+
+    @Override
+    public void loadTransferRects() {
+        // NEI uses the transfer rectangle's ID to open all recipes from the machine catalyst.
+        transferRects.add(new RecipeTransferRect(new Rectangle(3, 6, 158, 104), ID));
     }
 
     @Override

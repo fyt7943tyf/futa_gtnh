@@ -459,7 +459,7 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
             page -> {
                 if (page >= 0 && page < pages.getPages()
                     .size()) pages.setPage(page);
-            });
+            }).allowC2S();
         sync.syncValue(key, pageValue);
         panel.child(
             new ButtonWidget<>().size(16)

@@ -48,9 +48,10 @@ tasks.named("check") {
     dependsOn(tasks.named("verifySharedStorageReadApi"))
     dependsOn(tasks.named("verifyDisassembler"))
     dependsOn(tasks.named("verifyTerminalClicks"))
+    dependsOn(tasks.named("verifyDisassemblerUi"))
 }
 
-// Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.
+// Test-only input/GL fixtures exercise real GUI events and NEI foregrounds without a display or native input.
 val compileTerminalClickChecks = tasks.register<JavaCompile>("compileTerminalClickChecks") {
     dependsOn(tasks.named("classes"))
     source(fileTree("tools/terminal-click-check") { include("**/*.java") })
@@ -78,6 +79,18 @@ tasks.register<JavaExec>("verifyTerminalClicks") {
     dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
     mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
     args("com.futa_gtnh.client.TerminalClickRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
+tasks.register<JavaExec>("verifyDisassemblerUi") {
+    group = "verification"
+    description = "Checks machine page request permissions, client/server page selection and real NEI foreground texture"
+    dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.disassembler.DisassemblerUiRegression")
     classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
         files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
         files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
