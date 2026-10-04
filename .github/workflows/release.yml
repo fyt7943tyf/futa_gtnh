@@ -123,12 +123,28 @@ jobs:
           cp "build/libs/futa_gtnh-$VERSION-sources.jar" release-assets/ 2>/dev/null || true
           ls -la release-assets
 
+      # Release 正文：优先用 docs/ 里的交付说明。仓库直推 main、不走 PR，
+      # generate_release_notes 对这种仓库只会生成一条 Changelog 链接（正文空白），
+      # 所以这里把 docs/<版本>-改动与交付说明.md 读出来当正文 ——
+      # generate_release_notes 保持开着，Full Changelog 链接会自动追加在正文后面。
+      - name: 读取交付说明作为 Release 正文
+        env:
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          if [ -f "docs/$VERSION-改动与交付说明.md" ]; then
+            cp "docs/$VERSION-改动与交付说明.md" release-body.md
+          else
+            # 没有交付说明的版本留空正文，generate_release_notes 照常补 Changelog 链接
+            : > release-body.md
+          fi
+
       - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.decide.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: FutaGTNH ${{ needs.decide.outputs.version }}
+          body_path: release-body.md
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: true
