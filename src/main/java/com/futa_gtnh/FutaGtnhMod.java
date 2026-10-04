@@ -3,6 +3,7 @@ package com.futa_gtnh;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.futa_gtnh.block.BlockIoNode;
 import com.futa_gtnh.block.BlockLootMachine;
 import com.futa_gtnh.block.BlockSharedTerminal;
 import com.futa_gtnh.item.ItemSwiftStep;
@@ -69,6 +70,9 @@ public class FutaGtnhMod {
 
     /** 共享终端方块。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockSharedTerminal blockSharedTerminal;
+
+    /** IO 节点方块（共享存储的自动化输入输出口）。在 {@code CommonProxy#preInit} 里创建并注册。 */
+    public static BlockIoNode blockIoNode;
 
     /** 自选抽奖机方块。没装 Enhanced LootBags 时为 null。 */
     public static BlockLootMachine blockLootMachine;

@@ -8,9 +8,11 @@ import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.world.World;
 import net.minecraftforge.oredict.ShapedOreRecipe;
 
+import com.futa_gtnh.block.BlockIoNode;
 import com.futa_gtnh.block.BlockLootMachine;
 import com.futa_gtnh.block.BlockSharedTerminal;
 import com.futa_gtnh.block.BlockSwiftLight;
+import com.futa_gtnh.block.TileEntityIoNode;
 import com.futa_gtnh.block.TileEntityLootMachine;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
 import com.futa_gtnh.command.CommandSharedStorage;
@@ -40,6 +42,9 @@ public class CommonProxy {
 
     /** 共享终端方块。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockSharedTerminal blockSharedTerminal;
+
+    /** IO 节点方块（共享存储的自动化输入输出口）。在 {@code CommonProxy#preInit} 里创建并注册。 */
+    public static BlockIoNode blockIoNode;
 
     /** 自选抽奖机方块。没装 Enhanced LootBags 时为 null。 */
     public static BlockLootMachine blockLootMachine;
@@ -135,6 +140,12 @@ public class CommonProxy {
         GameRegistry
             .registerTileEntity(TileEntitySharedTerminal.class, FutaGtnhMod.MODID + ":" + BlockSharedTerminal.NAME);
         FutaGtnhMod.blockSharedTerminal = blockSharedTerminal;
+
+        // IO 节点：共享存储的自动化 IO 口（无查看库存界面），右键连接臂配置对应面
+        blockIoNode = new BlockIoNode();
+        GameRegistry.registerBlock(blockIoNode, BlockIoNode.NAME);
+        GameRegistry.registerTileEntity(TileEntityIoNode.class, FutaGtnhMod.MODID + ":" + BlockIoNode.NAME);
+        FutaGtnhMod.blockIoNode = blockIoNode;
 
         // 迅步的隐形光源：注册但<b>不给 ItemBlock</b>（itemclass 传 null），
         // 这样它不会出现在创造模式物品栏 / NEI 物品列表里 —— 玩家拿不到它，
@@ -267,6 +278,15 @@ public class CommonProxy {
             new ShapedOreRecipe(
                 new ItemStack(blockSharedTerminal, 1),
                 new Object[] { "GEG", "ECE", "GEG", 'G', "blockGlass", 'E', "enderpearl", 'C', "chestWood" }));
+
+        // IO 节点：末影珍珠×2 + 铁锭×4 + 漏斗。比共享终端便宜一截 —— 它只是终端
+        // 「主动搬运」那一小块功能的独立方块。「漏斗」对应搬运，「末影珍珠」对应跨空间。
+        // 漏斗走方块物品（这套映射的 Items 里没有它的字段）。
+        GameRegistry.addRecipe(
+            new ShapedOreRecipe(
+                new ItemStack(blockIoNode, 1),
+                new Object[] { " E ", "IHI", " E ", 'E', "enderpearl", 'I', "ingotIron", 'H',
+                    new ItemStack(Blocks.hopper, 1) }));
 
         // 迅步：羽毛 + 金锭 + 钻石。全部走矿物词典，装了别的模组也成立
         if (swiftStep != null) {

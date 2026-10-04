@@ -14,7 +14,8 @@ import net.minecraftforge.fluids.FluidStack;
  * <ul>
  * <li>{@link Mode#OFF}：什么都不做；</li>
  * <li>{@link Mode#PULL}：把<b>相邻容器</b>里的东西搬进共享存储（主动抽取）；</li>
- * <li>{@link Mode#PUSH}：把<b>共享存储</b>里的东西搬到相邻容器（主动输出）。</li>
+ * <li>{@link Mode#PUSH}：把<b>共享存储</b>里的东西搬到相邻容器（主动输出）；</li>
+ * <li>{@link Mode#PUSH_PULL}：同一个面双向都做 —— 先抽入再输出，一轮里各按各的档位走。</li>
  * </ul>
  * 物品和流体分开配，是因为「同一个面抽物品、同时往同一个面输出流体」是很常见的组合
  * （GT 的覆盖板也是这么分的）。
@@ -41,12 +42,29 @@ import net.minecraftforge.fluids.FluidStack;
  */
 public final class TerminalIoConfig {
 
-    /** 一个面、一种东西的搬运方向。 */
+    /**
+     * 一个面、一种东西的搬运方向。
+     *
+     * <p>
+     * {@link #PUSH_PULL} 加在枚举末尾：NBT 里存的是 ordinal，追加不影响旧存档的 0..2。
+     * 共享终端自己的配置界面仍然只在前三态里循环，这一态是 IO 节点在用。
+     */
     public enum Mode {
 
         OFF("futa_gtnh.gui.terminal.io.mode.off"),
         PULL("futa_gtnh.gui.terminal.io.mode.pull"),
-        PUSH("futa_gtnh.gui.terminal.io.mode.push");
+        PUSH("futa_gtnh.gui.terminal.io.mode.push"),
+        PUSH_PULL("futa_gtnh.gui.terminal.io.mode.push_pull");
+
+        /** 这个方向会不会往共享存储里搬（主动抽入）。 */
+        public boolean pulls() {
+            return this == PULL || this == PUSH_PULL;
+        }
+
+        /** 这个方向会不会从共享存储往外搬（主动输出）。 */
+        public boolean pushes() {
+            return this == PUSH || this == PUSH_PULL;
+        }
 
         private final String langKey;
 

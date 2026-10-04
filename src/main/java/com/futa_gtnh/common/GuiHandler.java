@@ -3,15 +3,19 @@ package com.futa_gtnh.common;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.world.World;
 
+import com.futa_gtnh.block.TileEntityIoNode;
 import com.futa_gtnh.block.TileEntityLootMachine;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
+import com.futa_gtnh.client.GuiIoNode;
 import com.futa_gtnh.client.GuiLootMachine;
 import com.futa_gtnh.client.GuiSharedTerminal;
 import com.futa_gtnh.exchange.AutoStore;
+import com.futa_gtnh.inventory.ContainerIoNode;
 import com.futa_gtnh.inventory.ContainerLootMachine;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketAutoStoreSync;
+import com.futa_gtnh.network.PacketIoNodeSync;
 import com.futa_gtnh.shared.SharedStorageManager;
 
 import cpw.mods.fml.common.network.IGuiHandler;
@@ -29,9 +33,29 @@ public class GuiHandler implements IGuiHandler {
     public static final int GUI_SHARED_TERMINAL = 0;
     public static final int GUI_LOOT_MACHINE = 1;
 
+    /**
+     * IO 节点的配置界面：每个面一个 GUI id（EnderIO 的做法），
+     * {@code id - GUI_IO_NODE_BASE} 就是右键点到的那根连接臂的面 ordinal。
+     */
+    public static final int GUI_IO_NODE_BASE = 2;
+    public static final int GUI_IO_NODE_COUNT = 6;
+
     @Override
     public Object getServerGuiElement(int id, net.minecraft.entity.player.EntityPlayer player, World world, int x,
         int y, int z) {
+        if (id >= GUI_IO_NODE_BASE && id < GUI_IO_NODE_BASE + GUI_IO_NODE_COUNT) {
+            TileEntityIoNode node = resolveIoNode(world, x, y, z);
+            if (node == null) return null;
+
+            if (player instanceof EntityPlayerMP) {
+                EntityPlayerMP serverPlayer = (EntityPlayerMP) player;
+                // 筛选页要列共享存储的条目：没开过终端界面的玩家这里没有缓存，先推一份全量
+                SharedStorageManager.sendSnapshotTo(serverPlayer);
+                PacketIoNodeSync.send(serverPlayer, node);
+            }
+            return new ContainerIoNode(node, player);
+        }
+
         if (id == GUI_LOOT_MACHINE) {
             TileEntityLootMachine machine = resolveLootMachine(world, x, y, z);
             if (machine == null) return null;
@@ -66,6 +90,13 @@ public class GuiHandler implements IGuiHandler {
     @Override
     public Object getClientGuiElement(int id, net.minecraft.entity.player.EntityPlayer player, World world, int x,
         int y, int z) {
+        if (id >= GUI_IO_NODE_BASE && id < GUI_IO_NODE_BASE + GUI_IO_NODE_COUNT) {
+            TileEntityIoNode node = resolveIoNode(world, x, y, z);
+            if (node == null) return null;
+            // 方法体在服务端永远不会执行，客户端类的引用是惰性解析的（同共享终端的做法）
+            return new GuiIoNode(new ContainerIoNode(node, player), id - GUI_IO_NODE_BASE);
+        }
+
         if (id == GUI_LOOT_MACHINE) {
             TileEntityLootMachine machine = resolveLootMachine(world, x, y, z);
             if (machine == null) return null;
@@ -98,5 +129,11 @@ public class GuiHandler implements IGuiHandler {
         if (world == null) return null;
         net.minecraft.tileentity.TileEntity tile = world.getTileEntity(x, y, z);
         return tile instanceof TileEntityLootMachine ? (TileEntityLootMachine) tile : null;
+    }
+
+    private static TileEntityIoNode resolveIoNode(World world, int x, int y, int z) {
+        if (world == null) return null;
+        net.minecraft.tileentity.TileEntity tile = world.getTileEntity(x, y, z);
+        return tile instanceof TileEntityIoNode ? (TileEntityIoNode) tile : null;
     }
 }

@@ -78,26 +78,22 @@ final class TerminalIoEngine {
 
             TileEntity neighbour = world.getTileEntity(x + face.offsetX, y + face.offsetY, z + face.offsetZ);
             if (neighbour == null || neighbour instanceof TileEntitySharedTerminal) continue;
+            // IO 节点不是容器，贴着也不该被当成搬运目标
+            if (neighbour instanceof TileEntityIoNode) continue;
 
             // 邻居看我们的方向：Forge 的接口要的是「从哪一面来的」
             ForgeDirection side = face.getOpposite();
 
             if (itemMode != TerminalIoConfig.Mode.OFF && neighbour instanceof IInventory) {
                 IInventory inventory = (IInventory) neighbour;
-                if (itemMode == TerminalIoConfig.Mode.PULL) {
-                    pullItems(inventory, side, config);
-                } else {
-                    pushItems(inventory, side, config, face);
-                }
+                if (itemMode.pulls()) pullItems(inventory, side, config);
+                if (itemMode.pushes()) pushItems(inventory, side, config, face);
             }
 
             if (fluidMode != TerminalIoConfig.Mode.OFF && neighbour instanceof IFluidHandler) {
                 IFluidHandler handler = (IFluidHandler) neighbour;
-                if (fluidMode == TerminalIoConfig.Mode.PULL) {
-                    pullFluid(handler, side, config);
-                } else {
-                    pushFluid(handler, side, config, face);
-                }
+                if (fluidMode.pulls()) pullFluid(handler, side, config);
+                if (fluidMode.pushes()) pushFluid(handler, side, config, face);
             }
         }
     }
