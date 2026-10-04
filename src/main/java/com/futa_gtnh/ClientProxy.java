@@ -15,6 +15,7 @@ import com.futa_gtnh.client.SwiftStepClientHandler;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketLocatorAction;
 
+import cpw.mods.fml.client.registry.RenderingRegistry;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
@@ -31,6 +32,12 @@ public class ClientProxy extends CommonProxy {
         RoguelikeMapClient.register();
         KeyHandler.register();
         SwiftStepClientHandler.register();
+
+        // IO 节点方块的 ISBRH（小中心核 + 连接臂 + 按模式着色的端帽）。
+        // renderId 是个静态字段：方块注册在两端都跑，但只有客户端赋得上渲染器；
+        // 服务端永远不渲染这个方块，字段保持 0 无所谓。
+        com.futa_gtnh.block.BlockIoNode.renderId = RenderingRegistry.getNextAvailableRenderId();
+        RenderingRegistry.registerBlockHandler(new com.futa_gtnh.client.IoNodeRenderer());
 
         // 世界渲染事件在 MinecraftForge.EVENT_BUS 上，不在 FML 的那条总线上。
         // 挂错了不会报错，只会永远收不到事件 —— 光渲染器会安静地什么都不画。

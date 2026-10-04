@@ -68,5 +68,8 @@ public final class NetworkHandler {
         INSTANCE.registerMessage(PacketSolarDescalerUse.Handler.class, PacketSolarDescalerUse.class, 27, Side.SERVER);
         // NEI 自动合成：服务端执行完当前一步后的回执。
         INSTANCE.registerMessage(PacketCraftResult.Handler.class, PacketCraftResult.class, 28, Side.CLIENT);
+        // IO 节点方块：面配置快照（S2C）与整份上行 / 权威值请求（C2S）
+        INSTANCE.registerMessage(PacketIoNodeSync.Handler.class, PacketIoNodeSync.class, 29, Side.CLIENT);
+        INSTANCE.registerMessage(PacketIoNodeConfig.Handler.class, PacketIoNodeConfig.class, 30, Side.SERVER);
     }
 }

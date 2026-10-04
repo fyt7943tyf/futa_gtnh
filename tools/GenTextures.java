@@ -22,6 +22,9 @@ public class GenTextures {
         blockTop();
         blockFront();
         gui();
+        ioNodeCore();
+        ioNodeArm();
+        ioNodeCap();
         verify();
         System.out.println("textures written to " + new File(OUT).getAbsolutePath());
     }
@@ -40,6 +43,9 @@ public class GenTextures {
         // GUI 是 256x256 画布，面板只占左上角 176x256，画布留白本就透明
         fullOpaque("gui/loot_machine.png", 176, 256);
         mostlyOpaque("items/solar_descaler.png", 0.20);
+        fullOpaque("blocks/io_node_core.png", 16, 16);
+        fullOpaque("blocks/io_node_arm.png", 16, 16);
+        fullOpaque("blocks/io_node_cap.png", 16, 16);
     }
 
     static void fullOpaque(String name, int boundsW, int boundsH) throws Exception {
@@ -151,6 +157,64 @@ public class GenTextures {
         px(img, 13, 2, 0x6A6A6A);
         px(img, 2, 13, 0x5A5A5A);
         px(img, 13, 13, 0x5A5A5A);
+    }
+
+    // ------------------------------------------------------------------
+    // IO 节点（io_node）：中心核 / 连接臂 / 端帽 三张。
+    //
+    // 渲染器（IoNodeRenderer.drawBox）的 UV 是「按面的像素尺寸从贴图左上角按比例取」：
+    // 6px 的核面采样左上 6x6，4px 的臂侧采样左上 4xN。所以这几张贴图的细节
+    // 都画在左上角一帯，右下大片区域给长边（臂的 10px 侧面）用。
+    // 端帽要乘模式颜色（灰/绿/橙/黄），底色必须接近白色，不然颜色乘出来发黑。
+    // ------------------------------------------------------------------
+
+    static void ioNodeCore() throws Exception {
+        BufferedImage img = img(16);
+        rect(img, 0, 0, 16, 16, 0x50575E); // 深钢底
+        rect(img, 0, 0, 16, 1, 0x767E88); // 顶部受光
+        rect(img, 0, 0, 1, 16, 0x666E78);
+        rect(img, 0, 15, 16, 1, 0x363B41); // 底部阴影
+        rect(img, 15, 0, 1, 16, 0x3E444B);
+        // 左上角（核实际采样的区域）画一颗「核心」：青绿色小方框
+        rect(img, 1, 1, 4, 4, 0x2E3A40);
+        rect(img, 2, 2, 2, 2, 0x39C48D);
+        px(img, 2, 2, 0x8CE8BC);
+        // 其余部分：细长的纵向拉丝
+        for (int x = 6; x < 16; x += 3) {
+            rect(img, x, 1, 1, 14, 0x5B626A);
+        }
+        write(img, "blocks/io_node_core.png");
+    }
+
+    static void ioNodeArm() throws Exception {
+        BufferedImage img = img(16);
+        rect(img, 0, 0, 16, 16, 0x6A7078); // 臂体：中灰
+        rect(img, 0, 0, 16, 1, 0x8A9098); // 受光
+        rect(img, 0, 15, 16, 1, 0x4A4F56);
+        rect(img, 0, 0, 1, 16, 0x7C828A);
+        rect(img, 15, 0, 1, 16, 0x53585F);
+        // 中间一条贯穿的「能量槽」（臂侧面采样左上 4x10，槽落在其中）
+        rect(img, 1, 1, 2, 14, 0x2E3A40);
+        rect(img, 1, 2, 2, 12, 0x5FA0C8);
+        px(img, 1, 2, 0xA8D8F0);
+        // 右侧稀疏铆点
+        px(img, 8, 3, 0x585E66);
+        px(img, 12, 8, 0x585E66);
+        px(img, 8, 12, 0x585E66);
+        write(img, "blocks/io_node_arm.png");
+    }
+
+    static void ioNodeCap() throws Exception {
+        BufferedImage img = img(16);
+        rect(img, 0, 0, 16, 16, 0xF0F0F0); // 近白底：吃得住乘色
+        rect(img, 0, 0, 16, 1, 0xFFFFFF);
+        rect(img, 0, 15, 16, 1, 0xC2C2C2);
+        rect(img, 0, 0, 1, 16, 0xFAFAFA);
+        rect(img, 15, 0, 1, 16, 0xCACACA);
+        // 中央浅灰指示环（乘色后呈现为模式色的深浅圈）
+        rect(img, 5, 5, 6, 6, 0xE2E2E2);
+        rect(img, 6, 6, 4, 4, 0xD2D2D2);
+        write(img, "blocks/io_node_cap.png");
     }
 
     // ------------------------------------------------------------------
