@@ -27,6 +27,7 @@
     var LS_CONSUMABLE = 'futa_gtnh.consumable';
     var LS_IGNORE_STOCK = 'futa_gtnh.ignorestock';
     var LS_BASKET = 'futa_gtnh.basket';
+    var LS_ALTS = 'futa_gtnh.alts';
 
     /** 一组多少个（MC 的栈上限）。数量换算成「几组零几个」时用。 */
     var STACK_SIZE = 64;
@@ -439,6 +440,83 @@
         writeBasket(out);
     }
 
+    /* ------------------------------------------------------------ 多候选材料的选择 */
+
+    /**
+     * 玩家给「任意一种都行」的格子指定的候选。
+     *
+     * <p>
+     * 键是 {@code 谁的配方:格子的x:格子的y}：同一个物品在不同配方里出现在不同格子，
+     * 光有坐标分不清是哪一条配方；同一个配方里也可能有两格都接受多候选，各自该用哪个是两回事。
+     * 值不在候选里时后端会忽略它（配方换了、索引重建了之后坐标可能指向别处），
+     * 所以这里坏数据只会退成「用默认候选」，不会算错。
+     */
+    function altKey(ownerItemId, slot) {
+        return String(ownerItemId) + ':' + num(slot && slot.x, 0) + ':' + num(slot && slot.y, 0);
+    }
+
+    function readAlts() {
+        var raw = lsGet(LS_ALTS);
+        if (!raw) return {};
+        try {
+            var parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    /** @return 玩家给这一格指定的候选物品号；没指定返回 0 */
+    function chosenAlt(ownerItemId, slot) {
+        var value = readAlts()[altKey(ownerItemId, slot)];
+        var id = Number(value);
+        return isFinite(id) && id > 0 ? id : 0;
+    }
+
+    /** 指定这一格用哪个候选；chosenId <= 0 表示改回自动。 */
+    function setAlt(ownerItemId, slot, chosenId) {
+        var map = readAlts();
+        var key = altKey(ownerItemId, slot);
+        if (chosenId > 0) {
+            map[key] = chosenId;
+        } else {
+            delete map[key];
+        }
+        lsSet(LS_ALTS, JSON.stringify(map));
+    }
+
+    /** {@code "42:3:1:100,..."} 形式，交给后端。 */
+    function altsParam() {
+        var map = readAlts();
+        var parts = [];
+        for (var key in map) {
+            if (!Object.prototype.hasOwnProperty.call(map, key)) continue;
+            if (!/^\d+:\d+:\d+$/.test(key)) continue;
+            parts.push(key + ':' + map[key]);
+        }
+        return parts.join(',');
+    }
+
+    /**
+     * 这一格实际该显示哪个物品。
+     *
+     * <p>
+     * 玩家指定过、而且指定的那个**确实在这一格的候选里**才用它；否则用候选里的第一个
+     * （和规划器的默认一致）。
+     */
+    function shownSlotItem(slot, ownerItemId) {
+        var primary = slot && slot.primary ? slot.primary : slot;
+        var alts = slot && Array.isArray(slot.alts) ? slot.alts : [];
+        if (alts.length <= 1) return primary;
+
+        var chosen = chosenAlt(ownerItemId, slot);
+        if (chosen > 0) {
+            for (var i = 0; i < alts.length; i++) {
+                if (num(alts[i].id, -1) === chosen) return alts[i];
+            }
+        }
+        return primary;
+    }
     function basketParam() {
         var list = readBasket();
         var parts = [];
@@ -698,6 +776,46 @@
         row.appendChild(close);
         bar.appendChild(row);
 
+        /*
+         * 多候选材料：让玩家挑这一格用哪一个。
+         *
+         * 原来只显示了一句「也可以用：A / B / C」，没法选 —— 规划永远按第一个候选算，
+         * 玩家手里明明有 B 也白搭。这里把候选列出来，点一下就换成它（存本地、跨会话记住）。
+         */
+        if (opts.alts && opts.alts.length > 1 && opts.ownerItemId !== undefined) {
+            var pickBox = el('div', 'alt-pick');
+            pickBox.appendChild(el('span', 'alt-pick-label', '这一格可以用：'));
+
+            for (var ai = 0; ai < opts.alts.length; ai++) {
+                (function (candidate) {
+                    var chosenNow = chosenAlt(opts.ownerItemId, opts.slot) === num(candidate.id, -1);
+                    var chip = el('button', 'alt-chip' + (chosenNow ? ' is-chosen' : ''));
+                    chip.appendChild(makeIcon(candidate, 'icon-22'));
+                    chip.appendChild(el('span', null, candidate.name ? String(candidate.name) : ('#' + candidate.id)));
+                    if (chosenNow) {
+                        chip.appendChild(el('span', 'alt-chip-mark', '✓ 用这个'));
+                    }
+                    chip.addEventListener('click', function () {
+                        // 再点一次已选中的 = 改回自动
+                        setAlt(opts.ownerItemId, opts.slot, chosenNow ? 0 : num(candidate.id, -1));
+                        hideItemInfo();
+                        toast(
+                            chosenNow ? '已改回自动挑候选（用列表里的第一个）'
+                                : ('这一格改用 ' + (candidate.name || candidate.id) + '，正在重新规划。'),
+                            'ok');
+                        // 在计划页就重新规划，否则重画当前页（和「选配方」那套一致）
+                        if (state.plan.active && byId('plan-host')) {
+                            refreshPlan();
+                        } else {
+                            render();
+                        }
+                    });
+                    pickBox.appendChild(chip);
+                })(opts.alts[ai]);
+            }
+            bar.appendChild(pickBox);
+        }
+
         // 想深究再进配方弹层 —— 识别一个东西不该付出整屏切换的代价
         if (item && item.id !== undefined && item.id !== null) {
             var act = el('div', 'item-info-actions');
@@ -898,6 +1016,10 @@
         }
         if (targets.length > 1) {
             url += '&targets=' + targets.join(',');
+        }        // 多候选材料的指定（玩家在格子上点出来的）
+        var altChoices = altsParam();
+        if (altChoices) {
+            url += '&alts=' + encodeURIComponent(altChoices);
         }
         if (choices) {
             url += '&choices=' + encodeURIComponent(choices);
@@ -1216,9 +1338,11 @@
      * 角标只有十几个像素、还带 pointer-events:none，指针停在图标上时什么都没有 ——
      * 玩家看到的现象就是「这一格里只有某个槽有提示，其它都没有」。
      */
-    function makeSlot(slot, kind, multiplier) {
+    function makeSlot(slot, kind, multiplier, ownerItemId) {
         var cell = el('div', 'slot' + (kind === 'output' ? ' is-output' : ''));
-        var item = slot && slot.primary ? slot.primary : slot;
+        // 玩家给这一格指定过候选就显示那个 —— 显示的和算的必须是同一个，
+        // 否则会出现「界面上写着铁板、规划却按钢板算」
+        var item = shownSlotItem(slot, ownerItemId);
         var id = item && item.id !== undefined && item.id !== null ? item.id : null;
         cell.appendChild(makeIcon(item));
 
@@ -1284,7 +1408,11 @@
                 e.stopPropagation();
                 showItemInfo(item, shownCount, {
                     note: (kind === 'output' ? '本次共产出' : '本次共需要')
-                        + (shownTimes > 1 ? '，每个配方 ×' + shownPer : '')
+                        + (shownTimes > 1 ? '，每个配方 ×' + shownPer : ''),
+                    // 多候选的格子：把候选列表和身份一起交给信息条，它负责渲染「用这个」
+                    alts: Array.isArray(slot && slot.alts) ? slot.alts : null,
+                    ownerItemId: ownerItemId,
+                    slot: slot
                 });
             };
             cell.addEventListener('click', open);
@@ -1312,7 +1440,7 @@
      *        「这一步做 256 次」时，玩家真正要备的是每个槽 ×256，
      *        只写 NEI 那种每次用量会让他少备 256 倍。
      */
-    function makeGrid(recipe, entries, multiplier) {
+    function makeGrid(recipe, entries, multiplier, ownerItemId) {
         var dims = gridDims(recipe);
         var grid = el('div', 'grid');
         grid.style.gridTemplateColumns = 'repeat(' + dims.w + ', var(--slot-size))';
@@ -1339,7 +1467,7 @@
         }
         for (i = 0; i < cells.length; i++) {
             if (cells[i]) {
-                grid.appendChild(makeSlot(cells[i].slot, cells[i].kind, multiplier));
+                grid.appendChild(makeSlot(cells[i].slot, cells[i].kind, multiplier, ownerItemId));
             } else {
                 grid.appendChild(el('div', 'slot is-empty'));
             }
@@ -1478,7 +1606,7 @@
         var entries = slotEntries(recipe ? recipe.inputs : null, 'input');
         entries = entries.concat(slotEntries(recipe ? recipe.outputs : null, 'output'));
         var gridWrap = el('div', 'recipe-side');
-        gridWrap.appendChild(makeGrid(recipe, entries));
+        gridWrap.appendChild(makeGrid(recipe, entries, 1, options.itemId));
         body.appendChild(gridWrap);
         body.appendChild(makeOutputLine(recipe));
 
@@ -1861,7 +1989,7 @@
         if (items.length === 0) {
             meta.textContent = q ? '没有找到匹配的物品' : '暂时没有可显示的数据';
         } else {
-            meta.textContent = '共 ' + state.search.total + ' 项，显示前 ' + items.length + ' 项';
+            meta.textContent = '共 ' + state.search.total + ' 项，已显示 ' + items.length + ' 项';
         }
         box.appendChild(meta);
 
@@ -1878,6 +2006,36 @@
             list.appendChild(buildResultRow(items[i], q));
         }
         box.appendChild(list);
+
+        /*
+         * 「加载更多」。
+         *
+         * 后端一直支持 limit + offset（默认 40），但前端原来写死 apiSearch(q, 40, 0)，
+         * 于是无论搜出多少条都只显示前 40 个 —— 玩家看到的就是「后面显示不了」。
+         * 这里用已显示的条数当偏移继续拉，拉到 total 为止。
+         */
+        if (items.length < state.search.total) {
+            var more = btn('btn btn-block', '加载更多（还有 ' + (state.search.total - items.length) + ' 项）');
+            more.addEventListener('click', function () {
+                more.disabled = true;
+                more.textContent = '正在加载…';
+                var offset = state.search.items.length;
+                var seq = state.search.seq;
+                apiSearch(q, 40, offset).then(function (data) {
+                    if (seq !== state.search.seq) {
+                        return;   // 期间又搜了别的词，这批结果丢掉
+                    }
+                    var added = Array.isArray(data.items) ? data.items : [];
+                    state.search.items = state.search.items.concat(added);
+                    state.search.total = num(data.total, state.search.items.length);
+                    renderSearchResults(q);
+                }).catch(function () {
+                    more.disabled = false;
+                    more.textContent = '加载更多（失败，点这里重试）';
+                });
+            });
+            box.appendChild(more);
+        }
     }
 
     function renderSearchPage(q) {
@@ -2613,7 +2771,7 @@
                 var gridBox = el('div', 'step-grid is-compact');
                 gridBox.appendChild(makeGrid(readyRecipe, slotEntries(readyRecipe.inputs, 'input')
                     .concat(slotEntries(readyRecipe.outputs, 'output'))
-                    .concat(slotEntries(readyRecipe.extras, 'extra')), step.crafts));
+                    .concat(slotEntries(readyRecipe.extras, 'extra')), step.crafts, step.itemId));
                 info.appendChild(gridBox);
             }
             card.appendChild(info);
@@ -2913,7 +3071,7 @@
             var gridBox = el('div', 'step-grid');
             gridBox.appendChild(makeGrid(recipe, slotEntries(recipe.inputs, 'input')
                 .concat(slotEntries(recipe.outputs, 'output'))
-                .concat(slotEntries(recipe.extras, 'extra')), crafts));
+                .concat(slotEntries(recipe.extras, 'extra')), crafts, step.itemId));
             body.appendChild(gridBox);
             body.appendChild(makeOutputLine(recipe, crafts));
         }

@@ -521,6 +521,32 @@ async function main() {
                 altInfo.count + ' 处：' + altInfo.first);
         }
         console.log('  → 后端多候选材料 ' + altIngredients.length + ' 行（含候选列表）');
+
+        // 候选要能「选」：点那一格 → 信息条里出现候选胶囊 → 点一个 → 写进 localStorage
+        const altPick = await session.eval(`(() => {
+            const cells = Array.from(document.querySelectorAll('.step-grid .slot.is-clickable'));
+            for (const cell of cells) {
+                cell.click();
+                const bar = document.getElementById('item-info');
+                const chips = bar ? bar.querySelectorAll('.alt-chip') : null;
+                if (chips && chips.length > 1) {
+                    const before = localStorage.getItem('futa_gtnh.alts') || '{}';
+                    chips[chips.length - 1].click();
+                    const after = localStorage.getItem('futa_gtnh.alts') || '{}';
+                    return { chips: chips.length, before: before.length, after: after,
+                             text: String(chips[chips.length - 1].textContent || '').slice(0, 24) };
+                }
+            }
+            return null;
+        })()`);
+        if (!altPick) {
+            console.log('  （这一页没有多候选格子，跳过候选选择的界面断言）');
+        } else {
+            check('点格子会列出全部候选', altPick.chips > 1, altPick.chips + ' 个候选');
+            // 记下来的键形如 "17837:1:0"（主人的物品号:格子的x:格子的y），所以看有没有冒号最实在
+            check('点候选会记进浏览器本地', String(altPick.after).indexOf(':') >= 0,
+                '选择后 localStorage=' + String(altPick.after).slice(0, 40) + '，选的是「' + altPick.text + '」');
+        }
         console.log('  截图: ' + await session.shot('plan-raw-conflict'));
 
         const fixed = await session.eval(`(() => {

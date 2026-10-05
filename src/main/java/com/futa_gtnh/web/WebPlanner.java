@@ -90,6 +90,19 @@ public final class WebPlanner {
         public final List<Target> targets = new ArrayList<>();
         /** 玩家指定的配方：物品 id -> 配方序号。 */
         public Map<Integer, Integer> choices = new HashMap<>();
+
+        /**
+         * 玩家给「多候选材料」指定的选择：{@code "谁的配方:格子的x:格子的y" -> 用哪个候选}。
+         *
+         * <p>
+         * 键里带「谁的配方」是因为同一个物品在不同配方里出现在不同格子，
+         * 光有坐标分不清是哪一条配方的槽；带坐标是因为同一个配方里可能有
+         * 两格都接受多个候选，而它们各自该用哪个是两回事。
+         *
+         * <p>
+         * 值为负 = 没指定，退回候选里的第一个。
+         */
+        public Map<String, Integer> alts = new HashMap<>();
         /** 当作原始材料、不再往下展开的物品 id。 */
         public Set<Integer> raw = new HashSet<>();
         /** 玩家手动标成「非消耗品」的物品 id（自动判定之外再补的）。 */
@@ -503,7 +516,7 @@ public final class WebPlanner {
                         int[] childPath = push(work.path, work.itemId);
                         for (int i = 0; i < view.inputs.length; i++) {
                             WebRecipeIndex.Slot slot = view.inputs[i];
-                            int childItem = slot.alts.length > 0 ? slot.alts[0] : -1;
+                            int childItem = pickAlt(request, work.itemId, slot);
                             if (childItem < 0) continue;
                             long amount = Math.min(MAX_AMOUNT, (long) slot.amount * delta);
                             queue.add(
@@ -789,8 +802,8 @@ public final class WebPlanner {
             step.crafts = times;
             step.perCraft = perCraft;
             step.total = step.perCraft * times;
-            fillIngredients(step.inputs, view.inputs, times, request, stockCache);
-            fillIngredients(step.extras, view.extras, times, request, stockCache);
+            fillIngredients(step.inputs, view.inputs, times, request, itemId, stockCache);
+            fillIngredients(step.extras, view.extras, times, request, itemId, stockCache);
 
             // 把依赖的「配方编号」翻译成「步骤号」：界面上认的是序号，
             // 内部编号（ordinal）是索引里的位置，玩家和前端都不该看到它。
@@ -817,7 +830,7 @@ public final class WebPlanner {
     }
 
     private static void fillIngredients(List<Ingredient> out, WebRecipeIndex.Slot[] slots, long times, Request request,
-        Map<Integer, Long> stockCache) {
+        int ownerItemId, Map<Integer, Long> stockCache) {
         // 同一种材料在配方里可能占好几格（比如四块钢板），合并成一行更好读
         //
         // 合并键用**整组候选**而不是第一候选：矿物词典那一类「铁板 / 各类铁板都行」的槽，
@@ -837,7 +850,10 @@ public final class WebPlanner {
             Ingredient ingredient = merged.get(key.toString());
             if (ingredient == null) {
                 ingredient = new Ingredient();
-                ingredient.itemId = slot.alts[0];
+                // 玩家给这一格指定过用哪个候选就用那个 —— 材料表里的「还缺多少」
+                // 也要跟着按它算，否则会出现「界面上显示 A、库存却按 B 算」
+                ingredient.itemId = pickAlt(request, ownerItemId, slot);
+                if (ingredient.itemId < 0) ingredient.itemId = slot.alts[0];
                 ingredient.alts = slot.alts.clone();
                 ingredient.perCraft = slot.amount;
                 ingredient.alternatives = slot.alts.length > 1;
@@ -855,6 +871,30 @@ public final class WebPlanner {
             ingredient.missing = Math.max(0L, ingredient.need - ingredient.have);
             out.add(ingredient);
         }
+    }
+
+    /**
+     * 这一格该用哪个候选。
+     *
+     * <p>
+     * 默认是候选里的第一个（索引建好后就不再变，所以同一份数据每次算出来都一样）；
+     * 玩家在界面上给这一格指定过的话就用指定的那个 —— <b>但只有它确实在这一格的候选里才算数</b>。
+     * 这条校验是必须的：配方换了、索引重建了之后坐标可能指向别的槽位，
+     * 那时候默默按一个不相干的物品算，比忽略这个选择糟得多。
+     *
+     * @param ownerItemId 这一格属于谁的配方（键的第一段）
+     * @return 选中的物品号；没有候选时返回 -1
+     */
+    private static int pickAlt(Request request, int ownerItemId, WebRecipeIndex.Slot slot) {
+        if (slot == null || slot.alts.length == 0) return -1;
+
+        Integer chosen = request.alts.get(ownerItemId + ":" + slot.x + ":" + slot.y);
+        if (chosen != null) {
+            for (int i = 0; i < slot.alts.length; i++) {
+                if (slot.alts[i] == chosen.intValue()) return chosen.intValue();
+            }
+        }
+        return slot.alts[0];
     }
 
     /**
