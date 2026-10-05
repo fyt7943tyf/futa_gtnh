@@ -27,6 +27,7 @@
     var LS_CONSUMABLE = 'futa_gtnh.consumable';
     var LS_IGNORE_STOCK = 'futa_gtnh.ignorestock';
     var LS_BASKET = 'futa_gtnh.basket';
+    var LS_GROUPS = 'futa_gtnh.groups';   // 书签组（组里有清单；旧键保留作镜像）
     var LS_ALTS = 'futa_gtnh.alts';
 
     /** 一组多少个（MC 的栈上限）。数量换算成「几组零几个」时用。 */
@@ -275,9 +276,24 @@
             lsSet(LS_ALTS, '');
             dropped.push('候选选择');
         }
-        if (lsGet(LS_BASKET)) {
-            lsSet(LS_BASKET, '');
-            dropped.push('购物清单');
+        // ★ 清的是「组里的清单」，不是那个镜像键：basket 现在只是镜像，清它等于没清 ——
+        // 失效编号会留在组里，规划会一直失败。组名保留：玩家怎么分类的不该因为换了客户端就没。
+        var store = lsGet(LS_GROUPS) ? readGroupStore() : null;
+        if (store) {
+            var cleared = false;
+            for (var gi = 0; gi < store.groups.length; gi++) {
+                if (store.groups[gi].items.length > 0) {
+                    store.groups[gi].items = [];
+                    cleared = true;
+                }
+            }
+            if (cleared) {
+                writeGroupStore(store);
+                dropped.push('书签组里的清单');
+            }
+        } else if (lsGet(LS_BASKET)) {
+            lsSet(LS_BASKET, '' );
+            dropped.push('计划清单');
         }
         return dropped;
     }
@@ -421,6 +437,181 @@
 
     /* ------------------------------------------------------------ 计划清单（多目标） */
 
+    /* ==================================================================
+     * 书签组：一个组 = 一份「计划清单」，可以把多个方块放进同一份规划里
+     *
+     * 为什么要在清单之上再加一层「组」：做机器往往是成套的（A 64 个 + B 3 个 + C 1 个），
+     * 但这套东西今天算完、明天还要再算一次，而清单是「这一次」的东西 —— 换一件事就得清空重填。
+     * 组是可命名、可保存、可随时切回来接着算的清单。
+     *
+     * ★ 兼容性是硬要求：
+     *   - 旧的单份清单（futa_gtnh.basket）在第一次加载时被迁移成名为「我的清单」的组；
+     *   - 旧键保留不删并继续镜像当前组，所以降级回旧版本也不会丢东西；
+     *   - 配方选择（choices）、候选选择（alts）、原始材料（raw）三个键这里一个字都不碰。
+     * ================================================================== */
+
+    /** 组存储的结构版本：以后改结构要升它，并在 readGroupStore 里加迁移分支。 */
+    var GROUP_SCHEMA = 1;
+    var DEFAULT_GROUP_NAME = '我的清单';
+
+    function newGroupId() {
+        return 'g' + Date.now().toString(36) + Math.floor(Math.random() * 46656).toString(36);
+    }
+
+    /** 把任意来源的清单数据洗成 [{id, count}]（坏数据丢掉，字段类型不对就修正）。 */
+    function normalizeItems(rawList) {
+        var out = [];
+        if (!Array.isArray(rawList)) return out;
+        for (var i = 0; i < rawList.length; i++) {
+            var entry = rawList[i];
+            var id = Number(entry && entry.id);
+            var count = Number(entry && entry.count);
+            if (!isFinite(id) || id < 0) continue;
+            if (!isFinite(count) || count < 1) count = 1;
+            out.push({ id: id, count: Math.min(1000000, Math.round(count)) });
+        }
+        return out;
+    }
+
+    /** 读组存储；没有就迁移旧清单。返回 {version, activeId, groups}。 */
+    function readGroupStore() {
+        var raw = lsGet(LS_GROUPS);
+        if (raw) {
+            try {
+                var parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object' && Array.isArray(parsed.groups)) {
+                    var groups = [];
+                    for (var i = 0; i < parsed.groups.length; i++) {
+                        var g = parsed.groups[i];
+                        if (!g || typeof g !== 'object') continue;
+                        groups.push({
+                            id: g.id ? String(g.id) : newGroupId(),
+                            name: g.name ? String(g.name).slice(0, 40) : DEFAULT_GROUP_NAME,
+                            items: normalizeItems(g.items)
+                        });
+                    }
+                    if (groups.length > 0) {
+                        var activeId = parsed.activeId ? String(parsed.activeId) : '';
+                        var found = false;
+                        for (var k = 0; k < groups.length; k++) {
+                            if (groups[k].id === activeId) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) activeId = groups[0].id;
+                        return { version: GROUP_SCHEMA, activeId: activeId, groups: groups };
+                    }
+                }
+            } catch (e) {
+                // 坏数据按「没有」处理，落到下面的迁移分支 —— 宁可重建，也不要让页面打不开
+            }
+        }
+
+        // 迁移：旧版本只有一份清单，把它装进第一个组里。旧键不动。
+        var legacy = [];
+        try {
+            var rawBasket = lsGet(LS_BASKET);
+            if (rawBasket) legacy = normalizeItems(JSON.parse(rawBasket));
+        } catch (e) {
+            legacy = [];
+        }
+        var first = { id: newGroupId(), name: DEFAULT_GROUP_NAME, items: legacy };
+        var store = { version: GROUP_SCHEMA, activeId: first.id, groups: [first] };
+        writeGroupStore(store);
+        return store;
+    }
+
+    function writeGroupStore(store) {
+        lsSet(LS_GROUPS, JSON.stringify(store));
+        // 镜像当前组到旧键：旧版本（或者以后降级）读它也能拿到东西
+        var active = activeGroupOf(store);
+        lsSet(LS_BASKET, JSON.stringify(active ? active.items : []));
+    }
+
+    function activeGroupOf(store) {
+        for (var i = 0; i < store.groups.length; i++) {
+            if (store.groups[i].id === store.activeId) return store.groups[i];
+        }
+        return store.groups.length ? store.groups[0] : null;
+    }
+
+    /** 当前正在编辑/规划的那个组。 */
+    function activeGroup() {
+        return activeGroupOf(readGroupStore());
+    }
+
+    /** 切换当前组。 */
+    function setActiveGroup(groupId) {
+        var store = readGroupStore();
+        for (var i = 0; i < store.groups.length; i++) {
+            if (store.groups[i].id === String(groupId)) {
+                store.activeId = store.groups[i].id;
+                writeGroupStore(store);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function createGroup(name) {
+        var store = readGroupStore();
+        var g = {
+            id: newGroupId(),
+            name: (name && String(name).slice(0, 40)) || ('新组 ' + (store.groups.length + 1)),
+            items: []
+        };
+        store.groups.push(g);
+        store.activeId = g.id;
+        writeGroupStore(store);
+        return g;
+    }
+
+    function renameGroup(groupId, name) {
+        var store = readGroupStore();
+        for (var i = 0; i < store.groups.length; i++) {
+            if (store.groups[i].id !== String(groupId)) continue;
+            var clean = String(name || '').trim();
+            store.groups[i].name = (clean || DEFAULT_GROUP_NAME).slice(0, 40);
+            writeGroupStore(store);
+            return true;
+        }
+        return false;
+    }
+
+    /** 删组。最后一组不让删（界面总要有个能落脚的地方）。 */
+    function deleteGroup(groupId) {
+        var store = readGroupStore();
+        if (store.groups.length <= 1) return false;
+        var kept = [];
+        for (var i = 0; i < store.groups.length; i++) {
+            if (store.groups[i].id !== String(groupId)) kept.push(store.groups[i]);
+        }
+        if (kept.length === store.groups.length) return false;
+        store.groups = kept;
+        if (store.activeId === String(groupId)) store.activeId = kept[0].id;
+        writeGroupStore(store);
+        return true;
+    }
+
+    function copyGroup(groupId) {
+        var store = readGroupStore();
+        for (var i = 0; i < store.groups.length; i++) {
+            if (store.groups[i].id !== String(groupId)) continue;
+            var src = store.groups[i];
+            var g = {
+                id: newGroupId(),
+                name: (src.name + ' 副本').slice(0, 40),
+                items: normalizeItems(src.items)
+            };
+            store.groups.push(g);
+            store.activeId = g.id;
+            writeGroupStore(store);
+            return g;
+        }
+        return null;
+    }
+
     /**
      * 「这次要一起做的东西」。
      *
@@ -429,30 +620,29 @@
      * 公共的中间产物会被算好几遍，而且看不出哪些活是共用的。
      * 清单存在浏览器本地，规划时整份交给后端一次算完。
      */
+    /**
+     * 当前组的清单。
+     *
+     * <p>
+     * 读写都落在「当前书签组」上；旧键（futa_gtnh.basket）由 writeGroupStore 负责镜像，
+     * 这样旧版本、或者以后降级回去，读到的还是同一份东西。
+     */
     function readBasket() {
-        var raw = lsGet(LS_BASKET);
-        var out = [];
-        if (!raw) return out;
-        try {
-            var parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-                for (var i = 0; i < parsed.length; i++) {
-                    var entry = parsed[i];
-                    var id = Number(entry && entry.id);
-                    var count = Number(entry && entry.count);
-                    if (!isFinite(id) || id < 0) continue;
-                    if (!isFinite(count) || count < 1) count = 1;
-                    out.push({ id: id, count: Math.min(1000000, Math.round(count)) });
-                }
-            }
-        } catch (e) {
-            /* 坏数据当没有 */
-        }
-        return out;
+        var group = activeGroup();
+        return group ? group.items : [];
     }
 
+    /** 把清单写回当前组（并镜像到旧键）。 */
     function writeBasket(list) {
-        lsSet(LS_BASKET, JSON.stringify(list || []));
+        var store = readGroupStore();
+        var group = activeGroupOf(store);
+        if (!group) {
+            group = { id: newGroupId(), name: DEFAULT_GROUP_NAME, items: [] };
+            store.groups.push(group);
+            store.activeId = group.id;
+        }
+        group.items = normalizeItems(list);
+        writeGroupStore(store);
     }
 
     function addToBasket(itemId, count) {
@@ -1062,8 +1252,12 @@
         return fetchJson(url);
     }
 
-    function apiItem(id) {
-        return fetchJson('/api/item?id=' + encodeURIComponent(String(id)));
+    function apiItem(id, rlimit) {
+        var url = '/api/item?id=' + encodeURIComponent(String(id));
+        if (rlimit > 0) {
+            url += '&rlimit=' + encodeURIComponent(String(rlimit));
+        }
+        return fetchJson(url);
     }
 
     function apiPlan(id, count, stock, choices, raw) {
@@ -1083,7 +1277,9 @@
         }
         if (targets.length > 1) {
             url += '&targets=' + targets.join(',');
-        }        // 多候选材料的指定（玩家在格子上点出来的）
+        }
+
+        // 多候选材料的指定（玩家在格子上点出来的）
         var altChoices = altsParam();
         if (altChoices) {
             url += '&alts=' + encodeURIComponent(altChoices);
@@ -2236,17 +2432,109 @@
      * 做机器是成套的：A 64 个 + B 3 个 + C 1 个。清单里的东西会被一起规划，
      * 公共的中间产物只算一次 —— 所以先把清单摆出来，玩家才看得见自己加了什么。
      */
+    /**
+     * 书签组那一排：切换、新建、重命名、复制、删除。
+     *
+     * <p>
+     * 组是「可保存的清单」：做一套机器时把几个方块放进同一个组，下次打开直接切回这个组接着算。
+     * 界面刻意做得很轻 —— 一排标签 + 一个小菜单，不占地方，手机上也好点。
+     */
+    function makeGroupBar() {
+        var store = readGroupStore();
+        var box = el('div', 'group-bar');
+
+        var tabs = el('div', 'group-tabs');
+        for (var i = 0; i < store.groups.length; i++) {
+            (function (group) {
+                var isActive = group.id === store.activeId;
+                var tab = el('button', 'group-tab' + (isActive ? ' is-active' : ''));
+                tab.appendChild(el('span', null, group.name));
+                if (group.items.length > 0) {
+                    tab.appendChild(el('span', 'group-count', String(group.items.length)));
+                }
+                tab.setAttribute('aria-label', '切换到书签组「' + group.name + '」');
+                tab.addEventListener('click', function () {
+                    if (!setActiveGroup(group.id)) return;
+                    // 记住当前输入的数量：切换组会重画页面
+                    var input = byId('count-input');
+                    if (input) {
+                        state.item.count = clampInt(input.value, 1, 1000000, state.item.count);
+                    }
+                    render();
+                    toast('已切换到「' + group.name + '」', 'ok');
+                });
+                tabs.appendChild(tab);
+            })(store.groups[i]);
+        }
+        box.appendChild(tabs);
+
+        var tools = el('div', 'group-tools');
+        var add = btn('btn btn-small', '＋ 新建组');
+        add.addEventListener('click', function () {
+            var name = prompt('新书签组的名字（里面先放空，之后往里加方块）', '新组 ' + (readGroupStore().groups.length + 1));
+            if (name === null) return;
+            var g = createGroup(name);
+            render();
+            toast('已新建「' + g.name + '」', 'ok');
+        });
+        tools.appendChild(add);
+
+        var active = activeGroup();
+        if (active) {
+            var rename = btn('btn btn-small', '重命名');
+            rename.addEventListener('click', function () {
+                var name = prompt('「' + active.name + '」改成什么名字？', active.name);
+                if (name === null) return;
+                renameGroup(active.id, name);
+                render();
+            });
+            tools.appendChild(rename);
+
+            var copy = btn('btn btn-small', '复制一份');
+            copy.addEventListener('click', function () {
+                var g = copyGroup(active.id);
+                if (!g) return;
+                render();
+                toast('已复制成「' + g.name + '」', 'ok');
+            });
+            tools.appendChild(copy);
+
+            if (readGroupStore().groups.length > 1) {
+                var del = btn('btn btn-small btn-danger', '删除本组');
+                del.addEventListener('click', function () {
+                    if (!confirm('删掉「' + active.name + '」？组里的清单会一起没掉（配方选择不受影响）。')) return;
+                    deleteGroup(active.id);
+                    render();
+                    toast('已删除「' + active.name + '」', 'ok');
+                });
+                tools.appendChild(del);
+            }
+        }
+        box.appendChild(tools);
+        return box;
+    }
+
     function makeBasketSection(currentId, currentCount) {
         var list = readBasket();
         var section = el('div', 'section');
+        // 组栏放在标题之前：先选「算哪一套」，再看「这套里有什么」
+        section.appendChild(makeGroupBar());
         var title = el('div', 'section-title');
         title.appendChild(document.createTextNode('一起做'));
         title.appendChild(el('span', 'count', '(' + (list.length + (currentId !== null ? 1 : 0)) + ')'));
         section.appendChild(title);
 
-        section.appendChild(el('div', 'muted',
-            '这里的东西会放进同一份计划一起算：共用的中间产物只做一批，'
-                + '步骤表里也会合并。'));
+        section.appendChild(
+            el('div', 'muted',
+                '这里的东西会放进同一份计划一起算：共用的中间产物只做一批，步骤表里也会合并。'));
+
+        // 空组要说一句：不然玩家新建完组、看到一个空箱子，会以为坏了
+        var groupNow = activeGroup();
+        if (groupNow && groupNow.items.length === 0) {
+            section.appendChild(
+                el('div', 'muted',
+                    '「' + groupNow.name + '」里还没有东西 —— 去物品页点「一起做：加进计划清单」把它加进来。'));
+        }
 
         var rows = el('div', 'basket-list');
         var addRow = function (itemId, count, isCurrent) {
@@ -2350,7 +2638,7 @@
         };
 
         var load = function () {
-            apiItem(id).then(function (data) {
+            apiItem(id, state.item && state.item.rlimit).then(function (data) {
                 if (done()) {
                     return;
                 }
@@ -2514,7 +2802,22 @@
             if (total > recipes.length) {
                 section.appendChild(
                     el('div', 'muted',
-                        '这个物品有 ' + total + ' 条配方，这里只列出前 ' + recipes.length + ' 条（回收类物品都这样）。'));
+                        '这个物品有 ' + total + ' 条配方，这里只列出前 ' + recipes.length + ' 条。'));
+                // 给出路：回收类物品有上万条配方，只给前 80 条而没有「继续看」的入口，
+                // 等于那件东西查不了。每次翻三倍（上限与后端一致）。
+                var moreRecipes = btn('btn btn-block', '加载更多配方（还有 ' + (total - recipes.length) + ' 条）');
+                moreRecipes.addEventListener('click', function () {
+                    moreRecipes.disabled = true;
+                    moreRecipes.textContent = '正在加载…';
+                    // 记住玩家输入的数量：重画页面会把输入框清掉
+                    var input = byId('count-input');
+                    if (input) {
+                        state.item.count = clampInt(input.value, 1, 1000000, count);
+                    }
+                    state.item.rlimit = Math.min(2000, Math.max(recipes.length * 3, recipes.length + 80));
+                    render();
+                });
+                section.appendChild(moreRecipes);
             }
 
             // 就地更新卡片状态，不重建页面，免得把用户输入的数量清掉
@@ -2736,12 +3039,11 @@
         host.appendChild(head);
 
         // 「一起做」：这份计划里包含的每一件东西（含清单里加进来的）。
-        // 只有一个目标时不显示，免得占地方
         rememberBasketNames(data);
-        var allTargets = Array.isArray(data.targets) ? data.targets : [];
-        if (allTargets.length > 1 || readBasket().length > 0) {
-            host.appendChild(makeBasketSection(targetId, targetCount));
-        }
+        // ★ 这一段**永远**渲染，哪怕当前组是空的。
+        // 曾经只在「多目标或清单非空」时渲染，结果新建一个空组 → 整个区连带组标签消失 →
+        // 之前那些组**无从切回**，玩家看到的就是「新建之后以前的清单不见了」。
+        host.appendChild(makeBasketSection(targetId, targetCount));
 
         /* 概览 */
         var sum = el('div', 'card summary');
@@ -3307,7 +3609,7 @@
         body.appendChild(el('div', 'box', '正在读取配方…'));
         showModal();
 
-        apiItem(id).then(function (data) {
+        apiItem(id, state.item && state.item.rlimit).then(function (data) {
             clear(body);
             var item = data.item || entry;
             var recipes = Array.isArray(data.recipes) ? data.recipes : [];
