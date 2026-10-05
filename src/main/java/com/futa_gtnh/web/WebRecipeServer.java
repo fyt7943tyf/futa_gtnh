@@ -57,6 +57,12 @@ public final class WebRecipeServer {
     /** 单个物品最多回多少条配方（回收类物品能有上万条，全回手机打不开）。 */
     private static final int MAX_RECIPES_PER_ITEM = 80;
 
+    /**
+     * 前端可以主动要更多（「加载更多配方」按钮）。仍然有上限：几万条一次性塞进浏览器，
+     * 手机只会卡死 —— 分几次点，每次翻三倍，够用了。
+     */
+    private static final int MAX_RECIPES_CEILING = 2000;
+
     /** 一次最多同时规划几件东西（「合成 A 64 个 + B 3 个」）。 */
     private static final int MAX_TARGETS = 12;
 
@@ -384,11 +390,15 @@ public final class WebRecipeServer {
             .k("item");
         writeItemRef(json, id, true);
 
+        // 一次回多少条：默认 80（手机上再多就打不开了），但允许前端要更多 ——
+        // 「回收类」物品能有上万条配方，只给前 80 条而没有出路，等于那件东西查不了。
+        int wanted = clampInt(query.get("rlimit"), MAX_RECIPES_PER_ITEM, 1, MAX_RECIPES_CEILING);
+
         json.k("recipes")
             .arr();
         int[] ordinals = WebRecipeIndex.recipesFor(id);
         int written = 0;
-        for (int i = 0; i < ordinals.length && written < MAX_RECIPES_PER_ITEM; i++) {
+        for (int i = 0; i < ordinals.length && written < wanted; i++) {
             WebRecipeIndex.RecipeView view = WebRecipeIndex.view(ordinals[i]);
             if (view == null) continue;
             writeRecipe(json, view);
