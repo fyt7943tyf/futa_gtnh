@@ -289,6 +289,9 @@ futa_gtnh.swift_step.gui.light.note=lights up only; mobs still spawn
 key.futa_gtnh.rts_toggle=Toggle RTS build mode
 futa_gtnh.rts.msg.disabled=RTS build mode is disabled on this server
 futa_gtnh.rts.hud.exit=G / ESC to exit
+
+# --- Mobile crafting guide web page ---
+key.futa_gtnh.web_recipe=Crafting guide web page (show phone URL)
 futa_gtnh.rts.hud.move=Camera: WASD pan Q/E turn Space/Shift up-down wheel zoom MMB-drag rotate RMB-drag pan
 futa_gtnh.rts.hud.radius=Action radius %s blocks
 futa_gtnh.rts.msg.wrong_tool=Tool not good enough: this block needs a better tool

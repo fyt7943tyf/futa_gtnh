@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#14161a">
+<meta name="format-detection" content="telephone=no">
+<title>合成向导</title>
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <span class="brand">合成向导</span>
+        <span id="status" class="status" role="status" aria-live="polite">
+            <span class="status-dot is-idle" aria-hidden="true"></span>
+            <span id="status-text" class="status-text">未连接</span>
+        </span>
+    </div>
+    <div id="status-progress" class="progress" role="progressbar" aria-label="配方索引建立进度"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+        <div id="status-bar" class="progress-bar"></div>
+    </div>
+</header>
+
+<!-- 页面里所有动态内容都由 app.js 注入；这里只保留静态骨架 -->
+<main id="view" class="view"></main>
+
+<footer id="footer" class="footer" hidden>
+    <div class="footer-inner">
+        <button type="button" id="footer-primary" class="btn btn-primary btn-block" hidden>生成合成步骤</button>
+    </div>
+</footer>
+
+<div id="overlay" class="overlay" hidden>
+    <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
+        <header class="modal-head">
+            <h2 id="modal-title" class="modal-title">选择配方</h2>
+            <button type="button" id="modal-close" class="btn btn-ghost btn-small">关闭</button>
+        </header>
+        <div id="modal-body" class="modal-body"></div>
+    </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<!-- 点格子弹出的物品信息条：手机上没有 hover，识别一个东西不能靠悬停 -->
+<div id="item-info" class="item-info" role="status" aria-live="polite" hidden></div>
+
+<!-- 自己画的悬停提示：原生 title 有一秒延迟，手机上还不显示 -->
+<div id="tip" class="tip" role="tooltip" hidden></div>
+
+</body>
+</html>

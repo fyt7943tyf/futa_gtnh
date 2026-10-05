@@ -71,5 +71,14 @@ public final class NetworkHandler {
         // IO 节点方块：面配置快照（S2C）与整份上行 / 权威值请求（C2S）
         INSTANCE.registerMessage(PacketIoNodeSync.Handler.class, PacketIoNodeSync.class, 29, Side.CLIENT);
         INSTANCE.registerMessage(PacketIoNodeConfig.Handler.class, PacketIoNodeConfig.class, 30, Side.SERVER);
+        // 手机网页版合成向导：请求一份共享存储全量快照（只读，用于算「还缺多少」）。
+        // 快照本身复用既有的 PacketStorageSync（S2C）。
+        // 这里原本写的是 28，变基时发现远端已经用掉 28/29/30 —— 撞号的后果是
+        // 两种包互相顶掉，而且是运行时才炸，所以宁可往后排也不要挤。
+        INSTANCE.registerMessage(
+            PacketStorageSnapshotRequest.Handler.class,
+            PacketStorageSnapshotRequest.class,
+            31,
+            Side.SERVER);
     }
 }

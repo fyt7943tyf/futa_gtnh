@@ -51,6 +51,10 @@ public class ClientProxy extends CommonProxy {
         // 俯瞰模式下隐藏第一人称手臂（GTNH Forge 反向移植的 RenderHandEvent，
         // Forge 总线事件，注册器内部自己挂对了总线）
         com.futa_gtnh.rts.client.RtsHandHider.register();
+
+        // 手机网页版合成向导：开一个只读的 HTTP 服务，服务端口/口令都在配置里。
+        // 没装 NEI 时它自己什么都不做（配方数据全部来自 NEI）。
+        com.futa_gtnh.web.WebRecipeService.register();
     }
 
     @Override
@@ -91,6 +95,9 @@ public class ClientProxy extends CommonProxy {
             if (Config.enableDisassembler) com.futa_gtnh.client.nei.DisassemblerRecipeHandler.register();
             com.futa_gtnh.client.nei.NeiIntegration.installStationOverlay();
         }
+        // 这时候（LoadComplete）NEI 刚把各模组的配方处理器注册完，
+        // 是开始建网页配方索引的最早时机（更早读到的是一张空表）
+        com.futa_gtnh.web.WebRecipeService.lateInit();
     }
 
     /**
