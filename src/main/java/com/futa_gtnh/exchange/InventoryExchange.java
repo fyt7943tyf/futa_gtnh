@@ -102,7 +102,9 @@ public final class InventoryExchange {
         long want = requested <= 0L ? available : Math.min(requested, available);
         if (want <= 0L) return 0;
 
-        long stored = storage.insertItem(key, want);
+        // 玩家手动往里放 —— 上限是给自动化（管道/机器）用的闸门，不拦玩家的手。
+        // 走到这里的调用方全是界面动作：depositSlot / depositAll / depositMatching
+        long stored = storage.insertItemManual(key, want);
         if (stored <= 0L) return 0;
 
         stack.stackSize -= (int) stored;
@@ -152,7 +154,10 @@ public final class InventoryExchange {
         // 显示物品不可拆分，请求量不足一整叠时直接不做，而不是默默丢掉一部分
         if (want < available) return 0L;
 
-        long stored = storage.insertFluid(key, available);
+        // 手动倒流体 / 回滚：都不受上限约束。见 SharedStorage.insertFluidManual 的说明 ——
+        // 上限是给自动化用的闸门，而这里每一处都是玩家在界面上的动作，
+        // 或者「把刚取出来的还回去」这种必须成功的回滚
+        long stored = storage.insertFluidManual(key, available);
         if (stored < available) {
             // 存量到顶了：把已经收下的退回去，这一格保持原样
             storage.extractFluid(key, stored);
@@ -222,7 +227,7 @@ public final class InventoryExchange {
                 // 整叠结算，理由和 depositFluidStack 一样：显示物品的数量整体存在 NBT 里，
                 // 光标上这一叠有几份就要按几份入账，而且不能做部分扣除
                 long total = (long) displayed.amount * (long) cursor.stackSize;
-                long stored = storage.insertFluid(displayKey, total);
+                long stored = storage.insertFluidManual(displayKey, total);
                 if (stored < total) {
                     storage.extractFluid(displayKey, stored);
                     return 0;
@@ -239,7 +244,8 @@ public final class InventoryExchange {
         ItemKey key = ItemKey.of(cursor);
         if (key == null) return 0;
 
-        long stored = storage.insertItem(key, want);
+        // 鼠标上拿着东西点进仓库：也是玩家的手，上限不拦
+        long stored = storage.insertItemManual(key, want);
         if (stored <= 0L) return 0;
 
         cursor.stackSize -= (int) stored;
@@ -427,7 +433,8 @@ public final class InventoryExchange {
 
         if (old != null) {
             if (oldKey == null) return 0L;
-            oldStored = storage.insertItem(oldKey, old.stackSize);
+            // 快捷栏换物：把玩家手里那格换进仓库，同样是玩家的手动动作
+            oldStored = storage.insertItemManual(oldKey, old.stackSize);
             if (oldStored < old.stackSize) {
                 if (oldStored > 0L) storage.extractItem(oldKey, oldStored);
                 return 0L;
@@ -464,7 +471,9 @@ public final class InventoryExchange {
             int size = (int) Math.min(remaining, stackLimit);
             ItemStack dropped = key.prototype(size);
             if (dropped == null) {
-                storage.insertItem(key, remaining);
+                // 回滚：把刚取出来的放回去。这不是「存款」，绝不能被上限挡住 ——
+                // 挡住的后果是这些东西凭空消失（原来这里连返回值都没看）
+                storage.insertItemManual(key, remaining);
                 return 0L;
             }
             player.dropPlayerItemWithRandomChoice(dropped, true);
@@ -614,8 +623,11 @@ public final class InventoryExchange {
 
         // 阶段二扣的和阶段三放的理论上一定相等；不等说明有 bug，
         // 这时把差额补回存储，宁可玩家少拿也不能让总量对不上。
+        //
+        // 补差额是回滚，不是存款：必须走不限上限的入口。上限一挡，
+        // 差额就永远回不去，账面上直接少一截（原来这里也是不看返回值的）
         if (remaining > 0L) {
-            storage.insertItem(key, remaining);
+            storage.insertItemManual(key, remaining);
             taken -= remaining;
         }
 
@@ -667,7 +679,7 @@ public final class InventoryExchange {
                 replacement.stackSize = 1;
                 if (!replaceOne(inv, i, replacement)) {
                     // 背包腾不出地方放灌好的容器，把扣掉的流体还回去，整个停手
-                    storage.insertFluid(key, taken);
+                    storage.insertFluidManual(key, taken);
                     remaining = 0L;
                     break;
                 }
@@ -716,23 +728,23 @@ public final class InventoryExchange {
         FluidStack readBack = display == null ? null : GTUtility.getFluidFromDisplayStack(display);
         if (readBack == null || readBack.amount <= 0) {
             // GT 没能把数量记进去（例如版本差异导致布尔量含义不同），整体回滚
-            storage.insertFluid(key, taken);
+            storage.insertFluidManual(key, taken);
             return 0L;
         }
 
         if (readBack.amount < taken) {
             // GT 只记下了一部分，把差额还回存储，只按它真正记下的量算
-            storage.insertFluid(key, taken - readBack.amount);
+            storage.insertFluidManual(key, taken - readBack.amount);
             taken = readBack.amount;
             display = GTUtility.getFluidDisplayStack(key.prototype(taken), true);
             if (display == null) {
-                storage.insertFluid(key, taken);
+                storage.insertFluidManual(key, taken);
                 return 0L;
             }
         }
 
         if (!player.inventory.addItemStackToInventory(display)) {
-            storage.insertFluid(key, taken);
+            storage.insertFluidManual(key, taken);
             return 0L;
         }
 
@@ -754,6 +766,107 @@ public final class InventoryExchange {
      *
      * @return 实际存入的毫巴数
      */
+    /**
+     * 灌装<b>光标上</b>拿着的空容器（流体页签里点一下流体条目）。
+     *
+     * <p>
+     * 和 {@link #fillContainers} 的区别是灌谁：那个翻遍玩家背包，这个只管光标上那一叠 ——
+     * 光标上的东西不属于 {@code mainInventory}，背包遍历碰不到它。
+     *
+     * <p>
+     * 这一条和 {@link #drainCursorContainer} 是一对：流体页签里
+     * <b>举着空容器点一下 = 灌满它</b>，<b>举着装满的点一下 = 倒空它</b>。
+     * 玩家的意图由他手上拿着什么表达，不用额外记快捷键。
+     *
+     * <p>
+     * <b>按整叠结算</b>，和倒空那边对称：光标上是 16 个空桶就一次灌 16 桶的量，
+     * 换成 16 桶水。只灌一个的话，另外 15 个空桶会留在光标上，看起来像「没反应」。
+     *
+     * @param requested 最多灌多少毫巴；&lt;= 0 表示尽量灌
+     * @return 实际灌进去的毫巴数
+     */
+    public static long fillCursorContainer(EntityPlayer player, FluidKey key, long requested, SharedStorage storage,
+        DeltaRecorder recorder) {
+        if (key == null) return 0L;
+
+        InventoryPlayer inv = player.inventory;
+        ItemStack cursor = inv.getItemStack();
+        if (cursor == null || cursor.getItem() == null || cursor.stackSize <= 0) return 0L;
+
+        long available = storage.getFluidAmount(key);
+        if (available <= 0L) return 0L;
+
+        // 先探出「一个容器能装多少」。探测必须给一个很大的量：
+        // Forge 老注册表那条路（桶走的就是它）要求「提供量 >= 容器容量」，
+        // 给 1 mB 会直接返回 null，于是举着空桶点一下毫无反应。
+        ItemStack probe = singleCopy(cursor);
+        FluidContainerHelper.FillResult probeResult = FluidContainerHelper.fill(probe, key, Integer.MAX_VALUE);
+        if (probeResult == null || probeResult.consumed <= 0L) return 0L;
+
+        long perContainer = probeResult.consumed;
+
+        // 整叠一起灌：光标上 16 个空桶就该一次灌 16 桶的量。
+        // requested 是「一次点击最多灌多少（按一个容器算）」，所以乘上叠数才是上限 ——
+        // 直接拿 requested 当总量的话，16 个空桶一次只会灌出 1 个，看着像没反应。
+        long perClick = requested <= 0L ? perContainer : Math.min(requested, perContainer);
+        long wanted = Math.min(perClick * (long) cursor.stackSize, available);
+        if (wanted <= 0L) return 0L;
+
+        // 先算清楚要取多少再去扣存储 —— 扣了再发现装不下就得回滚，
+        // 而回滚窗口一旦关不上就是丢东西
+        long taken = storage.extractFluid(key, wanted);
+        if (taken <= 0L) return 0L;
+
+        // 按真正取到的量算这一叠该变成什么；一次装不满整叠时，
+        // 只把装得下的那几个换掉，剩下的空容器原样留在光标上
+        long fullContainers = taken / perContainer;
+        long remainder = taken % perContainer;
+
+        ItemStack replacement;
+        int newSize;
+        if (fullContainers >= cursor.stackSize) {
+            // 整叠都灌满了
+            replacement = probeResult.container;
+            newSize = cursor.stackSize;
+            // 多取的零头（taken 里超出整叠容量的部分）还回去
+            long cap = perContainer * (long) cursor.stackSize;
+            if (taken > cap) {
+                storage.insertFluidManual(key, taken - cap);
+                taken = cap;
+            }
+        } else if (fullContainers > 0) {
+            // 只够灌满一部分：光标上留 fullContainers 个满的 + 剩下的空的。
+            // 这里必须是两种物品，光标一次只能拿一种，所以只换满的那些，并要求
+            // 剩下的空容器放回背包 —— 放不下就整体不换，把流体退回去
+            replacement = probeResult.container;
+            newSize = (int) fullContainers;
+            int left = cursor.stackSize - newSize;
+            ItemStack empties = singleCopy(cursor);
+            empties.stackSize = left;
+            if (!player.inventory.addItemStackToInventory(empties)) {
+                storage.insertFluidManual(key, taken);
+                return 0L;
+            }
+            if (remainder > 0L) {
+                // 装不满一整个容器的零头对桶这类容器不该发生（consumed 通常就是容量），
+                // 真发生了就还回去，别把它塞进一个半满的容器里
+                storage.insertFluidManual(key, remainder);
+                taken -= remainder;
+            }
+        } else {
+            // 连一个都装不满：退回去，什么都不改
+            storage.insertFluidManual(key, taken);
+            return 0L;
+        }
+
+        replacement.stackSize = newSize;
+        inv.setItemStack(replacement);
+        inv.markDirty();
+
+        recorder.fluid(key);
+        return taken;
+    }
+
     public static long drainCursorContainer(EntityPlayer player, SharedStorage storage, DeltaRecorder recorder) {
         InventoryPlayer inv = player.inventory;
         ItemStack cursor = inv.getItemStack();
@@ -770,7 +883,7 @@ public final class InventoryExchange {
         // 光标上要是有 16 个牛奶桶，只按一份入账却把整叠换成 16 个空桶，就等于抹掉 15 桶牛奶。
         long total = (long) result.fluid.amount * (long) cursor.stackSize;
 
-        long stored = storage.insertFluid(key, total);
+        long stored = storage.insertFluidManual(key, total);
         if (stored < total) {
             // 存量到顶了：把已经收下的退回去，光标保持原样
             storage.extractFluid(key, stored);
@@ -813,7 +926,7 @@ public final class InventoryExchange {
             // 同 drainCursorContainer：result.fluid.amount 只是「一个容器」的量
             long amount = (long) result.fluid.amount * (long) slot.stackSize;
 
-            long stored = storage.insertFluid(key, amount);
+            long stored = storage.insertFluidManual(key, amount);
             if (stored < amount) {
                 // 存储到顶了（理论上不可能），把没存进去的留下，别凭空吃掉
                 storage.extractFluid(key, stored);

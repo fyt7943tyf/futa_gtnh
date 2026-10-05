@@ -143,6 +143,34 @@ public class TileEntityIoNode extends TileEntity {
 
     private static boolean isItemTarget(TileEntity tile, ForgeDirection side) {
         if (!(tile instanceof IInventory)) return false;
+
+        // ★ GT 的机器 / 输入总线 / 输入仓改用「有没有槽位」来判，而不是 getAccessibleSlotsFromSide。
+        //
+        // GT 那边是这么写的：
+        //
+        // if (canAccessData() && (cover.letsItemsOut(-1) || cover.letsItemsIn(-1)))
+        // return mMetaTileEntity.getAccessibleSlotsFromSide(side);
+        // return GTValues.emptyIntArray; // ← 空数组
+        //
+        // 而 GT 的机器普遍不覆盖 getAccessibleSlotsFromSide（用基类），面访问实际是由
+        // canInsertItem / canExtractItem 控制的 —— 于是这个方法对绝大多数 GT 机器常年返回
+        // 空数组，我们的严格判定就恒为假：连接臂和端帽永远不画。
+        // 玩家看到的就是「旁边明明摆着 GT 机器或输入总线，节点却是光的」。
+        //
+        // getSizeInventory 是 GT 认真实现过的（canAccessData 为假时返回 0，机器没槽位也是 0），
+        // 拿它当「这一面有没有东西可搬」的判据既准确又能自愈 —— 机器还没初始化完的那一瞬间
+        // 可能读到 0，但 updateEntity 每 100 tick 会重算一次（见 RECHECK_INTERVAL）。
+        //
+        // 放宽是安全的：这个掩码只影响渲染。真正的每一次搬运都由 TerminalIoEngine 现场校验
+        // canInsertItem / canExtractItem，不会被这里放行。
+        if (tile instanceof gregtech.api.interfaces.tileentity.IGregTechTileEntity) {
+            try {
+                return ((IInventory) tile).getSizeInventory() > 0;
+            } catch (Throwable t) {
+                return false;
+            }
+        }
+
         if (tile instanceof ISidedInventory) {
             // 有面概念的容器：那一面必须真的开出了槽位（被覆盖板封死的面这里会返回空数组）
             try {

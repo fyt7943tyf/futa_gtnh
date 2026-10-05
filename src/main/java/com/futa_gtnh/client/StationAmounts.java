@@ -75,7 +75,7 @@ public final class StationAmounts {
             if (mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16) {
                 highlight(x, y);
             }
-            drawAmount(GuiSharedTerminal.formatShort(entry.getAmount()), x, y);
+            drawAmount(GuiSharedTerminal.amountText(entry), x, y, GuiSharedTerminal.amountColor(entry));
         }
     }
 
@@ -113,7 +113,7 @@ public final class StationAmounts {
      * 数量文字画在格子右下角，和终端界面（{@code GuiSharedTerminal.drawAmountText}）
      * 同一套做法：位数多了整体缩小，而不是截断。
      */
-    private static void drawAmount(String text, int slotX, int slotY) {
+    private static void drawAmount(String text, int slotX, int slotY, int color) {
         if (text == null || text.isEmpty()) return;
 
         Minecraft mc = Minecraft.getMinecraft();
@@ -123,7 +123,7 @@ public final class StationAmounts {
         GL11.glPushMatrix();
         GL11.glTranslatef(slotX + 17.0F, slotY + 17.0F, 300.0F);
         GL11.glScalef(scale, scale, 1.0F);
-        mc.fontRenderer.drawStringWithShadow(text, -width, -8, 0xFFFFFF);
+        mc.fontRenderer.drawStringWithShadow(text, -width, -8, color);
         GL11.glPopMatrix();
     }
 }

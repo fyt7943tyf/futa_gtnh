@@ -41,10 +41,20 @@ public class SharedStorage {
     public static final long MAX_AMOUNT = Long.MAX_VALUE;
 
     /** 存档格式版本。将来改结构时靠它做迁移。 */
-    public static final int FORMAT_VERSION = 1;
+    public static final int FORMAT_VERSION = 2;
 
     private final LinkedHashMap<ItemKey, Long> items = new LinkedHashMap<>();
     private final LinkedHashMap<FluidKey, Long> fluids = new LinkedHashMap<>();
+
+    /**
+     * 按条目的存量上限。没进这张表 = 不限制（见 {@link #getItemLimit}）。
+     *
+     * <p>
+     * 和存量分开存是有意的：存量会被取空（条目从 {@link #items} 里删掉），
+     * 而上限是玩家的一个「设置」，东西取光了也不该自己忘掉。
+     */
+    private final LinkedHashMap<ItemKey, Long> itemLimits = new LinkedHashMap<>();
+    private final LinkedHashMap<FluidKey, Long> fluidLimits = new LinkedHashMap<>();
 
     /**
      * 「隔离区」：存档里读不出来的条目，原样留着，写盘时再原封不动写回去。
@@ -84,21 +94,55 @@ public class SharedStorage {
     }
 
     /**
-     * 存入物品。
+     * 存入物品，<b>遵守存量上限</b>。
+     *
+     * <p>
+     * 这是<b>自动化路径</b>用的入口：管道、机器、终端主动搬运、别的模组通过
+     * {@code IInventory} 塞进来 —— 到了上限就拒收，超出的部分原样退回给调用方
+     * （调用方必须自己处理没存下的部分，返回值就是实际收下的量）。
+     *
+     * <p>
+     * 玩家<b>手动</b>往里放走 {@link #insertItemManual}，那条路允许超出上限。
      *
      * @param stack  物品来源，只取它的「种类」，{@code stackSize} 被忽略
      * @param amount 要存的数量
-     * @return 实际存进去的数量；因为饱和上限而没存进去的部分需要调用方自行处理
+     * @return 实际存进去的数量；因为上限而没存进去的部分需要调用方自行处理
      */
     public synchronized long insertItem(net.minecraft.item.ItemStack stack, long amount) {
         return insertItem(ItemKey.of(stack), amount);
     }
 
     public synchronized long insertItem(ItemKey key, long amount) {
+        return insertItemInternal(key, amount, true);
+    }
+
+    /**
+     * 玩家手动存入，<b>允许超出上限</b>。
+     *
+     * <p>
+     * 「上限」是给自动化用的闸门（防止某个物品被机器无限灌满），不是给玩家上的镣铐 ——
+     * 玩家自己往里放，放多少就收多少，只是仍然受全局上限保护（避免计数溢出）。
+     *
+     * <p>
+     * <b>能这样分的前提是路径本身就分得开</b>：手动那条只有界面上的存入槽走，
+     * 而它由本模组的 {@code Slot} 直接调用，模组外的自动化碰不到；
+     * 自动化走的是 {@code IInventory}/{@code IFluidHandler} 那一套，一律受上限约束。
+     */
+    public synchronized long insertItemManual(net.minecraft.item.ItemStack stack, long amount) {
+        return insertItemManual(ItemKey.of(stack), amount);
+    }
+
+    public synchronized long insertItemManual(ItemKey key, long amount) {
+        return insertItemInternal(key, amount, false);
+    }
+
+    private long insertItemInternal(ItemKey key, long amount, boolean obeyLimit) {
         if (key == null || amount <= 0L) return 0L;
 
         long have = getItemAmount(key);
-        long space = MAX_AMOUNT - have;
+        // 手动存放时上限不参与，但全局上限仍然要守：long 加爆了会让合计值变负
+        long ceiling = obeyLimit ? limitOf(itemLimits, key) : MAX_AMOUNT;
+        long space = ceiling - have;
         if (space <= 0L) return 0L;
 
         long accepted = Math.min(amount, space);
@@ -175,10 +219,20 @@ public class SharedStorage {
     }
 
     public synchronized long insertFluid(FluidKey key, long amount) {
+        return insertFluidInternal(key, amount, true);
+    }
+
+    /** 玩家手动倒入流体，允许超出上限（同 {@link #insertItemManual}）。 */
+    public synchronized long insertFluidManual(FluidKey key, long amount) {
+        return insertFluidInternal(key, amount, false);
+    }
+
+    private long insertFluidInternal(FluidKey key, long amount, boolean obeyLimit) {
         if (key == null || amount <= 0L) return 0L;
 
         long have = getFluidAmount(key);
-        long space = MAX_AMOUNT - have;
+        long ceiling = obeyLimit ? limitOf(fluidLimits, key) : MAX_AMOUNT;
+        long space = ceiling - have;
         if (space <= 0L) return 0L;
 
         long accepted = Math.min(amount, space);
@@ -317,6 +371,101 @@ public class SharedStorage {
     }
 
     // ==================================================================
+    // 按物品 / 流体的存量上限
+    // ==================================================================
+
+    /**
+     * 某个条目的存量上限。
+     *
+     * <p>
+     * <b>语义是「总存量不超过 N」</b>：到了 N 就拒收，但已经存着的东西照常能取出来。
+     * 上限只挡写入，永远不删数据 —— 设一个比现有存量更小的上限（比如存了 5000 再设 100），
+     * 结果是「不再收，但一个都不会少」，玩家得自己取到 100 以下才会重新开始收。
+     *
+     * <p>
+     * <b>没有限额和限额为 0 是两回事</b>：没有限额 = 不限制（{@link #MAX_AMOUNT}），
+     * 限额 0 = 一件都不许再存。界面上要分得清，所以 {@link #hasItemLimit} 单独存在。
+     */
+    public synchronized long getItemLimit(ItemKey key) {
+        return limitOf(itemLimits, key);
+    }
+
+    public synchronized long getFluidLimit(FluidKey key) {
+        return limitOf(fluidLimits, key);
+    }
+
+    /** @return 这个条目是不是被显式设过上限（用于和「没设过」区分开） */
+    public synchronized boolean hasItemLimit(ItemKey key) {
+        return key != null && itemLimits.containsKey(key);
+    }
+
+    public synchronized boolean hasFluidLimit(FluidKey key) {
+        return key != null && fluidLimits.containsKey(key);
+    }
+
+    /**
+     * 设置上限。
+     *
+     * @param limit 允许的总存量；负数按 0 处理（0 = 不再接受新的）
+     */
+    public synchronized void setItemLimit(ItemKey key, long limit) {
+        if (key == null) return;
+        itemLimits.put(key, Math.max(0L, limit));
+        markChanged();
+    }
+
+    public synchronized void setFluidLimit(FluidKey key, long limit) {
+        if (key == null) return;
+        fluidLimits.put(key, Math.max(0L, limit));
+        markChanged();
+    }
+
+    /** 取消上限（恢复成不限制）。注意这不会动存量。 */
+    public synchronized void clearItemLimit(ItemKey key) {
+        if (key == null) return;
+        if (itemLimits.remove(key) != null) markChanged();
+    }
+
+    public synchronized void clearFluidLimit(FluidKey key) {
+        if (key == null) return;
+        if (fluidLimits.remove(key) != null) markChanged();
+    }
+
+    /** @return 现有上限表的一份副本（同步给客户端用） */
+    public synchronized Map<ItemKey, Long> itemLimitsView() {
+        return new LinkedHashMap<>(itemLimits);
+    }
+
+    public synchronized Map<FluidKey, Long> fluidLimitsView() {
+        return new LinkedHashMap<>(fluidLimits);
+    }
+
+    /**
+     * 还能再收多少。
+     *
+     * <p>
+     * 自动搬运要用它<b>在取之前</b>先算好目标能收多少，只取那么多 ——
+     * 「先取出来再试着存回去，存不下就退回去」有一条失败窗口，而那条窗口一旦
+     * 关不上就是丢东西。宁可少搬一点也不要有这个窗口。
+     *
+     * @return 剩余容量；已达上限返回 0
+     */
+    public synchronized long itemSpaceLeft(ItemKey key) {
+        if (key == null) return 0L;
+        return Math.max(0L, limitOf(itemLimits, key) - getItemAmount(key));
+    }
+
+    public synchronized long fluidSpaceLeft(FluidKey key) {
+        if (key == null) return 0L;
+        return Math.max(0L, limitOf(fluidLimits, key) - getFluidAmount(key));
+    }
+
+    private static <K> long limitOf(Map<K, Long> limits, K key) {
+        Long limit = key == null ? null : limits.get(key);
+        return limit == null ? MAX_AMOUNT : limit;
+    }
+
+    // ==================================================================
     // 序列化
     // ==================================================================
 
@@ -349,6 +498,25 @@ public class SharedStorage {
         }
         root.setTag("fluids", fluidList);
 
+        // 上限表（格式版本 2 新增）。旧存档没有这两个 tag，读出来就是空表 = 不限制
+        NBTTagList itemLimitList = new NBTTagList();
+        for (Map.Entry<ItemKey, Long> entry : itemLimits.entrySet()) {
+            NBTTagCompound tag = entry.getKey()
+                .writeToNbt();
+            tag.setLong("limit", entry.getValue());
+            itemLimitList.appendTag(tag);
+        }
+        root.setTag("itemLimits", itemLimitList);
+
+        NBTTagList fluidLimitList = new NBTTagList();
+        for (Map.Entry<FluidKey, Long> entry : fluidLimits.entrySet()) {
+            NBTTagCompound tag = entry.getKey()
+                .writeToNbt();
+            tag.setLong("limit", entry.getValue());
+            fluidLimitList.appendTag(tag);
+        }
+        root.setTag("fluidLimits", fluidLimitList);
+
         return root;
     }
 
@@ -376,6 +544,8 @@ public class SharedStorage {
     public synchronized int readFromNbt(NBTTagCompound root) {
         items.clear();
         fluids.clear();
+        itemLimits.clear();
+        fluidLimits.clear();
         unreadableItems.clear();
         unreadableFluids.clear();
         itemTotal = 0L;
@@ -411,6 +581,27 @@ public class SharedStorage {
             }
             mergeFluid(key, amount);
             loaded++;
+        }
+
+        // 上限表（格式版本 2）。旧存档没有这两个 tag，读出来就是空表 = 不限制，
+        // 所以 v1 → v2 不需要任何迁移动作。
+        //
+        // 注意这里<b>不夹取存量</b>：存档里存了 5000、上限写的 100，那就保持 5000 不变，
+        // 只是从今往后不再收。读档时按上限删数据就是丢东西，而丢东西是绝对不能做的。
+        NBTTagList itemLimitList = root.getTagList("itemLimits", 10);
+        for (int i = 0; i < itemLimitList.tagCount(); i++) {
+            NBTTagCompound tag = itemLimitList.getCompoundTagAt(i);
+            ItemKey key = ItemKey.readFromNbt(tag);
+            if (key == null || !tag.hasKey("limit")) continue;
+            itemLimits.put(key, Math.max(0L, tag.getLong("limit")));
+        }
+
+        NBTTagList fluidLimitList = root.getTagList("fluidLimits", 10);
+        for (int i = 0; i < fluidLimitList.tagCount(); i++) {
+            NBTTagCompound tag = fluidLimitList.getCompoundTagAt(i);
+            FluidKey key = FluidKey.readFromNbt(tag);
+            if (key == null || !tag.hasKey("limit")) continue;
+            fluidLimits.put(key, Math.max(0L, tag.getLong("limit")));
         }
 
         markChanged();

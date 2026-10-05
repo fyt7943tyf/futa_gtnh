@@ -37,6 +37,16 @@ public final class ClientStorageCache {
     private static final Map<ItemKey, StorageViewEntry> ITEM_INDEX = new HashMap<>();
     private static final Map<FluidKey, StorageViewEntry> FLUID_INDEX = new HashMap<>();
 
+    /**
+     * 存量上限，只放被显式设过的那几条。
+     *
+     * <p>
+     * <b>不在表里 ≠ 上限为 0</b>：不在 = 不限制（自动化可以一直往里灌），
+     * 0 = 一件都不许再进。界面显示和「已满」判断都靠这个区别，别用 0 兜底。
+     */
+    private static final Map<ItemKey, Long> ITEM_LIMITS = new HashMap<>();
+    private static final Map<FluidKey, Long> FLUID_LIMITS = new HashMap<>();
+
     /** 每次内容变化自增，GUI 靠它判断「要不要重新过滤排序」。 */
     private static int revision;
     private static boolean ready;
@@ -191,6 +201,8 @@ public final class ClientStorageCache {
         FLUIDS.clear();
         ITEM_INDEX.clear();
         FLUID_INDEX.clear();
+        ITEM_LIMITS.clear();
+        FLUID_LIMITS.clear();
 
         if (root != null) {
             NBTTagList itemList = root.getTagList("items", 10);
@@ -210,10 +222,53 @@ public final class ClientStorageCache {
                 if (key == null || amount <= 0L) continue;
                 addFluid(key, amount);
             }
+
+            // 上限：只有被显式设过的条目才在表里。不在表里 = 不限制，
+            // 所以界面上要区分「没设过」和「设成 0」，不能拿 0 当默认值
+            NBTTagList itemLimitList = root.getTagList("itemLimits", 10);
+            for (int i = 0; i < itemLimitList.tagCount(); i++) {
+                NBTTagCompound tag = itemLimitList.getCompoundTagAt(i);
+                ItemKey key = ItemKey.readFromNbt(tag);
+                if (key == null || !tag.hasKey("limit")) continue;
+                ITEM_LIMITS.put(key, Long.valueOf(Math.max(0L, tag.getLong("limit"))));
+            }
+
+            NBTTagList fluidLimitList = root.getTagList("fluidLimits", 10);
+            for (int i = 0; i < fluidLimitList.tagCount(); i++) {
+                NBTTagCompound tag = fluidLimitList.getCompoundTagAt(i);
+                FluidKey key = FluidKey.readFromNbt(tag);
+                if (key == null || !tag.hasKey("limit")) continue;
+                FLUID_LIMITS.put(key, Long.valueOf(Math.max(0L, tag.getLong("limit"))));
+            }
         }
 
         ready = true;
         revision++;
+    }
+
+    /** @return 这个物品的存量上限；没设过时返回 {@code null}（= 不限制） */
+    public static synchronized Long getItemLimit(ItemKey key) {
+        return key == null ? null : ITEM_LIMITS.get(key);
+    }
+
+    /** @return 这个流体的存量上限；没设过时返回 {@code null}（= 不限制） */
+    public static synchronized Long getFluidLimit(FluidKey key) {
+        return key == null ? null : FLUID_LIMITS.get(key);
+    }
+
+    /** 已满：设了上限且存量已经不低于它（自动化的东西再也进不来了）。 */
+    public static synchronized boolean isItemFull(ItemKey key) {
+        Long limit = getItemLimit(key);
+        if (limit == null) return false;
+        StorageViewEntry entry = key == null ? null : ITEM_INDEX.get(key);
+        return entry != null && entry.getAmount() >= limit.longValue();
+    }
+
+    public static synchronized boolean isFluidFull(FluidKey key) {
+        Long limit = getFluidLimit(key);
+        if (limit == null) return false;
+        StorageViewEntry entry = key == null ? null : FLUID_INDEX.get(key);
+        return entry != null && entry.getAmount() >= limit.longValue();
     }
 
     // ==================================================================

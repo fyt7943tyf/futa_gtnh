@@ -189,8 +189,9 @@ final class TerminalIoEngine {
                 int accepted = insertInto(inventory, side, key.prototype(taken));
                 if (accepted < taken) {
                     // 目标中途不收（比如别的机器同时塞满了）：剩下的原样放回仓库。
-                    // 宁可退回去，也不能凭空多出来
-                    storage.insertItem(key, taken - accepted);
+                    // 宁可退回去，也不能凭空多出来。
+                    // 这是回滚不是存款 —— 用不受上限的入口，否则上限一挡，东西就没了
+                    storage.insertItemManual(key, taken - accepted);
                 }
                 inventory.markDirty();
                 SharedStorageManager.broadcastItemChange(key);
@@ -296,6 +297,14 @@ final class TerminalIoEngine {
     }
 
     private static boolean isAccessible(ISidedInventory inventory, int slot, ForgeDirection side) {
+        // ★ GT 的机器 / 输入总线 / 输入仓跳过这道闸门。
+        //
+        // GT 的 getAccessibleSlotsFromSide 对绝大多数机器常年返回空数组（细节见
+        // TileEntityIoNode.isItemTarget 的说明），拿它当闸门的结果是「旁边摆着 GT 机器，
+        // 既搬不动、也不显示连接」。GT 的面访问实际由 canInsertItem / canExtractItem 控制，
+        // 那两个方法在调用处照样会走 —— 它们才是权威，这个槽位表不是。
+        if (inventory instanceof gregtech.api.interfaces.tileentity.IGregTechTileEntity) return true;
+
         for (int accessible : inventory.getAccessibleSlotsFromSide(side.ordinal())) {
             if (accessible == slot) return true;
         }
@@ -369,8 +378,9 @@ final class TerminalIoEngine {
 
                 int filled = handler.fill(side, key.prototype(taken), true);
                 if (filled < taken) {
-                    // 目标中途不收了：没灌进去的原样放回仓库
-                    storage.insertFluid(key, taken - filled);
+                    // 目标中途不收了：没灌进去的原样放回仓库。
+                    // 同样是回滚，不受上限约束
+                    storage.insertFluidManual(key, taken - filled);
                 }
                 if (filled > 0) SharedStorageManager.broadcastFluidChange(key);
 

@@ -124,6 +124,30 @@ public class PacketStorageAction implements IMessage {
     /** 丢弃共享存储中鼠标下物品的全部同类（Inventory Bogo Sorter 的 Alt+Q）。 */
     public static final byte DROP_MATCHING_ITEMS = 26;
 
+    // ---- 存量上限（界面里中键点格子）----
+    /**
+     * 给一个物品设存量上限。
+     *
+     * <p>
+     * {@code amount} 就是新的上限，{@code amount < 0} 表示取消上限（恢复「不限制」）。
+     * 用 {@link #item(byte, com.futa_gtnh.shared.ItemKey, long)} 构造，键走 {@code keyTag} ——
+     * 和别的动作一样，不能用客户端列表下标：那玩意依赖当时的搜索/排序/分页。
+     */
+    public static final byte SET_ITEM_LIMIT = 40;
+
+    /** 给一个流体设存量上限，语义同 {@link #SET_ITEM_LIMIT}。 */
+    public static final byte SET_FLUID_LIMIT = 41;
+
+    /**
+     * 灌装<b>光标上</b>拿着的空容器（流体页签里，举着空桶/空单元点一下流体）。
+     *
+     * <p>
+     * 和 {@link #FILL_CONTAINER} 的区别是灌谁：那个翻玩家背包，这个只管光标上那一叠。
+     * 两者是一对对称手势的一半 —— 举着空的点一下 = 灌满它，
+     * 举着装满的点一下 = 倒空它（{@link #DRAIN_CURSOR}）。
+     */
+    public static final byte FILL_CURSOR_CONTAINER = 42;
+
     // ---- NEI 合成联动 ----
     /**
      * 按客户端发来的布局填充终端界面的 3×3 合成栏：材料优先从玩家背包取，不够的从共享存储取。

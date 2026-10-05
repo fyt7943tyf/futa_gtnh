@@ -7,6 +7,7 @@ import java.util.UUID;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.Container;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.play.server.S2FPacketSetSlot;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
@@ -117,6 +118,12 @@ public final class StorageActionHandler {
 
         ContainerSharedTerminal container = (ContainerSharedTerminal) open;
         boolean forceContainerSync = false;
+        // 上限变了要重发全量：上限不在增量协议里（增量只带存量），
+        // 不重发的话界面上那个「现有/上限」还是旧的
+        boolean limitChanged = false;
+        // 光标被改过（灌装/倒空光标上的容器）：光标是客户端的状态，
+        // 服务端改完必须主动推一次，否则玩家看到的是旧样子
+        boolean cursorChanged = false;
         int crafted = 0;
 
         try {
@@ -175,6 +182,32 @@ public final class StorageActionHandler {
                     InventoryExchange.drainContainers(player, storage, recorder);
                     break;
                 }
+                case PacketStorageAction.SET_ITEM_LIMIT: {
+                    com.futa_gtnh.shared.ItemKey key = packet.getItemKey();
+                    if (key != null) {
+                        // amount < 0 = 取消上限（恢复「不限制」）；否则就是新的上限。
+                        // 注意上限只挡写入，不会因为设小了就删东西 —— 见 SharedStorage 的说明
+                        if (amount < 0L) {
+                            storage.clearItemLimit(key);
+                        } else {
+                            storage.setItemLimit(key, amount);
+                        }
+                        limitChanged = true;
+                    }
+                    break;
+                }
+                case PacketStorageAction.SET_FLUID_LIMIT: {
+                    com.futa_gtnh.shared.FluidKey fluidKey = packet.getFluidKey();
+                    if (fluidKey != null) {
+                        if (amount < 0L) {
+                            storage.clearFluidLimit(fluidKey);
+                        } else {
+                            storage.setFluidLimit(fluidKey, amount);
+                        }
+                        limitChanged = true;
+                    }
+                    break;
+                }
                 case PacketStorageAction.WITHDRAW_TO_CURSOR: {
                     InventoryExchange.withdrawToCursor(player, packet.getItemKey(), amount, storage, recorder);
                     break;
@@ -211,6 +244,13 @@ public final class StorageActionHandler {
                 }
                 case PacketStorageAction.DRAIN_CURSOR: {
                     InventoryExchange.drainCursorContainer(player, storage, recorder);
+                    cursorChanged = true;
+                    break;
+                }
+                case PacketStorageAction.FILL_CURSOR_CONTAINER: {
+                    // 和 DRAIN_CURSOR 对称：灌装光标上拿着的那个空容器
+                    InventoryExchange.fillCursorContainer(player, packet.getFluidKey(), amount, storage, recorder);
+                    cursorChanged = true;
                     break;
                 }
                 case PacketStorageAction.SET_TERMINAL_IO: {
@@ -295,6 +335,24 @@ public final class StorageActionHandler {
         }
 
         SharedStorageManager.broadcastDelta(delta);
+
+        // 改的是上限（不在增量协议里），得重发一份全量，不然界面上那个
+        // 「现有/上限」还停在旧数字上 —— 玩家会以为没设成功
+        if (limitChanged) {
+            SharedStorageManager.saveNow();
+            SharedStorageManager.resyncAll();
+        }
+
+        // 光标推回客户端（权威值）。
+        //
+        // 光标不属于任何槽位，增量包和 detectAndSendChanges 都管不到它，所以必须走
+        // 「windowId = -1, slot = -1」这条原版通道。不推的话，客户端那边的预测一旦
+        // 和真实结果不一致（比如流体不够只灌了一部分），玩家要等到下一次点击触发原版的
+        // 光标不一致分支才会看到正确结果 —— 表现就是「点了几下才变」。
+        if (cursorChanged) {
+            ItemStack cursor = player.inventory.getItemStack();
+            player.playerNetServerHandler.sendPacket(new S2FPacketSetSlot(-1, -1, cursor));
+        }
 
         // 玩家背包的槽位由容器自己同步（那些是真实槽位），
         // 增量包只负责共享存储网格那部分

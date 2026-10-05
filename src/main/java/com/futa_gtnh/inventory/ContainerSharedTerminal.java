@@ -18,6 +18,7 @@ import net.minecraftforge.fluids.FluidStack;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.block.TileEntitySharedTerminal;
+import com.futa_gtnh.client.ClientStorageCache;
 import com.futa_gtnh.exchange.DeltaRecorder;
 import com.futa_gtnh.exchange.FluidContainerHelper;
 import com.futa_gtnh.exchange.InventoryExchange;
@@ -507,6 +508,25 @@ public class ContainerSharedTerminal extends Container {
     // 原版点击分发
     // ==================================================================
 
+    /**
+     * 这一格（如果有的话）对应的流体键。
+     *
+     * <p>
+     * 键优先用服务端带过来的那份，从显示物品反推只作兜底 —— 和 {@link #slotClick} 里
+     * 流体分支同一套理由（反推在「模组的 getter 会改写物品栈」时会失灵）。
+     */
+    private FluidKey hoveredFluidKey(int viewIndex) {
+        if (viewIndex < 0 || viewIndex >= pageFluidKeys.length) return null;
+        FluidKey key = pageFluidKeys[viewIndex];
+        if (key != null) return key;
+
+        ItemStack display = ghost.getDisplay(viewIndex);
+        if (display == null) return null;
+        FluidStack shown = GTUtility.getFluidFromDisplayStack(display);
+        if (shown == null || shown.getFluid() == null || shown.amount <= 0) return null;
+        return FluidKey.of(shown);
+    }
+
     @Override
     public ItemStack slotClick(int slotId, int mouseButton, int mode, EntityPlayer player) {
         // --- 共享存储网格：两端都只返回 null，真实改动等服务端处理请求包 ---
@@ -696,7 +716,8 @@ public class ContainerSharedTerminal extends Container {
         }
 
         ItemStack before = live.copy();
-        long stored = storage.insertItem(key, live.stackSize);
+        // 手动合成出来的产物回仓库：玩家的手，不受上限约束
+        long stored = storage.insertItemManual(key, live.stackSize);
         if (stored < live.stackSize) {
             // 存储到单条目上限了：把刚塞进去的退回来，这一次当没发生
             if (stored > 0L) storage.extractItem(key, stored);
@@ -950,6 +971,29 @@ public class ContainerSharedTerminal extends Container {
                 return;
             }
 
+            // 对称的另一半：流体页签里举着「空的、能装这种流体的」容器点一下 = 灌满它。
+            //
+            // 必须在这里判，而不是在下面对流体条目的分支里 —— 那一段只在光标为空时才会走到
+            // （上面这一大块已经把「光标上有东西」的情况全部 return 掉了）。
+            if (fluidTabActive && mouseButton == 0 && !dragging) {
+                FluidKey hovered = hoveredFluidKey(viewIndex);
+                if (hovered != null) {
+                    ItemStack probe = cursor.copy();
+                    probe.stackSize = 1;
+                    // 探测只问「这个容器能不能装这种流体」，所以给的量要大。
+                    // 给 1 mB 的话，Forge 老注册表那条路（桶走的就是它）会直接拒绝：
+                    // 它明确要求「提供量 >= 容器容量」。那样举着空桶点一下会毫无反应。
+                    if (FluidContainerHelper.fill(probe, hovered, Integer.MAX_VALUE) != null) {
+                        NetworkHandler.INSTANCE.sendToServer(
+                            PacketStorageAction
+                                .fluid(PacketStorageAction.FILL_CURSOR_CONTAINER, hovered, Config.fluidClickAmount));
+                        // 预测：不然玩家点完还是看到手里的空桶，要等下一次点击才会被纠正
+                        predictCursorFill(cursor, hovered, Config.fluidClickAmount);
+                        return;
+                    }
+                }
+            }
+
             long amount;
             if (dragging) {
                 // 原版不会给共享格派发 mode 5（isItemValid 和 canDragIntoSlot 两头都挡着），
@@ -1198,6 +1242,41 @@ public class ContainerSharedTerminal extends Container {
         ItemStack emptied = result.container;
         emptied.stackSize = cursor.stackSize;
         player.inventory.setItemStack(emptied);
+    }
+
+    /**
+     * 客户端本地预测「光标上的空容器被灌满之后」的样子。
+     *
+     * <p>
+     * 没有这个预测，玩家就会看到「举着空桶点了一下，桶还是空的」——服务端那边早就
+     * 换成满桶了，可<b>光标是客户端自己的状态</b>，没人告诉它。要等到下一次点击
+     * 触发原版的「光标不一致」分支才会被纠正回来，于是表现成「点几下、或者拿回背包
+     * 再拿出来才变满」。
+     *
+     * <p>
+     * 只预测「整叠都灌得满」这一种情况：装不满整叠时服务端要把剩下的空容器塞回背包，
+     * 那牵扯到背包空位，客户端预测容易和真结果对不上，不如不预测
+     * （服务端那边会权威推一次光标，见 StorageActionHandler）。
+     */
+    private void predictCursorFill(ItemStack cursor, FluidKey key, long requested) {
+        if (cursor == null || key == null) return;
+
+        long available = ClientStorageCache.getFluidAmount(key.prototype(1));
+        if (available <= 0L) return;
+
+        ItemStack probe = cursor.copy();
+        probe.stackSize = 1;
+        // 探测给大数：Forge 老注册表那条路（桶）要求「提供量 >= 容器容量」
+        FluidContainerHelper.FillResult result = FluidContainerHelper.fill(probe, key, Integer.MAX_VALUE);
+        if (result == null || result.consumed <= 0L) return;
+
+        long perContainer = result.consumed;
+        long perClick = requested <= 0L ? perContainer : Math.min(requested, perContainer);
+        if (perClick * (long) cursor.stackSize > available) return;
+
+        ItemStack filled = result.container;
+        filled.stackSize = cursor.stackSize;
+        player.inventory.setItemStack(filled);
     }
 
     private static boolean isClient(EntityPlayer player) {
