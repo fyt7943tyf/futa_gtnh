@@ -546,6 +546,76 @@ async function main() {
             // 记下来的键形如 "17837:1:0"（主人的物品号:格子的x:格子的y），所以看有没有冒号最实在
             check('点候选会记进浏览器本地', String(altPick.after).indexOf(':') >= 0,
                 '选择后 localStorage=' + String(altPick.after).slice(0, 40) + '，选的是「' + altPick.text + '」');
+
+        console.log('== 选了候选之后，格子里的图标要跟着换 ==');
+        /*
+         * 玩家反馈「选择替代物品后，合成栏显示的没有更新」。这是显示与规划脱节，
+         * 光看 localStorage 是看不出来的 —— 必须比对：点之前那格的图标、点之后那格的图标。
+         */
+        const swap = await session.eval(`(async () => {
+            const cells = Array.from(document.querySelectorAll('.step-grid .slot.is-clickable'));
+            for (let i = 0; i < cells.length; i++) {
+                cells[i].click();
+                const bar = document.getElementById('item-info');
+                const chips = bar ? Array.from(bar.querySelectorAll('.alt-chip')) : [];
+                if (chips.length < 2) continue;
+                const before = cells[i].querySelector('img');
+                const beforeSrc = before ? before.getAttribute('src') : null;
+                const target = chips[chips.length - 1];
+                const wantSrc = target.querySelector('img') ? target.querySelector('img').getAttribute('src') : null;
+                const wantName = String(target.textContent || '').replace('✓ 用这个', '').trim();
+                target.click();
+                return JSON.stringify({ index: i, beforeSrc: beforeSrc, wantSrc: wantSrc, wantName: wantName,
+                                        barZ: getComputedStyle(bar).zIndex });
+            }
+            return null;
+        })()`);
+        if (!swap) {
+            console.log('  （没有多候选格子，跳过图标更新断言）');
+        } else {
+            const s = JSON.parse(swap);
+            await waitFor(session, "document.querySelectorAll('.step-grid .slot.is-clickable').length > 0", 20000, '重绘后的格子');
+            const latest = await session.eval(`(() => {
+                const cells = Array.from(document.querySelectorAll('.step-grid .slot.is-clickable'));
+                const cell = cells[${s.index}];
+                if (!cell) return null;
+                const img = cell.querySelector('img');
+                return JSON.stringify({ src: img ? img.getAttribute('src') : null,
+                                        title: img ? String(img.getAttribute('title') || img.getAttribute('data-tip') || '') : '' });
+            })()`);
+            const now = latest ? JSON.parse(latest) : null;
+            check('选完候选后格子图标变了', !!now && !!s.wantSrc && now.src === s.wantSrc,
+                '原来 ' + s.beforeSrc + ' → 现在 ' + (now ? now.src : 'null') + '（期望 ' + s.wantSrc + '）');
+            check('信息条压在弹层之上（z-index 70）', s.barZ === '70', 'z-index=' + s.barZ);
+
+            // 按「第几个格子」回查不可靠：指定候选项之后计划会重算、格子顺序也会变。
+            // 改成读格子上那份 data-alt 诊断（玩家看不见），它直接写着：谁的配方、坐标、
+            // 候选几个、取到的选择是哪个、实际显示的是哪个 —— 一次就能定位卡在哪一步。
+            await session.send('Page.reload', { ignoreCache: true });
+            await waitFor(session, "document.querySelectorAll('.step-grid .slot.is-clickable').length > 0", 25000, '刷新后的格子');
+            const pinInfo = await session.eval(`(() => {
+                const cells = Array.from(document.querySelectorAll('.step-grid .slot.is-clickable'));
+                const diags = [];
+                let hit = null;
+                for (const cell of cells) {
+                    const raw = cell.getAttribute('data-alt');
+                    if (!raw) continue;
+                    const d = JSON.parse(raw);
+                    if (d.alts > 1) diags.push(raw);
+                    const img = cell.querySelector('img');
+                    d.src = img ? img.getAttribute('src') : null;
+                    if (!hit && d.chosen > 0) hit = d;
+                }
+                // 顺便看看本地记录还在不在、有没有报错提示（自愈会把它清掉）
+                return JSON.stringify({ hit: hit, diags: diags.slice(0, 4), cells: cells.length,
+                    alts: localStorage.getItem('futa_gtnh.alts'),
+                    toast: (document.getElementById('toast') || {}).textContent || '' });
+            })()`);
+            const pin = pinInfo ? JSON.parse(pinInfo) : null;
+            check('刷新后那格显示选中的候选', !!pin && !!pin.hit && pin.hit.shown === pin.hit.chosen,
+                pin ? ('取到=' + (pin.hit ? pin.hit.chosen : '无') + ' 显示=' + (pin.hit ? pin.hit.shown : '无')
+                    + ' 候选格=' + JSON.stringify(pin.diags)) : '没有诊断数据');
+        }
         }
         console.log('  截图: ' + await session.shot('plan-raw-conflict'));
 
@@ -1179,6 +1249,44 @@ async function main() {
         if (session) session.ws.close();
         edge.kill();
     }
+
+
+        // ★ 这一段必须放在最后：它故意触发「编号失效」的自愈，会把本地的配方/候选/清单全清掉，
+        // 放在前面的话，后面所有依赖这些记录的断言都会失败 —— 我就被它骗了好几轮。
+
+        console.log('== 换了客户端之后旧编号要能自愈 ==');
+        /*
+         * 物品编号是每台客户端自己的（按各自注册表顺序排）。玩家在两台客户端之间切换时，
+         * 本地存的编号会失效 —— 原来只会报「找不到物品」，然后页面就卡死在那儿，
+         * 怎么点都出不来，只能自己去清浏览器数据。
+         *
+         * 这里塞一个必然不存在的编号进本地存储，然后按 hash 路由直接打开它的计划页。
+         */
+        await session.eval(`
+            localStorage.setItem('futa_gtnh.choices', JSON.stringify({ '999999999': 12345 }));
+            localStorage.setItem('futa_gtnh.alts', JSON.stringify({ '999999999:1:0': 42 }));
+            localStorage.setItem('futa_gtnh.basket', JSON.stringify([999999999]));
+            location.hash = '#/plan/999999999?count=8';
+            null
+        `);
+        await waitFor(session,
+            "(document.getElementById('toast') && /没有这个物品|找不到/.test(document.getElementById('toast').textContent)) || /没有这个物品|找不到/.test(document.body.textContent)",
+            15000, '失效编号的提示');
+        const staleState = await session.eval(`(() => {
+            const box = document.getElementById('toast');
+            return JSON.stringify({
+                toast: box ? String(box.textContent).slice(0, 60) : '',
+                choices: localStorage.getItem('futa_gtnh.choices') || '',
+                alts: localStorage.getItem('futa_gtnh.alts') || '',
+                basket: localStorage.getItem('futa_gtnh.basket') || ''
+            });
+        })()`);
+        const stale = JSON.parse(staleState);
+        check('失效编号会说清原因', /没有这个物品|编号/.test(stale.toast + (await session.eval("document.body.textContent"))),
+            stale.toast);
+        check('失效编号会清掉本地的配方选择', !stale.choices || stale.choices === '{}', stale.choices);
+        check('失效编号会清掉本地的候选选择', !stale.alts || stale.alts === '{}', stale.alts);
+        check('失效编号会清掉本地的购物清单', !stale.basket || stale.basket === '[]', stale.basket);
 
     console.log('\n结果: ' + passed + ' 通过 / ' + failed + ' 失败');
     process.exit(failed === 0 ? 0 : 1);
