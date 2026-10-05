@@ -254,6 +254,47 @@
         }
     }
 
+    /**
+     * 这台客户端上不存在某个物品时，把本地跟编号绑在一起的记录全清掉。
+     *
+     * <p>
+     * 物品编号是**每台客户端自己的**（按各自注册表顺序排），所以换了客户端或存档之后，
+     * 本地存的配方选择、候选选择、购物清单都会指错或指空。不清掉的话，玩家会一直卡在
+     * 「计算合成步骤失败／找不到物品」上，而且怎么点都出不来 —— 只能自己去清浏览器数据，
+     * 那不是玩家该干的事。
+     *
+     * @return 清掉了哪几样（用于提示里说清楚）
+     */
+    function dropStaleChoices() {
+        var dropped = [];
+        if (lsGet(LS_CHOICES)) {
+            lsSet(LS_CHOICES, '');
+            dropped.push('配方选择');
+        }
+        if (lsGet(LS_ALTS)) {
+            lsSet(LS_ALTS, '');
+            dropped.push('候选选择');
+        }
+        if (lsGet(LS_BASKET)) {
+            lsSet(LS_BASKET, '');
+            dropped.push('购物清单');
+        }
+        return dropped;
+    }
+
+    /**
+     * 这个错误是不是「你要找的那个物品在这台客户端上不存在」。
+     *
+     * <p>
+     * ★ 必须只认后端那句专门的措辞，<b>不能</b>见到「找不到」就动手：
+     * 规划展开时，某个<b>深层依赖</b>对不上也会报「找不到物品：xxx」，
+     * 那跟「换了客户端」毫无关系 —— 而清空动作是不可逆的，玩家的配方选择、
+     * 候选选择、购物清单会一起没掉。这个误伤真实发生过：玩家刚指定完替代品，
+     * 界面就不按他的选择算了，因为规划报了个依赖错误把记录清了。
+     */
+    function looksLikeStaleItemId(message) {
+        return String(message || '').indexOf('这台客户端上没有这个物品') >= 0;
+    }
     function lsSet(key, value) {
         try {
             window.localStorage.setItem(key, value);
@@ -809,6 +850,16 @@
                             refreshPlan();
                         } else {
                             render();
+                        }                        // 弹层（如果开着）也要重画：它是独立的一层，
+                        // 页面重画不会带上它，玩家就会看到「✓ 用这个」和格子里的旧物品并存
+                        if (state.modalRepaints) {
+                            for (var ri = 0; ri < state.modalRepaints.length; ri++) {
+                                try {
+                                    state.modalRepaints[ri]();
+                                } catch (ignored) {
+                                    // 某一组重画失败不该影响别的
+                                }
+                            }
                         }
                     });
                     pickBox.appendChild(chip);
@@ -981,7 +1032,17 @@
                     throw new Error('服务器没有返回数据（HTTP ' + res.status + '）');
                 }
                 if (data.ok !== true) {
-                    throw new Error(data.error ? String(data.error) : ('请求失败（HTTP ' + res.status + '）'));
+                    var message = data.error ? String(data.error) : ('请求失败（HTTP ' + res.status + '）');
+                    // 编号失效（换了客户端/存档）是唯一一种「重试也没用」的失败：
+                    // 本地跟编号绑在一起的记录（配方选择/候选选择/购物清单）已经指错了，
+                    // 先把它们清掉，玩家重新搜一次就能继续用 —— 而不是卡在一个永远失败的页面上。
+                    if (looksLikeStaleItemId(message)) {
+                        var dropped = dropStaleChoices();
+                        if (dropped.length) {
+                            message += '（已清掉本地的' + dropped.join('、') + '）';
+                        }
+                    }
+                    throw new Error(message);
                 }
                 return data;
             });
@@ -1301,6 +1362,12 @@
             prev.disabled = list.length <= 1;
             next.disabled = list.length <= 1;
         };
+        // 把「重画这一组」登记下来：玩家在弹层里给某个格子换了候选之后，
+        // 弹层是独立的一层，页面重画（render/refreshPlan）不会带上它 ——
+        // 于是出现「胶囊上写着 ✓ 用这个，格子却还是旧物品」。
+        if (state.modalRepaints) {
+            state.modalRepaints.push(paint);
+        }
 
         var step = function (delta) {
             if (list.length <= 1) return;
@@ -1352,6 +1419,22 @@
         var id = item && item.id !== undefined && item.id !== null ? item.id : null;
         cell.appendChild(makeIcon(item));
 
+        // 把「这一格的候选与选择状态」写到 data- 属性上。
+        // 它不显示给玩家，但让自动化测试能直接读到「键对不对、候选有几个、取到的是哪个」——
+        // 「选了替代品但界面没变」这类问题，光看截图和 localStorage 是分不清卡在哪一步的。
+        try {
+            cell.setAttribute('data-alt', JSON.stringify({
+                owner: ownerItemId === undefined || ownerItemId === null ? 'undefined' : String(ownerItemId),
+                x: slot && slot.x !== undefined ? slot.x : null,
+                y: slot && slot.y !== undefined ? slot.y : null,
+                alts: slot && slot.alts ? slot.alts.length : 0,
+                chosen: chosenAlt(ownerItemId, slot),
+                shown: item && item.id !== undefined ? item.id : null
+            }));
+        } catch (ignored) {
+            // 只是诊断信息
+        }
+
         var label = item && item.name ? String(item.name) : '未知物品';
         var per = num(slot ? slot.count : 0, 0);
         var times = Math.max(1, num(multiplier, 1));
@@ -1369,6 +1452,11 @@
             if (times > 1) {
                 tip += '（每个配方 ×' + per + '，本次做 ' + times + ' 次）';
             }
+        }
+        // 这一格被玩家指定过候选：说清楚，否则「为什么它不按第一个候选算」会让人困惑
+        var pinned = num(item && item.id, -1) > 0 && chosenAlt(ownerItemId, slot) === num(item && item.id, -1);
+        if (pinned) {
+            tip += '（这一格已指定用它）';
         }
         if (altCount > 1) {
             tip += '（或其它 ' + (altCount - 1) + ' 种替代品）';
@@ -3188,6 +3276,7 @@
         }
         var id = entry.id;
         state.modalOpener = document.activeElement;
+        state.modalRepaints = [];   // 本次弹层里各组的重画回调（换候选之后要用）
         state.modalOrigin = currentRoute().name;
         var fromPlan = state.modalOrigin === 'plan';
 

@@ -117,6 +117,15 @@ public final class WebPlanner {
 
         public boolean ok;
         public String error;
+
+        /**
+         * 购物清单里被跳过的目标数（那些编号在这台客户端上不存在）。
+         *
+         * <p>
+         * 不失败、只是不参与规划：清单里混进别的客户端的编号是很常见的事
+         * （物品编号是每台客户端自己的），为它把玩家正在算的东西一起打掉毫无道理。
+         */
+        public int skippedTargets;
         public final List<String> warnings = new ArrayList<>();
         public int targetId;
         public String targetName = "";
@@ -290,10 +299,21 @@ public final class WebPlanner {
             return plan;
         }
         for (int i = 0; i < targets.size(); i++) {
-            if (WebStore.stackOf(targets.get(i).itemId) == null) {
-                plan.error = "找不到物品：" + targets.get(i).itemId;
+            if (WebStore.stackOf(targets.get(i).itemId) != null) continue;
+
+            // 物品编号是**每台客户端自己的**（按各自的注册表顺序排），所以换了客户端或存档之后，
+            // 页面本地存着的旧编号（目标、配方选择、候选选择、购物清单）全都会指错或指空。
+            //
+            // 主目标不存在 = 玩家要算的东西在这台客户端上没有：说清原因（光说「找不到物品」
+            // 会让人以为模组坏了）。
+            if (i == 0) {
+                plan.error = "这台客户端上没有这个物品。物品编号是每台客户端自己的，" + "换客户端或存档之后，浏览器里存的旧编号就失效了 —— 重新搜索一次即可。";
                 return plan;
             }
+
+            // 附带目标（购物清单里的其它东西）不存在：跳过它，别让整份计划失败。
+            // 清单里混进别的客户端的编号很常见，为它把玩家正在算的东西一起打掉毫无道理。
+            plan.skippedTargets++;
         }
 
         // ★ 展开 → 查环 → 把环里的一个物品改成「自己准备」→ 再展开。

@@ -424,6 +424,7 @@ ol {
     background: rgba(80, 200, 120, 0.12);
 }
 
+
 .alt-chip-mark {
     color: var(--ok);
     font-size: 11.5px;
@@ -979,7 +980,14 @@ ol {
 }
 
 .material-stat {
-    font-size: 12.5px;    color: var(--text-dim);
+    display: flex;
+    flex-wrap: wrap;
+    /* 这些 span（模组名 / 库存 / 备注）原来是挨着排的，没有任何间距 ——
+       手机上会挤成「ggfab库存 0本次共需要」这种读不断句的一坨。 */
+    gap: 4px 8px;
+    align-items: baseline;
+    font-size: 12.5px;
+    color: var(--text-dim);
     font-variant-numeric: tabular-nums;
 }
 
@@ -1179,6 +1187,17 @@ ol {
     right: 0;
     bottom: 0;
     z-index: 40;
+    /* 手机上这条会往上长：名字 + 库存 + 备注 + 候选胶囊 + 按钮，很容易比屏幕还高，
+       而它是 position: fixed / bottom: 0 —— 一旦超高，顶部（候选就在那儿）就被挤出屏幕，
+       玩家看到的就是「候选被挡住了」。限高 + 可滚动，候选永远够得着。 */
+    max-height: 72vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* 必须压在弹层（.overlay，z-index 60）之上：玩家常常是在「选择配方」弹层里
+       点开某个格子的候选，这时候信息条在下面的话，整排候选会被遮罩盖住，
+       只露出最下面一截 —— 看着就是「替代品菜单被挡住了」。
+       仍低于 toast（80），因为 toast 是「看一眼就走」的临时提示。 */
+    z-index: 70;
     max-width: var(--shell-max);
     margin: 0 auto;
     padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
@@ -1789,4 +1808,16 @@ ol {
  */
 [hidden] {
     display: none !important;
+}
+
+/* 窄屏：候选胶囊收紧一点，一行能放下更多候选 */
+@media (max-width: 480px) {
+    .alt-pick {
+        gap: 5px;
+    }
+
+    .alt-chip {
+        padding: 2px 7px;
+        font-size: 12px;
+    }
 }

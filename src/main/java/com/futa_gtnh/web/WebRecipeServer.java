@@ -372,7 +372,7 @@ public final class WebRecipeServer {
         if (!WebRecipeIndex.isReady()) return notReadyJson();
 
         int id = clampInt(query.get("id"), -1, -1, Integer.MAX_VALUE);
-        if (id < 0 || WebStore.stackOf(id) == null) return errorJson("找不到这个物品");
+        if (id < 0 || WebStore.stackOf(id) == null) return errorJson("这台客户端上没有这个物品（物品编号是每台客户端自己的，换客户端或存档后旧编号会失效）");
 
         WebJson json = WebJson.object();
         json.k("ok")
@@ -415,7 +415,7 @@ public final class WebRecipeServer {
         WebStore.requestFreshStock();
 
         int id = clampInt(query.get("id"), -1, -1, Integer.MAX_VALUE);
-        if (id < 0 || WebStore.stackOf(id) == null) return errorJson("找不到这个物品");
+        if (id < 0 || WebStore.stackOf(id) == null) return errorJson("这台客户端上没有这个物品（物品编号是每台客户端自己的，换客户端或存档后旧编号会失效）");
 
         WebPlanner.Request request = new WebPlanner.Request();
         request.itemId = id;
@@ -872,7 +872,12 @@ public final class WebRecipeServer {
         }
         // 页面和脚本每次都要重新校验（改完 mod 直接刷新就能看到），
         // 这样调试时不用教玩家「清一下浏览器缓存」
-        sendBytes(exchange, 200, contentTypeOf(name), data, name.endsWith(".ico") ? "max-age=86400" : "no-cache");
+        // 页面资源一律 no-store。
+        //
+        // 原来是 no-cache（用前先问一下），但这类「问一下」在手机上经常被跳过，
+        // 结果是玩家升级了模组、界面却还是旧的 —— 排查时非常误导（改好的样式量出来还是旧值）。
+        // 这是个本机小服务，重下一次 app.js 的代价可以忽略，宁可每次都拿新的。
+        sendBytes(exchange, 200, contentTypeOf(name), data, name.endsWith(".ico") ? "max-age=86400" : "no-store");
     }
 
     private static byte[] readResource(String name) {
