@@ -37,6 +37,7 @@
     var state = {
         viewToken: 0,        // 页面渲染令牌：异步返回时令牌不一致就丢弃旧结果
         status: null,        // 最近一次 /api/status 的结果
+        stockReady: true,    // 共享存储的库存快照到了没（没到就不该说「缺」）
         pollTimer: null,
         toastTimer: null,
         debounceTimer: null,
@@ -968,6 +969,11 @@
                         throw new Error('服务器返回了无法解析的数据（HTTP ' + res.status + '）');
                     }
                 }
+                // 库存快照到没到：所有接口都带这个字段，在这里统一记下来，
+                // 界面据此决定要不要提示「库存还没同步完」
+                if (data && typeof data.stockReady === 'boolean') {
+                    state.stockReady = data.stockReady;
+                }
                 if (data && data.building === true && data.ok !== true) {
                     throw new IndexBuildingError(data.error, num(data.progress, null));
                 }
@@ -1881,8 +1887,25 @@
 
     function makeStatusBanner() {
         var st = state.status;
+        var stockWarn = null;
+
+        /*
+         * 库存快照还没到的时候，页面上那些「还缺多少」其实是在拿一个它还不知道的答案
+         * 下结论 —— 玩家看到的就是「我明明有，它说缺」。宁可先提示一句，
+         * 也别给一个会让人白跑一趟的结论。
+         *
+         * 顺带把口径说清楚：这份库存 = 共享存储 + 你身上（主背包/快捷栏），
+         * 不含背包、箱子这类容器里的东西。
+         */
+        if (state.stockReady === false) {
+            stockWarn = el('div', 'box box-warn');
+            stockWarn.appendChild(el('strong', null, '⚠️ 共享存储的库存还没同步完'));
+            stockWarn.appendChild(el('div', 'dim', '下面的「还缺多少」先别照着准备，同步完成后这里会自动刷新。'));
+            stockWarn.appendChild(el('div', 'dim', '这份库存 = 共享存储 + 你身上（主背包/快捷栏）；不含背包、箱子这类容器里的东西。'));
+        }
+
         if (!st || !st.building) {
-            return null;
+            return stockWarn;
         }
         var pct = Math.round(Math.max(0, Math.min(1, num(st.progress, 0))) * 100);
         var box = el('div', 'box');
@@ -1891,6 +1914,9 @@
             box.appendChild(el('div', null, String(st.detail)));
         }
         box.appendChild(el('div', 'dim', '首次打开需要几十秒到几分钟，完成后这里会自动刷新。'));
+        if (stockWarn) {
+            box.appendChild(stockWarn);
+        }
         return box;
     }
 

@@ -273,6 +273,10 @@ public final class WebRecipeServer {
         WebJson json = WebJson.object();
         json.k("ok")
             .v(true)
+            .k("stockReady")
+            // 客户端这份共享存储快照还没到时分不清「真的没有」和「还没同步」——
+            // 界面要据此提示，而不是拿一个自己都不知道的答案去说「还缺」
+            .v(WebStore.stockReady())
             .k("game")
             .v("GTNH")
             .k("version")
@@ -340,6 +344,10 @@ public final class WebRecipeServer {
         WebJson json = WebJson.object();
         json.k("ok")
             .v(true)
+            .k("stockReady")
+            // 客户端这份共享存储快照还没到时分不清「真的没有」和「还没同步」——
+            // 界面要据此提示，而不是拿一个自己都不知道的答案去说「还缺」
+            .v(WebStore.stockReady())
             .k("total")
             .v(total)
             .k("items")
@@ -369,6 +377,10 @@ public final class WebRecipeServer {
         WebJson json = WebJson.object();
         json.k("ok")
             .v(true)
+            .k("stockReady")
+            // 客户端这份共享存储快照还没到时分不清「真的没有」和「还没同步」——
+            // 界面要据此提示，而不是拿一个自己都不知道的答案去说「还缺」
+            .v(WebStore.stockReady())
             .k("item");
         writeItemRef(json, id, true);
 
@@ -434,6 +446,10 @@ public final class WebRecipeServer {
         WebJson json = WebJson.object();
         json.k("ok")
             .v(true)
+            .k("stockReady")
+            // 客户端这份共享存储快照还没到时分不清「真的没有」和「还没同步」——
+            // 界面要据此提示，而不是拿一个自己都不知道的答案去说「还缺」
+            .v(WebStore.stockReady())
             .k("warnings")
             .arr();
         for (int i = 0; i < plan.warnings.size(); i++) json.v(plan.warnings.get(i));

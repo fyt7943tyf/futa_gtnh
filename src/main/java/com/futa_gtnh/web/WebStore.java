@@ -297,6 +297,25 @@ public final class WebStore {
         }
     }
 
+    /**
+     * 库存数据到底能不能用。
+     *
+     * <p>
+     * 共享存储的快照是服务器推给客户端的，<b>刚进世界那几秒它还是空的</b> ——
+     * 那段时间里网页算出来的库存全是 0，于是所有材料都报「还缺」，玩家看到的就是
+     * 「我明明有，它说缺」。页面上必须把这种状态说出来，而不是拿一个自己都还不知道的
+     * 答案去下结论。
+     *
+     * @return 客户端这份共享存储快照有没有到（到了才敢说「缺」）
+     */
+    public static boolean stockReady() {
+        try {
+            return ClientStorageCache.isReady();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** 库存快照里有多少个条目（诊断用：共享背包快照有没有拉下来看这个）。 */
     public static int stockSize() {
         return stock.size();
@@ -307,7 +326,21 @@ public final class WebStore {
         ItemStack stack = stackOf(id);
         if (stack == null) return 0L;
         Long value = stock.get(stockKey(stack));
-        return value == null ? 0L : value;
+        if (value != null) return value.longValue();
+
+        // ★ 通配兜底。
+        //
+        // 共享存储里存的原型栈经常是「通配 damage」（32767，矿物词典那种：任意 meta 都算）。
+        // 而网页目录里的物品带的是真实 meta —— 两边键不相等，于是仓库里明明有，
+        // 页面却报「还缺」。同一个物品 id 下，通配库存本来就该覆盖任意 meta，所以查不到
+        // 精确键时再看一眼通配键。
+        Long wildcard = stock.get(wildcardKey(stack));
+        return wildcard == null ? 0L : wildcard.longValue();
+    }
+
+    /** 同一个物品 id 的「通配 meta」键（原版 32767 = 任意 meta 都匹配）。 */
+    private static long wildcardKey(ItemStack stack) {
+        return ((long) Item.getIdFromItem(stack.getItem()) << 32) | 32767L;
     }
 
     /** 库存里有多少这个物品（按栈本身查，配方里的任意候选都能问）。 */
@@ -358,6 +391,34 @@ public final class WebStore {
         }
 
         stock = map;
+
+        // 诊断：快照里有、但按现在的键查不回来的条目数。
+        // 「共享存储里明明有、页面却报缺」时，这个数就是那条线索 —— 不为 0 说明
+        // 两边的键（物品 id + damage）对不上。每次刷新只打一行。
+        try {
+            int misses = 0;
+            int wildcards = 0;
+            for (Map.Entry<Long, Long> entry : map.entrySet()) {
+                long key = entry.getKey()
+                    .longValue();
+                int itemId = (int) (key >>> 32);
+                int damage = (int) key;
+                if (damage == 32767) wildcards++;
+                // 这条库存的身份（物品 id + damage）在目录里存在吗？
+                // 不存在的话，页面上任何物品都查不到它 —— 正是「明明有却报缺」的形态
+                net.minecraft.item.Item raw = net.minecraft.item.Item.getItemById(itemId);
+                if (raw == null) {
+                    misses++;
+                    continue;
+                }
+                String identity = keyOf(new ItemStack(raw, 1, damage));
+                if (idOfKey(identity) < 0) misses++;
+            }
+            FutaGtnhMod.LOG.info("网页配方：库存快照 {} 条（其中通配 meta {} 条），查不回来的 {} 条", map.size(), wildcards, misses);
+        } catch (Throwable ignored) {
+            // 只是日志
+        }
+
     }
 
     private static void add(Map<Long, Long> map, long key, long amount) {

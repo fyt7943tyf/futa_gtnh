@@ -429,6 +429,12 @@ ol {
     font-size: 11.5px;
 }
 
+/* 警示条：库存还没同步完时用（见 makeStatusBanner） */
+.box-warn {
+    border-color: rgba(240, 180, 60, 0.6);
+    background: rgba(240, 180, 60, 0.08);
+}
+
 .btn-block {
     flex: 1 1 auto;
     width: 100%;
