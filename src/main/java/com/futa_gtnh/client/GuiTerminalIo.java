@@ -213,6 +213,11 @@ public class GuiTerminalIo extends GuiScreen {
         guiLeft = (width - GUI_WIDTH) / 2;
         guiTop = (height - GUI_HEIGHT) / 2;
 
+        // 每开一次界面重新记一遍诊断：写死成「一个进程只记一次」的话，
+        // 第二次开界面就没有日志了（排查时正是要看第二次）
+        ghostDiagLogged = false;
+        ghostDetailLogged = false;
+
         buttonList.clear();
         faceModeButtons.clear();
         searchField = null;
@@ -649,16 +654,19 @@ public class GuiTerminalIo extends GuiScreen {
         mc.getTextureManager()
             .bindTexture(TextureMap.locationBlocksTexture);
 
-        // 幽灵按深度分两拨：在本体后面的先画，在本体前面的等本体画完再画。
-        // 这样挡在前面的箱子是「半透明浮在共享终端上」，而不是被本体整个盖掉，
-        // 也不会反过来把本体遮死。
-        List<Integer> behind = new ArrayList<>();
-        List<Integer> front = new ArrayList<>();
+        // 幽灵**全部**等本体画完再画（半透明盖上去）。
+        //
+        // 原来按深度分了两拨：在本体后面的先画、前面的后画。结果是「背面那一侧的邻居
+        // 先画 → 被不透明的本体整个盖住 → 界面上什么都没有」——玩家贴着 GT 输入仓、
+        // 而它在默认视角的背面时，看到的就是「3D 完全不显示」。
+        // 幽灵本来就是 0.45 透明度的，压在本体上只会把它染个色，不会把本体遮死，
+        // 所以统一放到本体之后画，背面的邻居也能透出来（要正对着看就按「翻转视角」）。
+        List<Integer> ghostFaces = new ArrayList<>();
         for (int face = 0; face < CubeView.FACES; face++) {
             if (!ClientTerminalIo.hasItemTarget(face) && !ClientTerminalIo.hasFluidTarget(face)) continue;
-            (cube.depth(face) > 0.0D ? front : behind).add(face);
+            ghostFaces.add(face);
         }
-        drawNeighbourGhosts(behind, visible);
+        logGhostDiagOnce(ghostFaces.size());
 
         // 关键：幽灵方块（尤其是 TESR 那一路）会把纹理绑成它自己的贴图，
         // 本体的面还按方块图集的 UV 采样 —— 不重新绑回来的话就会采到别的图（通常是全透明），
@@ -677,8 +685,8 @@ public class GuiTerminalIo extends GuiScreen {
                 selectedFace == face);
         }
 
-        // 本体画完，再把挡在前面的幽灵半透明地盖上去
-        drawNeighbourGhosts(front, visible);
+        // 本体画完，再把所有幽灵半透明地盖上去（含背面的那几面）
+        drawNeighbourGhosts(ghostFaces, visible);
 
         GL11.glDisable(GL11.GL_BLEND);
         GL11.glEnable(GL11.GL_LIGHTING);
@@ -693,11 +701,51 @@ public class GuiTerminalIo extends GuiScreen {
     }
 
     /** 画本体周围那圈「这一面真的有东西可搬」的半透明方块。 */
+    /**
+     * 一次性诊断：客户端这一侧认为「有几面连着东西」。
+     *
+     * <p>
+     * 和 {@code PacketTerminalIoSync} 里那条服务端日志配对：服务端说算了什么、
+     * 客户端说画了几面，一对比就知道问题出在哪一边。每次开界面只打一条。
+     */
+    private void logGhostDiagOnce(int facesWithTarget) {
+        if (ghostDiagLogged) return;
+        ghostDiagLogged = true;
+        StringBuilder connected = new StringBuilder();
+        for (int face = 0; face < CubeView.FACES; face++) {
+            if (ClientTerminalIo.hasItemTarget(face)) connected.append(' ')
+                .append(face)
+                .append(":物品");
+            if (ClientTerminalIo.hasFluidTarget(face)) connected.append(' ')
+                .append(face)
+                .append(":流体");
+        }
+        com.futa_gtnh.FutaGtnhMod.LOG.info(
+            "共享终端 IO 诊断（客户端）：有目标的面 {} 个{}；方块中心=({}, {}) 缩放={} 可见面={} 界面={}x{}",
+            facesWithTarget,
+            connected.length() == 0 ? "（一个都没有）" : connected.toString(),
+            (int) cubeX(),
+            (int) cubeY(),
+            CUBE_SCALE,
+            visibleFaces(),
+            width,
+            height);
+    }
+
+    private static boolean ghostDiagLogged;
+
+    /** 每个幽灵面只详记一次（每次开界面重置）。 */
+    private static boolean ghostDetailLogged;
+
     private void drawNeighbourGhosts(List<Integer> faces, List<Integer> visible) {
         double[] tint = new double[3];
         for (int face : faces) {
             boolean items = ClientTerminalIo.hasItemTarget(face);
             boolean fluids = ClientTerminalIo.hasFluidTarget(face);
+
+            // GT 的机器/总线/仓：只用纯色半透明块，不贴方块图标（理由见 neighbourTileOf）
+            boolean gtNeighbour = neighbourTileOf(
+                face) instanceof gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 
             if (items && fluids) {
                 tint[0] = 0.55D;
@@ -722,7 +770,15 @@ public class GuiTerminalIo extends GuiScreen {
 
             // 先试「按它在世界里的样子画」：箱子、带特殊渲染器的机器，方块图标根本不是它的样子
             // （原版箱子的方块图标就是橡木木板），只有走 TESR 才画得出真正的箱子。
-            if (renderSpecialGhost(face, offset, tint)) continue;
+            boolean specialDrawn = renderSpecialGhost(face, offset, tint);
+            if (specialDrawn && !ghostDetailLogged) {
+                ghostDetailLogged = true;
+                com.futa_gtnh.FutaGtnhMod.LOG.info("共享终端 IO 诊断（客户端）：面 {} 的邻居有特殊渲染器，已按真实样子画", face);
+            }
+            // GT 的邻居即使画出了真实样子，也要再叠一层纯色块：一来颜色编码（橙/蓝/绿）才完整，
+            // 二来万一它的渲染器什么都没画出来（坐标约定对不上），至少还有块东西看得见。
+            // 其它方块维持原样：TESR 画成功就不再多画一块，免得把箱子上色。
+            if (specialDrawn && !gtNeighbour) continue;
 
             // 邻居方块和本体同朝向，所以看得见的还是那三个面
             for (int visibleFace : visible) {
@@ -730,12 +786,30 @@ public class GuiTerminalIo extends GuiScreen {
                     .projectOffset(visibleFace, offset[0], offset[1], offset[2], cubeX(), cubeY(), CUBE_SCALE);
 
                 IIcon icon = null;
-                if (neighbour != null) {
+                if (gtNeighbour) {
+                    // GT 的邻居：要它自己的真实贴图（拿不到才退回纯色块）
+                    icon = gtFaceIcon(neighbourTileOf(face), neighbour, visibleFace);
+                } else if (neighbour != null) {
                     try {
                         icon = neighbour.getIcon(visibleFace, meta);
                     } catch (Throwable ignored) {
                         icon = null;
                     }
+                }
+
+                if (!ghostDetailLogged) {
+                    ghostDetailLogged = true;
+                    com.futa_gtnh.FutaGtnhMod.LOG.info(
+                        "共享终端 IO 诊断（客户端）：面 {} 邻居={} meta={} 偏移=({}, {}, {}) 图标={} 首个顶点=({}, {})",
+                        face,
+                        ClientTerminalIo.getNeighbourName(face),
+                        meta,
+                        (int) offset[0],
+                        (int) offset[1],
+                        (int) offset[2],
+                        icon == null ? "空（走纯色回退）" : "有",
+                        (int) quad[0][0],
+                        (int) quad[0][1]);
                 }
 
                 if (icon != null) {
@@ -778,6 +852,18 @@ public class GuiTerminalIo extends GuiScreen {
         net.minecraft.tileentity.TileEntity neighbour = world.getTileEntity(bx, by, bz);
         if (neighbour == null) return false;
 
+        // ★ GT 的机器 / 输入总线 / 输入仓不走这条路。
+        //
+        // 它们的 TESR 是按方块实体<b>自己的世界坐标</b>定位的（渲染器内部读 te.xCoord 那一套），
+        // 而这里只能把模型摆在 0,0,0 —— 于是模型被画到屏幕外去了。日志里能直接看到这一条：
+        // 「面 2 走了 TESR 渲染器（应当看得见）」，屏幕上却什么都没有。
+        // 原版箱子没这问题，因为箱子渲染器只用传进去的那三个坐标。
+        //
+        // GT 的渲染器会按方块实体自己的身体坐标定位（内部做 te.xCoord - x 那一套），
+        // 所以这里必须把它<b>自己的坐标</b>传进去 —— 那样相对位置正好是 (0,0,0)，
+        // 模型就落在我们当前摆好的位置上。传 0,0,0 的话它会算出 240 格开外，画到屏幕外。
+        boolean gt = neighbour instanceof gregtech.api.interfaces.tileentity.IGregTechTileEntity;
+
         net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher dispatcher = net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher.instance;
         if (!dispatcher.hasSpecialRenderer(neighbour)) return false;
 
@@ -808,7 +894,12 @@ public class GuiTerminalIo extends GuiScreen {
             // 这两个常量 LWJGL 的 GL14 里没有导出，直接写 GL 规范里的值（0x8001 / 0x8002）
             GL11.glBlendFunc(GL_CONSTANT_COLOR, GL_ONE_MINUS_CONSTANT_ALPHA);
 
-            dispatcher.renderTileEntityAt(neighbour, 0.0D, 0.0D, 0.0D, 0.0F);
+            dispatcher.renderTileEntityAt(
+                neighbour,
+                gt ? (double) neighbour.xCoord : 0.0D,
+                gt ? (double) neighbour.yCoord : 0.0D,
+                gt ? (double) neighbour.zCoord : 0.0D,
+                0.0F);
 
             GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
             GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
@@ -828,6 +919,99 @@ public class GuiTerminalIo extends GuiScreen {
     }
 
     /** 按注册名把邻居方块解析出来；认不出来返回 null。 */
+    /**
+     * 某一面邻居的方块实体（客户端世界里的那个）。
+     *
+     * <p>
+     * GT 的机器 / 输入总线 / 输入仓要按 GT 判断，不能只看方块图标：它们的方块图标是
+     * 通用机壳，真正长什么样由 MTE 决定，而 MTE 的贴图只能通过 GT 自己的 ISBR 上下文画，
+     * 拿不出一个 IIcon 来贴。硬贴会画出一台"普通机器"，比不贴更误导。
+     */
+    /**
+     * 向 GT 的方块实体要「这一面长什么样」的真实贴图。
+     *
+     * <p>
+     * GT 的机器 / 输入总线 / 输入仓，方块图标是通用机壳，真正的外观由方块实体（MTE）
+     * 通过 {@code ITexuredTileEntity.getTexture} 给出。那些 ITexture 只能通过 GT 自己的
+     * ISBR 上下文渲染，拿不到简单图标 —— 但标准实现 {@code GTRenderedTexture} 实现了
+     * {@code IIconTexture}，可以直接问它要 {@code IIcon}（上下文只在少数特殊贴图里用，
+     * 这里传 null，出问题就被 catch 住退回纯色块）。
+     */
+    /** 机器朝哪一面（GT 的正面）。拿不到就返回 null，调用方按「没有正面」处理。 */
+    private static net.minecraftforge.common.util.ForgeDirection frontFacingOf(
+        net.minecraft.tileentity.TileEntity tile) {
+        if (!(tile instanceof gregtech.api.interfaces.tileentity.IGregTechTileEntity)) return null;
+        try {
+            return ((gregtech.api.interfaces.tileentity.IGregTechTileEntity) tile).getFrontFacing();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 从一组 ITexture 里取出能直接当图标用的那一个。 */
+    private static net.minecraft.util.IIcon firstIcon(gregtech.api.interfaces.ITexture[] textures, int forgeSide) {
+        if (textures == null) return null;
+        for (int i = 0; i < textures.length; i++) {
+            if (textures[i] instanceof gregtech.common.render.IIconTexture) {
+                try {
+                    net.minecraft.util.IIcon icon = ((gregtech.common.render.IIconTexture) textures[i])
+                        .getIcon(forgeSide, null);
+                    if (icon != null) return icon;
+                } catch (Throwable ignored) {
+                    // 这一张拿不到，试下一张
+                }
+            }
+        }
+        return null;
+    }
+
+    private static net.minecraft.util.IIcon gtFaceIcon(net.minecraft.tileentity.TileEntity tile, Block block,
+        int forgeSide) {
+        if (!(tile instanceof gregtech.api.interfaces.tileentity.ITexturedTileEntity)) return null;
+        if (forgeSide < 0 || forgeSide >= net.minecraftforge.common.util.ForgeDirection.values().length) return null;
+        try {
+            net.minecraftforge.common.util.ForgeDirection side = net.minecraftforge.common.util.ForgeDirection
+                .values()[forgeSide];
+            gregtech.api.interfaces.ITexture[] textures = ((gregtech.api.interfaces.tileentity.ITexturedTileEntity) tile)
+                .getTexture(block, side);
+            if (textures == null || textures.length == 0) return null;
+            net.minecraft.util.IIcon icon = firstIcon(textures, forgeSide);
+            if (icon != null) return icon;
+
+            // 这一面没给图标（GT 有些面只在特定上下文里才有贴图）：
+            // 退而用其它面的 —— 机器的外壳基本是同一套，总比一块纯色强
+            // 退而用其它面的。★ 顺序很重要：先背面、再四个侧面，最后才是顶/底，
+            // 而且**永远不用正面** —— 机器的正面是那块有辨识度的面板（屏幕/输入口），
+            // 拿它铺满其余各面会变成「六面都是正面」，比一块纯色还离谱。
+            net.minecraftforge.common.util.ForgeDirection front = frontFacingOf(tile);
+            int[] order = { 3, 2, 4, 5, 1, 0 };
+            for (int candidate : order) {
+                if (candidate == forgeSide) continue;
+                if (front != null && candidate == front.ordinal()) continue;
+                net.minecraft.util.IIcon fallback = firstIcon(
+                    ((gregtech.api.interfaces.tileentity.ITexturedTileEntity) tile)
+                        .getTexture(block, net.minecraftforge.common.util.ForgeDirection.values()[candidate]),
+                    candidate);
+                if (fallback != null) return fallback;
+            }
+        } catch (Throwable t) {
+            // 拿不到就当没有：退回纯色块，不影响别的
+            return null;
+        }
+        return null;
+    }
+
+    private net.minecraft.tileentity.TileEntity neighbourTileOf(int face) {
+        net.minecraft.tileentity.TileEntity terminal = container == null ? null : container.getTerminal();
+        if (terminal == null || terminal.getWorldObj() == null) return null;
+        double[] off = CubeView.neighbourOffset(face);
+        return terminal.getWorldObj()
+            .getTileEntity(
+                terminal.xCoord + (int) Math.round(off[0] / 2.0D),
+                terminal.yCoord + (int) Math.round(off[1] / 2.0D),
+                terminal.zCoord + (int) Math.round(off[2] / 2.0D));
+    }
+
     private static Block neighbourBlock(int face) {
         String name = ClientTerminalIo.getNeighbourName(face);
         if (name.isEmpty()) return null;
@@ -843,7 +1027,9 @@ public class GuiTerminalIo extends GuiScreen {
         if (icon == null) return;
 
         GL11.glEnable(GL11.GL_BLEND);
-        GL11.glColor4f((float) tint[0] * brightness, (float) tint[1] * brightness, (float) tint[2] * brightness, 0.30F);
+        // 不透明度比纯色块那条路高得多：贴的是邻居的真实贴图，太淡就看不出是什么机器了。
+        // 颜色仍然乘上去，橙/蓝/绿的编码还在，只是不再盖过贴图本身。
+        GL11.glColor4f((float) tint[0] * brightness, (float) tint[1] * brightness, (float) tint[2] * brightness, 0.85F);
         emitTexturedQuad(icon, quad);
         GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
     }

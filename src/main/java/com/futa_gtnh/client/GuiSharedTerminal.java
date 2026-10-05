@@ -23,6 +23,7 @@ import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketAutoStore;
 import com.futa_gtnh.network.PacketStorageAction;
+import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 
 /**
@@ -542,6 +543,234 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         drawAutoStoreTooltip(mouseX, mouseY);
         drawSearchModeTooltip(mouseX, mouseY);
         drawToolButtonTooltip(mouseX, mouseY);
+        drawLimitDialog(mouseX, mouseY);
+    }
+
+    // ==================================================================
+    // 存量上限对话框（中键点格子）
+    // ==================================================================
+
+    /**
+     * 正在设上限的那个条目；{@code null} 表示对话框没开。
+     *
+     * <p>
+     * 物品和流体共用这一个对话框：在物品页签里中键点就是给物品设，在流体页签里
+     * 就是给流体设 —— 条目自己知道自己是哪一种（{@link StorageViewEntry#isFluid()}）。
+     */
+    private StorageViewEntry limitTarget;
+
+    /** 上限输入框。整数字符串，空 = 不限制。 */
+    private FutaSearchField limitField;
+
+    private int limitPanelLeft;
+    private int limitPanelTop;
+
+    private static final int LIMIT_W = 176;
+    private static final int LIMIT_H = 78;
+    private static final int LIMIT_FIELD_W = 80;
+
+    /** @return 处理掉了就返回 true（对话框开着时吞掉所有点击） */
+    private boolean handleLimitDialogClick(int mouseX, int mouseY) {
+        if (limitTarget == null) return false;
+
+        int buttonY = limitPanelTop + LIMIT_H - 22;
+        if (hit(mouseX, mouseY, limitPanelLeft + 6, buttonY, 52, 16)) {
+            applyLimitFromField();
+            return true;
+        }
+        if (hit(mouseX, mouseY, limitPanelLeft + 62, buttonY, 52, 16)) {
+            // 「不限」= 取消上限。和「设成 0」区别开：0 是一件都不许再进
+            sendLimit(-1L);
+            return true;
+        }
+        if (hit(mouseX, mouseY, limitPanelLeft + 118, buttonY, 52, 16)) {
+            closeLimitDialog();
+            return true;
+        }
+
+        // 点输入框里就交给它（能拖光标），点在面板别处不关，点面板外关掉
+        if (limitField != null && hit(mouseX, mouseY, limitPanelLeft + 8, limitPanelTop + 34, LIMIT_FIELD_W, 16)) {
+            limitField.mouseClicked(mouseX, mouseY, 0);
+            return true;
+        }
+        if (!hit(mouseX, mouseY, limitPanelLeft, limitPanelTop, LIMIT_W, LIMIT_H)) {
+            closeLimitDialog();
+        }
+        return true;
+    }
+
+    /** @return 处理掉了就返回 true */
+    private boolean handleLimitDialogKey(char typedChar, int keyCode) {
+        if (limitTarget == null) return false;
+
+        if (keyCode == Keyboard.KEY_ESCAPE) {
+            closeLimitDialog();
+            return true;
+        }
+        if (keyCode == Keyboard.KEY_RETURN || keyCode == Keyboard.KEY_NUMPADENTER) {
+            applyLimitFromField();
+            return true;
+        }
+        // 只收数字和退格：这个框里没有别的东西是合法的，
+        // 放字母进来只会让「确定」按下去才发现解析失败
+        if (limitField != null) {
+            limitField.textboxKeyTyped(typedChar, keyCode);
+        }
+        return true;
+    }
+
+    private void applyLimitFromField() {
+        if (limitField == null) {
+            closeLimitDialog();
+            return;
+        }
+        String text = limitField.getText();
+        if (text == null || text.trim()
+            .isEmpty()) {
+            // 空框按「不限」处理 —— 这正是大多数人对「把上限删掉」的直觉
+            sendLimit(-1L);
+            return;
+        }
+        long limit;
+        try {
+            limit = Long.parseLong(text.trim());
+        } catch (NumberFormatException e) {
+            // 保留对话框，把话说清楚。直接关掉的话玩家只会觉得「按了没反应」
+            limitError = "请填一个整数（留空或点「不限」= 取消上限）";
+            return;
+        }
+        sendLimit(Math.max(0L, limit));
+    }
+
+    /** 输入不合法时显示在面板里的一句话；为空表示没有错误。 */
+    private String limitError;
+
+    private void sendLimit(long limit) {
+        StorageViewEntry entry = limitTarget;
+        closeLimitDialog();
+        if (entry == null) return;
+
+        if (entry.isFluid()) {
+            FluidKey key = entry.getFluidKey();
+            if (key != null) {
+                NetworkHandler.INSTANCE
+                    .sendToServer(PacketStorageAction.fluid(PacketStorageAction.SET_FLUID_LIMIT, key, limit));
+            }
+        } else {
+            ItemKey key = entry.getItemKey();
+            if (key != null) {
+                NetworkHandler.INSTANCE
+                    .sendToServer(PacketStorageAction.item(PacketStorageAction.SET_ITEM_LIMIT, key, limit));
+            }
+        }
+    }
+
+    private void closeLimitDialog() {
+        limitTarget = null;
+        if (limitField != null) limitField.setFocused(false);
+    }
+
+    /** 中键点共享网格：给这一格的东西设上限。 */
+    private boolean handleLimitOpenClick(int mouseX, int mouseY, int mouseButton) {
+        if (mouseButton != 2 || limitTarget != null) return false;
+
+        int index = hoveredGhostIndex(mouseX, mouseY);
+        if (index < 0) return false;
+        int absolute = scrollRow * ContainerSharedTerminal.COLS + index;
+        if (absolute < 0 || absolute >= filtered.size()) return false;
+
+        StorageViewEntry entry = filtered.get(absolute);
+        if (entry == null) return false;
+
+        limitTarget = entry;
+        limitError = null;
+        if (limitField == null) {
+            limitField = new FutaSearchField(fontRendererObj, 0, 0, LIMIT_FIELD_W, 16);
+        }
+        limitField.setMaxStringLength(18);
+        Long current = entry.isFluid() ? ClientStorageCache.getFluidLimit(entry.getFluidKey())
+            : ClientStorageCache.getItemLimit(entry.getItemKey());
+        // 预填当前上限；没设过就预填现有存量 —— 大多数人想设的就是「别再多了」
+        long prefill = current != null ? current.longValue() : entry.getAmount();
+        limitField.setText(String.valueOf(prefill), false);
+        limitField.setFocused(true);
+
+        limitPanelLeft = Math.max(4, Math.min(width - LIMIT_W - 4, mouseX - LIMIT_W / 2));
+        limitPanelTop = Math.max(4, Math.min(height - LIMIT_H - 4, mouseY + 8));
+        limitField.xPosition = limitPanelLeft + 8;
+        limitField.yPosition = limitPanelTop + 34;
+        return true;
+    }
+
+    /**
+     * 画对话框。
+     *
+     * <p>
+     * 这是玩家唯一能看到「这个东西最多能存多少」的地方，所以除了输入框，
+     * 还要把<b>现有存量</b>摆在旁边：设上限时最要紧的判断就是「现在有多少」。
+     */
+    private void drawLimitDialog(int mouseX, int mouseY) {
+        if (limitTarget == null) return;
+
+        int left = limitPanelLeft;
+        int top = limitPanelTop;
+
+        GL11.glDisable(GL11.GL_LIGHTING);
+        GL11.glDisable(GL11.GL_DEPTH_TEST);
+        drawRect(left - 1, top - 1, left + LIMIT_W + 1, top + LIMIT_H + 1, 0xFF000000);
+        drawRect(left, top, left + LIMIT_W, top + LIMIT_H, 0xFF1A1C20);
+        drawRect(left, top, left + LIMIT_W, top + 16, 0xFF2A2E36);
+
+        boolean fluid = limitTarget.isFluid();
+        String title = fluid ? "流体存量上限" : "物品存量上限";
+        fontRendererObj.drawStringWithShadow(title, left + 6, top + 4, 0xFFFFFF);
+
+        String name = limitTarget.getDisplayName();
+        if (name != null && fontRendererObj.getStringWidth(name) > LIMIT_W - 16) {
+            name = fontRendererObj.trimStringToWidth(name, LIMIT_W - 16) + "…";
+        }
+        fontRendererObj.drawStringWithShadow(String.valueOf(name), left + 8, top + 20, 0xE0E0E0);
+
+        long have = limitTarget.getAmount();
+        Long current = fluid ? ClientStorageCache.getFluidLimit(limitTarget.getFluidKey())
+            : ClientStorageCache.getItemLimit(limitTarget.getItemKey());
+        String haveText = "现有 " + GuiSharedTerminal.formatShort(have)
+            + (current == null ? "（当前不限）" : "（上限 " + GuiSharedTerminal.formatShort(current.longValue()) + "）");
+        fontRendererObj.drawStringWithShadow(haveText, left + 8, top + LIMIT_H - 38, 0xA0A0A0);
+
+        if (limitError != null) {
+            fontRendererObj.drawStringWithShadow(limitError, left + 8, top + 52, 0xFF5555);
+        }
+
+        if (limitField != null) limitField.drawTextBox();
+
+        int buttonY = top + LIMIT_H - 22;
+        drawLimitButton(left + 6, buttonY, 52, "确定", hit(mouseX, mouseY, left + 6, buttonY, 52, 16), 0xFF3E7D3E);
+        drawLimitButton(left + 62, buttonY, 52, "不限", hit(mouseX, mouseY, left + 62, buttonY, 52, 16), 0xFF3A3F47);
+        drawLimitButton(left + 118, buttonY, 52, "取消", hit(mouseX, mouseY, left + 118, buttonY, 52, 16), 0xFF3A3F47);
+
+        GL11.glEnable(GL11.GL_LIGHTING);
+        GL11.glEnable(GL11.GL_DEPTH_TEST);
+    }
+
+    private void drawLimitButton(int x, int y, int w, String label, boolean hovered, int color) {
+        drawRect(x, y, x + w, y + 16, hovered ? brighten(color) : color);
+        drawRect(x, y, x + w, y + 1, 0xFF000000);
+        drawRect(x, y + 15, x + w, y + 16, 0xFF000000);
+        int textWidth = fontRendererObj.getStringWidth(label);
+        fontRendererObj.drawStringWithShadow(label, x + (w - textWidth) / 2, y + 4, 0xFFFFFF);
+    }
+
+    private static int brighten(int argb) {
+        int a = (argb >>> 24) & 0xFF;
+        int r = Math.min(255, ((argb >> 16) & 0xFF) + 30);
+        int g = Math.min(255, ((argb >> 8) & 0xFF) + 30);
+        int b = Math.min(255, (argb & 0xFF) + 30);
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    private static boolean hit(int mouseX, int mouseY, int x, int y, int w, int h) {
+        return mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
     }
 
     /**
@@ -714,6 +943,39 @@ public class GuiSharedTerminal extends FutaGuiContainer {
             0x404040);
     }
 
+    /**
+     * 格子右下角那行文字：有上限时写成「现有/上限」。
+     *
+     * <p>
+     * 只在设过上限时才变长 —— 没设过的条目显示得和以前一模一样，
+     * 不然整片格子都被无关的数字挤满。
+     */
+    static String amountText(StorageViewEntry entry) {
+        String have = formatShort(entry.getAmount());
+        Long limit = limitOf(entry);
+        if (limit == null) return have;
+        return have + "/" + formatShort(limit.longValue());
+    }
+
+    /**
+     * 这行文字的颜色：到达上限时标红。
+     *
+     * <p>
+     * 玩家最需要一眼看出来的就是「这个再也进不来了」—— 上限的用处全在这里，
+     * 藏进提示里等于没做。
+     */
+    static int amountColor(StorageViewEntry entry) {
+        Long limit = limitOf(entry);
+        if (limit == null) return 0xFFFFFF;
+        return entry.getAmount() >= limit.longValue() ? 0xFF5555 : 0xFFFFFF;
+    }
+
+    private static Long limitOf(StorageViewEntry entry) {
+        if (entry == null) return null;
+        if (entry.isFluid()) return ClientStorageCache.getFluidLimit(entry.getFluidKey());
+        return ClientStorageCache.getItemLimit(entry.getItemKey());
+    }
+
     /** 在网格里每一格的右下角画出「有多少」。 */
     private void drawSlotAmounts() {
         int start = scrollRow * ContainerSharedTerminal.COLS;
@@ -730,8 +992,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
             int x = ContainerSharedTerminal.GRID_X + 1 + col * 18;
             int y = ContainerSharedTerminal.GRID_Y + 1 + row * 18;
 
-            String text = formatShort(entry.getAmount());
-            drawAmountText(text, x, y);
+            drawAmountText(amountText(entry), x, y, amountColor(entry));
         }
     }
 
@@ -742,7 +1003,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
      * 位数多了就整体缩小，而不是截断 —— 看到 {@code 12.3M} 和看到 {@code 12.3…}
      * 完全是两回事。缩放矩阵用完必须还原，否则后面所有绘制都会跟着变小。
      */
-    private void drawAmountText(String text, int slotX, int slotY) {
+    private void drawAmountText(String text, int slotX, int slotY, int color) {
         if (text == null || text.isEmpty()) return;
 
         float scale = text.length() > 6 ? 0.5F : (text.length() > 4 ? 0.75F : 1.0F);
@@ -751,7 +1012,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         GL11.glPushMatrix();
         GL11.glTranslatef(slotX + 17.0F, slotY + 17.0F, 300.0F);
         GL11.glScalef(scale, scale, 1.0F);
-        fontRendererObj.drawStringWithShadow(text, -width, -8, 0xFFFFFF);
+        fontRendererObj.drawStringWithShadow(text, -width, -8, color);
         GL11.glPopMatrix();
     }
 
@@ -761,6 +1022,11 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) {
+        // 上限对话框优先：开着的时候它吞掉所有点击，别让点击穿到下面的格子上去
+        if (handleLimitDialogClick(mouseX, mouseY)) return;
+        // 中键点共享格子 = 设存量上限（物品页签给物品设，流体页签给流体设）
+        if (handleLimitOpenClick(mouseX, mouseY, mouseButton)) return;
+
         if (mouseButton == 0 || mouseButton == 1) {
             // 若窗口外松开时丢了事件，新一次按下不能继承上一次的释放标记。
             sharedShiftClickButtons &= ~(1 << mouseButton);
@@ -1151,6 +1417,9 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
     @Override
     protected void keyTyped(char typedChar, int keyCode) {
+        // 上限对话框开着时，键盘归它（数字 / 回车确定 / ESC 取消）
+        if (handleLimitDialogKey(typedChar, keyCode)) return;
+
         // 注意：1.7.10 的 GuiScreen#keyTyped 没有声明 throws，
         // 覆写时加上 throws IOException 会直接编译不过
         if (searchField != null && searchField.textboxKeyTyped(typedChar, keyCode)) {

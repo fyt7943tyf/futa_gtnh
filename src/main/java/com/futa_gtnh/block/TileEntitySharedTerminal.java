@@ -37,6 +37,16 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     private final Map<ItemKey, Integer> outputIndices = new HashMap<>();
     /** 上次提供给调用方的虚拟堆叠数量，用于支持漏斗回滚和直接写回剩余堆叠。 */
     private final Map<Integer, Integer> exposedAmounts = new HashMap<>();
+
+    /**
+     * 存入槽里「仓库收不下」的那点东西。
+     *
+     * <p>
+     * 正常情况下是 null：放进去的东西都会立刻被吸进共享仓库。但仓库对某个物品设了
+     * 存量上限之后，超出的部分收不下 —— 那部分留在这里，玩家看得见、拿得回，
+     * 漏斗也能取走。**绝不能丢**。
+     */
+    private ItemStack inputLeftover;
     private SharedStorage indexedStorage;
     private int indexedRevision = -1;
     private int indexedOutputRevision = -1;
@@ -107,7 +117,10 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         FluidKey key = FluidKey.of(resource);
         if (key == null) return 0;
         SharedStorage storage = SharedStorageManager.getStorage();
-        long space = Math.max(0L, SharedStorage.MAX_AMOUNT - storage.getFluidAmount(key));
+        // 问存储「还能收多少」，而不是拿全局上限自己算：这个流体可能被设过限额，
+        // 拿全局上限算出来的「可接收量」会偏大，管道据此规划就会推超。
+        // （真存的时候 insertFluid 还会再夹一次，所以不会丢东西，但预检查不该骗人）
+        long space = storage.fluidSpaceLeft(key);
         int acceptable = (int) Math.min(resource.amount, space);
         if (!doFill || acceptable <= 0) return acceptable;
         long stored = storage.insertFluid(key, acceptable);
@@ -282,6 +295,12 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
     @Override
     public ItemStack getStackInSlot(int slot) {
+        // 存入槽：它是个「漏斗口」，正常时永远是空的（东西一进来就被吸进仓库）。
+        // 但仓库满了（物品设了上限）时，收不下的那部分必须留在这里让玩家拿回去 ——
+        // 见 setInventorySlotContents 里的说明。
+        if (slot == INPUT_SLOT) {
+            return inputLeftover == null ? null : inputLeftover.copy();
+        }
         ItemKey key = keyForSlot(slot);
         if (key == null || !allowsOutput(faceForSlot(slot), key.prototype())) return null;
         int amount = visibleAmount(key);
@@ -291,6 +310,16 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
     @Override
     public ItemStack decrStackSize(int slot, int amount) {
+        // 从存入槽里把没吸收掉的那点拿回去
+        if (slot == INPUT_SLOT) {
+            if (inputLeftover == null || amount <= 0) return null;
+            int taken = Math.min(amount, inputLeftover.stackSize);
+            ItemStack out = inputLeftover.copy();
+            out.stackSize = taken;
+            inputLeftover.stackSize -= taken;
+            if (inputLeftover.stackSize <= 0) inputLeftover = null;
+            return out;
+        }
         ItemKey key = keyForSlot(slot);
         if (key == null || amount <= 0 || !allowsOutput(faceForSlot(slot), key.prototype())) return null;
         int visible = visibleAmount(key);
@@ -312,10 +341,36 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     public void setInventorySlotContents(int slot, ItemStack stack) {
         SharedStorage storage = SharedStorageManager.getStorage();
         if (slot == INPUT_SLOT) {
-            if (stack == null || stack.getItem() == null || stack.stackSize <= 0) return;
+            // ★ 收不下的东西留在这个槽里，绝不吞掉。
+            //
+            // 这个槽是个「漏斗口」：放进去就被吸进共享仓库，正常时槽里是空的。
+            // 但某个物品被设了存量上限之后，insertItem 只会接收一部分 ——
+            // 原来这里无论收下多少都直接 return（槽又读不出内容），
+            // 于是「上限挡下来的那部分」会凭空消失。玩家看到的就是「塞进去，东西少了」。
+            //
+            // 现在改成：先尽量吸收，剩下的原样留在槽里，玩家能看见也能拿回去，
+            // 漏斗/管道也能把它取走（getStackInSlot / decrStackSize 都认这个槽了）。
+            if (stack == null || stack.getItem() == null || stack.stackSize <= 0) {
+                if (inputLeftover != null) {
+                    // 把一个空栈写进来 = 清空这个槽（GUI 里手动拿走时会发生）
+                    inputLeftover = null;
+                }
+                return;
+            }
             ItemKey key = ItemKey.of(stack);
-            if (key != null && storage.insertItem(key, stack.stackSize) > 0L) {
-                SharedStorageManager.broadcastItemChange(key);
+            if (key == null) {
+                inputLeftover = stack.copy();
+                return;
+            }
+            long accepted = storage.insertItem(key, stack.stackSize);
+            if (accepted > 0L) SharedStorageManager.broadcastItemChange(key);
+            int left = stack.stackSize - (int) Math.min(accepted, stack.stackSize);
+            if (left > 0) {
+                ItemStack rest = stack.copy();
+                rest.stackSize = left;
+                inputLeftover = rest;
+            } else {
+                inputLeftover = null;
             }
             return;
         }

@@ -1,5 +1,6 @@
 package com.futa_gtnh.client.nei;
 
+import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -37,9 +38,30 @@ public final class DisassemblerRecipeHandler extends TemplateRecipeHandler {
         return StatCollector.translateToLocal("futa_gtnh.disassembler.name");
     }
 
+    /**
+     * NEI 会<b>无条件</b>拿这个字符串去 {@code GuiDraw.changeTexture}，所以绝不能返回空串。
+     *
+     * <p>
+     * 原来这里写的是 {@code ""}（作者的意图是「这个配方页不用贴图，我自己画背景」），
+     * 但 NEI 的 {@code TemplateRecipeHandler.drawForeground} 里是这么写的：
+     *
+     * <pre>
+     * GuiDraw.changeTexture(getGuiTexture()); // 没有判空
+     * drawExtras(recipe);
+     * </pre>
+     *
+     * 空串会变成 {@code new ResourceLocation("")}，加载出来的图是 null，
+     * 于是 {@code TextureUtil.uploadTextureImageAllocate} 直接 NPE ——
+     * 崩在「打开拆解机配方」的那一刻，而且崩溃报告里只会写
+     * {@code Resource location: minecraft:} 这种看不出所以然的东西。
+     *
+     * <p>
+     * 这里给一张一定存在的原版贴图：{@link #drawBackground} 会用自己的灰底盖满整个
+     * 配方页（166×140），所以这张图其实<b>看不见</b>，绑定它只是为了不让 NEI 拿到空串。
+     */
     @Override
     public String getGuiTexture() {
-        return "";
+        return "textures/gui/container/generic_54.png";
     }
 
     @Override
@@ -55,6 +77,20 @@ public final class DisassemblerRecipeHandler extends TemplateRecipeHandler {
     @Override
     public int recipiesPerPage() {
         return 1;
+    }
+
+    /**
+     * 配方页上「点这里把材料搬进机器」的那块区域。
+     *
+     * <p>
+     * 不实现它的话，NEI 在注册合成催化剂时会打一条
+     * {@code failed to load catalyst handler, implement `loadTransferRects` for your handler}
+     * —— 而且「从背包一键填料」这个功能也就没了。区域画在入口格和产出格之间那道空隙上，
+     * 和别的配方的习惯一致。
+     */
+    @Override
+    public void loadTransferRects() {
+        transferRects.add(new RecipeTransferRect(new Rectangle(22, 24, 8, 18), ID));
     }
 
     @Override

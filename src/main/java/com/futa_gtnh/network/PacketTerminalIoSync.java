@@ -74,6 +74,33 @@ public class PacketTerminalIoSync implements IMessage {
             packet.neighbourNames[face.ordinal()] = name == null ? "" : name;
             packet.neighbourMetas[face.ordinal()] = (byte) world.getBlockMetadata(bx, by, bz);
         }
+
+        // 一次性诊断：这一份同步包里到底算了什么。
+        //
+        // 「配置界面里 3D 预览不显示邻居」这类反馈最难办的地方是：到底是服务端没算出来、
+        // 还是客户端没画出来，从界面上看都是「空的」。所以把六个面各自看到了什么方块、
+        // 算出来的两个掩码各是什么，一次打在日志里 —— 每次打开界面只打一行，不刷屏。
+        try {
+            StringBuilder detail = new StringBuilder();
+            for (net.minecraftforge.common.util.ForgeDirection face : net.minecraftforge.common.util.ForgeDirection.VALID_DIRECTIONS) {
+                String name = packet.neighbourNames[face.ordinal()];
+                detail.append(' ')
+                    .append(face.name())
+                    .append('=')
+                    .append(name == null || name.isEmpty() ? "(空)" : name);
+            }
+            FutaGtnhMod.LOG.info(
+                "共享终端 IO 诊断：({} {} {}) 维度 {} 物品掩码={} 流体掩码={} 邻居：{}",
+                terminal.xCoord,
+                terminal.yCoord,
+                terminal.zCoord,
+                packet.dimension,
+                Integer.toBinaryString(packet.itemMask),
+                Integer.toBinaryString(packet.fluidMask),
+                detail.toString());
+        } catch (Throwable ignored) {
+            // 只是日志
+        }
         return packet;
     }
 

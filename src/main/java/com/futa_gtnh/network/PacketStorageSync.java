@@ -71,6 +71,28 @@ public class PacketStorageSync implements IMessage {
         }
         root.setTag("fluids", fluidList);
 
+        // 存量上限（只下发被显式设过的那几条，没设过 = 不限制）。
+        // 和存量分开两张表：上限是「设置」，存量取空了它也得留着
+        NBTTagList itemLimitList = new NBTTagList();
+        for (Map.Entry<ItemKey, Long> entry : storage.itemLimitsView()
+            .entrySet()) {
+            NBTTagCompound tag = entry.getKey()
+                .writeToNbt();
+            tag.setLong("limit", entry.getValue());
+            itemLimitList.appendTag(tag);
+        }
+        root.setTag("itemLimits", itemLimitList);
+
+        NBTTagList fluidLimitList = new NBTTagList();
+        for (Map.Entry<FluidKey, Long> entry : storage.fluidLimitsView()
+            .entrySet()) {
+            NBTTagCompound tag = entry.getKey()
+                .writeToNbt();
+            tag.setLong("limit", entry.getValue());
+            fluidLimitList.appendTag(tag);
+        }
+        root.setTag("fluidLimits", fluidLimitList);
+
         try {
             return net.minecraft.nbt.CompressedStreamTools.compress(root);
         } catch (Exception e) {
