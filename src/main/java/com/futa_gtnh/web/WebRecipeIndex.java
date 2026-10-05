@@ -59,7 +59,10 @@ public final class WebRecipeIndex {
     private WebRecipeIndex() {}
 
     /** 缓存文件格式版本；字段变了就 +1，老文件会被直接丢掉重建。 */
-    private static final int FILE_VERSION = 5;
+    // 6：流体的「一次用多少」改成从流体 NBT 里读（原来一律读 stackSize，
+    // 于是「每次 144 L」被当成 1）。用量是写进缓存的数据，所以必须让旧缓存作废 ——
+    // 否则改完代码看着毫无变化，因为读的还是那份旧索引。
+    private static final int FILE_VERSION = 9;
 
     private static final int MAGIC = 0x46574542; // "FWEB"
 
@@ -837,7 +840,7 @@ public final class WebRecipeIndex {
                 ItemStack main = primaryOf(result);
                 if (main != null) {
                     resultId = WebStore.idOf(main);
-                    resultAmount = amountOf(main);
+                    resultAmount = amountOf(main, resultId);
                 }
             } else if (others != null) {
                 // ★ NEI 的约定：没有 resultStack 时，otherStacks 就是这条配方的产出。
@@ -929,8 +932,8 @@ public final class WebRecipeIndex {
 
             int[] candidates = permutationIds(positioned.items, mainId);
             out.add(
-                new int[] { mainId, amountOf(main), internAlts(candidates), positioned.getChance(), positioned.relx,
-                    positioned.rely });
+                new int[] { mainId, amountOf(main, mainId), internAlts(candidates), positioned.getChance(),
+                    positioned.relx, positioned.rely });
         }
 
         private int[] permutationIds(ItemStack[] items, int mainId) {
@@ -1062,8 +1065,72 @@ public final class WebRecipeIndex {
         return null;
     }
 
-    private static int amountOf(ItemStack stack) {
+    /**
+     * 这一格「一次要用多少」。
+     *
+     * <p>
+     * <b>流体要单独看</b>：配方里的流体是以伪物品出现的（NEI/GT 给每种流体造一个显示用
+     * ItemStack），它的 stackSize 是 1，真正的用量写在<b>流体 NBT</b> 里 ——
+     * 实测「Molten Borosilicate Glass」那格每次要 144 L，而这里原来一律读 stackSize，
+     * 于是界面上写「每个配方 ×1，共需 64」：数字全都差了一个 144 倍。
+     */
+    private static int amountOf(ItemStack stack, int itemId) {
+        int fluidAmount = fluidAmountOf(stack, itemId);
+        if (fluidAmount > 0) return fluidAmount;
         return stack.stackSize <= 0 ? 1 : stack.stackSize;
+    }
+
+    /**
+     * 如果这是「流体显示物品」，返回它带着的流体量（mB）；不是流体就返回 0。
+     *
+     * <p>
+     * 用 Forge 的标准读法解析 NBT —— NEI 的流体显示物品、GT 的流体单元，存的都是
+     * 一个 {@code FluidStack} 的 NBT，所以这一条能覆盖两边的实现。
+     */
+    private static int fluidAmountOf(ItemStack stack, int itemId) {
+        if (stack == null || stack.getItem() == null) return 0;
+        // ★ 这里**不能**用 isFluidItem 当闸：它的名字判据依赖库存快照，
+        // 而索引重建时那份快照往往还没到 —— 闸一关，用量就永远读不出来（连着诊断一起哑掉）。
+        // 只读 NBT 不看库存，读不出来时才去问「这算不算流体」来决定要不要记日志。
+        // GTNH 自己的键最优先：实测 {mFluidMaterialName:..., mFluidDisplayAmount:144L}，
+        // Forge 的标准解析认不出它（这正是「每次 144 L 被当成 1」的原因）
+        long display = WebStore.fluidDisplayAmount(stack);
+        if (display > 0) return (int) Math.min(Integer.MAX_VALUE, display);
+
+        if (!stack.hasTagCompound()) {
+            if (WebStore.isFluidItem(itemId)) logFluidTagOnce(stack, "无 NBT");
+            return 0;
+        }
+        try {
+            net.minecraftforge.fluids.FluidStack fluid = net.minecraftforge.fluids.FluidStack
+                .loadFluidStackFromNBT(stack.getTagCompound());
+            if (fluid != null && fluid.amount > 0) return fluid.amount;
+            if (WebStore.isFluidItem(itemId)) {
+                logFluidTagOnce(stack, "FluidStack 解析不出量：" + stack.getTagCompound());
+            }
+            return 0;
+        } catch (Throwable t) {
+            logFluidTagOnce(stack, "解析抛异常：" + t);
+        }
+        return 0;
+    }
+
+    /** 把「流体伪物品用了量、但读不出来」的那种 NBT 打一次，照着实测结构改解析。 */
+    private static final java.util.Set<String> fluidTagLogged = new java.util.HashSet<>();
+
+    private static void logFluidTagOnce(ItemStack stack, String detail) {
+        String name;
+        try {
+            name = String.valueOf(stack.getDisplayName());
+        } catch (Throwable t) {
+            name = "?";
+        }
+        synchronized (fluidTagLogged) {
+            if (fluidTagLogged.size() >= 20 || !fluidTagLogged.add(name)) return;
+        }
+        String text = detail;
+        if (text.length() > 300) text = text.substring(0, 300) + "…";
+        com.futa_gtnh.FutaGtnhMod.LOG.info("网页配方：流体的用量读不出来 —— 物品「{}」，NBT 实况：{}", name, text);
     }
 
     // ==================================================================
