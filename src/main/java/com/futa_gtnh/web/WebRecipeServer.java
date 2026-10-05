@@ -413,6 +413,8 @@ public final class WebRecipeServer {
         request.targets.addAll(parseTargets(query.get("targets")));
         request.useStock = !"0".equals(query.get("stock"));
         request.choices = parseChoices(query.get("choices"));
+        // 多候选材料的指定：alts=主人的物品:格子的x:格子的y:选中的物品,...
+        request.alts = parseAlts(query.get("alts"));
         request.raw = parseIntSet(query.get("raw"));
         // 非消耗品：catalyst 是「这个也算」（补自动判定漏的），
         // consumable 是「我就要按消耗算」（推翻自动判定）
@@ -761,6 +763,34 @@ public final class WebRecipeServer {
         } catch (Throwable t) {
             return fallback;
         }
+    }
+
+    /**
+     * {@code "42:3:1:100,42:5:1:200"} -> 「物品 42 的配方里，(3,1) 那格用 100，(5,1) 那格用 200」。
+     *
+     * <p>
+     * 解析不了的整条跳过：少一条指定最多是「用了默认候选」，而报错会让整个页面打不开。
+     * 真正的合法性（那个物品是否真的在这一格的候选里）由 WebPlanner.pickAlt 校验。
+     */
+    private static Map<String, Integer> parseAlts(String raw) {
+        Map<String, Integer> out = new HashMap<>();
+        if (raw == null || raw.isEmpty()) return out;
+        String[] parts = raw.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            String[] fields = parts[i].trim()
+                .split(":");
+            if (fields.length != 4) continue;
+            try {
+                int owner = Integer.parseInt(fields[0].trim());
+                int x = Integer.parseInt(fields[1].trim());
+                int y = Integer.parseInt(fields[2].trim());
+                int chosen = Integer.parseInt(fields[3].trim());
+                out.put(owner + ":" + x + ":" + y, Integer.valueOf(chosen));
+            } catch (NumberFormatException ignored) {
+                // 这一条不要了
+            }
+        }
+        return out;
     }
 
     /** {@code "42:123,77:456"} -> 物品 42 用配方 123、物品 77 用配方 456。 */
