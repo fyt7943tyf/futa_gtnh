@@ -456,6 +456,55 @@ public class Config {
     /** 是否注册共享终端的合成配方。 */
     public static boolean enableRecipe = true;
 
+    // ------------------------------------------------------------------
+    // 网页合成向导（客户端）
+    //
+    // 这些全部只在客户端生效：配方数据来自 NEI，而 NEI 只存在于客户端。
+    // 专用服务端读它们没有任何用处（也不会去读）。
+    // ------------------------------------------------------------------
+
+    /**
+     * 是否启用手机网页版的配方查询与合成指导。
+     *
+     * <p>
+     * 关掉之后不会开任何端口、也不会去建配方索引，按键和命令都会直接说「已关闭」。
+     */
+    public static boolean webRecipeEnable = true;
+
+    /** 客户端启动后是否自动开始监听（不用每次进游戏手动开）。 */
+    public static boolean webRecipeAutoStart = true;
+
+    /**
+     * 是否在启动后自动建立全量配方索引。
+     *
+     * <p>
+     * 建一次要跑一会儿（几百个配方处理器、十几万条配方），但结果会缓存到
+     * {@code config/futa_gtnh/web_recipes.dat}，下次开游戏是秒开的。
+     * 关掉它就变成「手机第一次打开页面时再建」。
+     */
+    public static boolean webRecipePrebuild = true;
+
+    /** 网页监听端口。 */
+    public static int webRecipePort = 8765;
+
+    /**
+     * 网页绑定地址。
+     *
+     * <p>
+     * 默认 {@code 0.0.0.0}（局域网里的手机才连得上）。改成 {@code 127.0.0.1}
+     * 就只有这台电脑自己能访问 —— 不想让同网段的人扫到端口时这么设。
+     */
+    public static String webRecipeBindAddress = "0.0.0.0";
+
+    /**
+     * 访问口令。留空表示不校验。
+     *
+     * <p>
+     * 设了之后必须用带 {@code ?k=口令} 的完整地址打开（按键时聊天栏里给的就是它），
+     * 之后浏览器会记住这个 Cookie。
+     */
+    public static String webRecipeToken = "";
+
     /** 配置文件位置，在 {@link #synchronizeConfiguration} 里记下，供运行时回写用。 */
     private static File configFileRef;
 
@@ -585,6 +634,44 @@ public class Config {
 
         enableRecipe = configuration
             .getBoolean("enableRecipe", Configuration.CATEGORY_GENERAL, enableRecipe, "是否注册共享终端的合成配方。");
+
+        webRecipeEnable = configuration.getBoolean(
+            "webRecipeEnable",
+            Configuration.CATEGORY_GENERAL,
+            webRecipeEnable,
+            "是否启用手机网页版的配方查询与合成指导（客户端内嵌一个只读的 HTTP 服务，数据来自 NEI）。");
+
+        webRecipeAutoStart = configuration.getBoolean(
+            "webRecipeAutoStart",
+            Configuration.CATEGORY_GENERAL,
+            webRecipeAutoStart,
+            "客户端启动后是否自动开始监听。关掉后可以用 P 键或 /futaweb start 手动开。");
+
+        webRecipePrebuild = configuration.getBoolean(
+            "webRecipePrebuild",
+            Configuration.CATEGORY_GENERAL,
+            webRecipePrebuild,
+            "启动后是否自动建立全量配方索引（首次要跑一会儿，之后走 config/futa_gtnh/web_recipes.dat 缓存秒开）。");
+
+        webRecipePort = configuration.getInt(
+            "webRecipePort",
+            Configuration.CATEGORY_GENERAL,
+            webRecipePort,
+            1024,
+            65535,
+            "网页监听端口。手机访问的地址是 http://电脑IP:这个端口/ 。");
+
+        webRecipeBindAddress = configuration.getString(
+            "webRecipeBindAddress",
+            Configuration.CATEGORY_GENERAL,
+            webRecipeBindAddress,
+            "网页绑定地址。0.0.0.0=局域网可访问（手机要连这个）；127.0.0.1=只有本机能访问。");
+
+        webRecipeToken = configuration.getString(
+            "webRecipeToken",
+            Configuration.CATEGORY_GENERAL,
+            webRecipeToken,
+            "访问口令。留空=不校验；填了就必须用带 ?k=口令 的完整地址打开（按键时聊天栏给的就是完整地址）。");
 
         enableLootMachine = configuration.getBoolean(
             "enableLootMachine",

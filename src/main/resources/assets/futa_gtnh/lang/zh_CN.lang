@@ -286,6 +286,9 @@ futa_gtnh.swift_step.gui.light.note=只照亮，不挡刷怪
 key.futa_gtnh.rts_toggle=俯瞰建筑模式
 futa_gtnh.rts.msg.disabled=俯瞰建筑模式已被服务器关闭
 futa_gtnh.rts.hud.exit=G / ESC 退出
+
+# --- 手机网页版合成向导 ---
+key.futa_gtnh.web_recipe=合成向导网页（显示手机访问地址）
 futa_gtnh.rts.hud.move=相机：WASD平移 Q/E转向 空格/Shift升降 滚轮推拉 中键拖旋转 右键拖平移
 futa_gtnh.rts.hud.radius=操作半径 %s 格
 futa_gtnh.rts.msg.wrong_tool=工具不够：这个方块需要更好的工具（俯瞰破坏不会无掉落挖除）

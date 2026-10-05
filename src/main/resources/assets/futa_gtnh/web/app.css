@@ -1,0 +1,1742 @@
+/* ==========================================================================
+   合成向导 - 手机优先深色主题样式
+   纯静态资源，无外部字体 / 图片 / CDN 依赖。
+   ========================================================================== */
+
+:root {
+    color-scheme: dark;
+
+    /* 配色 */
+    --bg: #14161a;
+    --bg-elev: #1c1f26;
+    --bg-elev-2: #23272f;
+    --bg-sunk: #101216;
+
+    --text: #e8eaed;
+    --text-dim: #9aa0a6;
+    --text-faint: #6b7280;
+
+    --primary: #3ea6ff;
+    --primary-ink: #06263f;
+    --primary-soft: rgba(62, 166, 255, 0.16);
+
+    --ok: #5bd48a;
+    --warn: #f5b642;
+    --danger: #ff6b6b;
+
+    --line: #2c313a;
+    --line-soft: #23272f;
+
+    /* 尺寸 */
+    --card-radius: 12px;
+    --slot-size: 36px;
+    --slot-gap: 3px;
+    --tap: 46px;
+    --shell-max: 720px;
+    --topbar-h: 52px;
+
+    /* 阴影 */
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 3px 10px rgba(0, 0, 0, 0.28);
+    --shadow-lift: 0 6px 22px rgba(0, 0, 0, 0.5);
+
+    /* 安全区（刘海屏 / 手势条） */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* --------------------------------------------------------------- 基础重置 */
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC",
+        "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
+        "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    overflow-wrap: break-word;
+    -webkit-tap-highlight-color: rgba(62, 166, 255, 0.18);
+    -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+    color: inherit;
+}
+
+a {
+    color: var(--primary);
+    text-decoration: none;
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+figure {
+    margin: 0;
+}
+
+ul,
+ol {
+    padding: 0;
+    list-style: none;
+}
+
+/* ---------------------------------------------------------------- 兜底 */
+
+:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- 顶栏 */
+
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: rgba(20, 22, 26, 0.94);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-soft);
+    padding-top: var(--safe-top);
+}
+
+.topbar-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    max-width: var(--shell-max);
+    margin: 0 auto;
+    min-height: var(--topbar-h);
+    padding: 6px 14px;
+    padding-left: calc(14px + var(--safe-left));
+    padding-right: calc(14px + var(--safe-right));
+}
+
+.brand {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+}
+
+.status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 12.5px;
+    color: var(--text-dim);
+}
+
+.status-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 46vw;
+}
+
+.status-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-faint);
+}
+
+.status-dot.is-ok {
+    background: var(--ok);
+}
+
+.status-dot.is-building {
+    background: var(--warn);
+    animation: pulse 1.4s ease-in-out infinite;
+}
+
+.status-dot.is-error {
+    background: var(--danger);
+}
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}
+
+.progress {
+    height: 3px;
+    background: var(--bg-sunk);
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0;
+    background: var(--primary);
+    transition: width 0.3s ease;
+}
+
+/* ---------------------------------------------------------------- 布局 */
+
+.view {
+    max-width: var(--shell-max);
+    margin: 0 auto;
+    padding: 14px;
+    padding-left: calc(14px + var(--safe-left));
+    padding-right: calc(14px + var(--safe-right));
+    padding-bottom: calc(110px + var(--safe-bottom));
+    min-height: 60vh;
+}
+
+.panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.section-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.6px;
+}
+
+.section-title .count {
+    font-weight: 400;
+    color: var(--text-faint);
+}
+
+.page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.page-head h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.spacer {
+    flex: 1 1 auto;
+}
+
+.muted {
+    color: var(--text-dim);
+    font-size: 13px;
+}
+
+.dim {
+    color: var(--text-faint);
+    font-size: 12.5px;
+}
+
+.num {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- 卡片 */
+
+.card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--card-radius);
+    box-shadow: var(--shadow);
+    padding: 12px;
+}
+
+.card-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.box {
+    max-width: var(--shell-max);
+    margin: 0 auto;
+    background: var(--bg-elev);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--card-radius);
+    box-shadow: var(--shadow);
+    padding: 18px 16px;
+    text-align: center;
+    color: var(--text-dim);
+}
+
+.box strong {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text);
+    font-size: 15px;
+}
+
+.box .btn {
+    margin-top: 12px;
+}
+
+/* ---------------------------------------------------------------- 按钮 */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: var(--tap);
+    min-width: var(--tap);
+    padding: 0 16px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg-elev-2);
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.06s ease;
+}
+
+.btn:active {
+    transform: scale(0.985);
+}
+
+.btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.btn-primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-ink);
+    font-weight: 600;
+}
+
+.btn-primary:disabled {
+    background: var(--line);
+    border-color: var(--line);
+    color: var(--text-faint);
+}
+
+.btn-ghost {
+    background: transparent;
+    border-color: var(--line);
+    color: var(--text-dim);
+}
+
+.btn-small {
+    min-height: 40px;
+    min-width: 40px;
+    padding: 0 12px;
+    font-size: 13.5px;
+    border-radius: 8px;
+}
+
+.btn-block {
+    flex: 1 1 auto;
+    width: 100%;
+}
+
+.btn.is-selected {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.chip-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 4px 10px 4px 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.chip .mini-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+}
+
+/* ---------------------------------------------------------------- 输入 */
+
+.search-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.field-label {
+    font-size: 12.5px;
+    color: var(--text-dim);
+}
+
+.input {
+    width: 100%;
+    min-height: var(--tap);
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg-sunk);
+    color: var(--text);
+    font-size: 16px;
+}
+
+.input::placeholder {
+    color: var(--text-faint);
+}
+
+.row-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 15px;
+}
+
+.input-count {
+    width: 6.5em;
+    text-align: center;
+}
+
+/* 开关（「当作原始材料」） */
+.toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+
+.toggle input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--primary);
+}
+
+/* ---------------------------------------------------------------- 物品图标 */
+
+.icon {
+    flex: none;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 6px;
+    background: var(--bg-sunk);
+}
+
+.icon img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    image-rendering: pixelated;
+}
+
+.icon-lg {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+}
+
+.icon-40 {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+}
+
+.icon-22 {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+}
+
+.icon-ph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    color: #fff;
+    font-weight: 600;
+    font-size: 13px;
+    line-height: 1;
+}
+
+.icon-lg .icon-ph {
+    font-size: 20px;
+}
+
+.icon-22 .icon-ph {
+    font-size: 11px;
+}
+
+/* ---------------------------------------------------------------- 搜索结果 */
+
+.list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.result {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--card-radius);
+    background: var(--bg-elev);
+    box-shadow: var(--shadow);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.result:active {
+    background: var(--bg-elev-2);
+}
+
+.result-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.result-name {
+    display: block;
+    font-size: 15px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.result-sub {
+    display: block;
+    font-size: 12px;
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.result-badges {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--line);
+    color: var(--text-dim);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.badge-ok {
+    color: var(--ok);
+    border-color: rgba(91, 212, 138, 0.35);
+    background: rgba(91, 212, 138, 0.12);
+}
+
+.badge-warn {
+    color: var(--warn);
+    border-color: rgba(245, 182, 66, 0.35);
+    background: rgba(245, 182, 66, 0.12);
+}
+
+.badge-danger {
+    color: var(--danger);
+    border-color: rgba(255, 107, 107, 0.35);
+    background: rgba(255, 107, 107, 0.12);
+}
+
+/* ---------------------------------------------------------------- 物品页 */
+
+.item-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 18px;
+}
+
+.item-name {
+    font-size: 18px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.item-sub {
+    font-size: 12.5px;
+    color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- 配方卡片 */
+
+.recipe {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.recipe.is-selected {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 1px var(--primary-soft), var(--shadow);
+}
+
+.recipe-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.recipe-machine {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.recipe-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    /* 网格是「材料和产出画在同一张坐标里」，所以宽度就是配方的真实宽度。
+       GT 的装配线之类可能有十几列，手机上放不下：允许横向滑动，别撑破页面。 */
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+}
+
+.recipe-side {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+}
+
+/* 产出一行字：网格里绿色数字是产出，这里再用文字说一遍 */
+.out-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 2px;
+}
+
+.out-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+    color: var(--text);
+}
+
+.recipe-arrow {
+    flex: none;
+    color: var(--text-faint);
+    font-size: 18px;
+}
+
+.slot-label {
+    font-size: 11.5px;
+    color: var(--text-faint);
+}
+
+.extras {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 2px;
+}
+
+.extras-label {
+    font-size: 12px;
+    color: var(--warn);
+}
+
+.extra-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 30px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- 槽位网格 */
+
+.grid {
+    display: grid;
+    gap: var(--slot-gap);
+}
+
+.slot {
+    position: relative;
+    width: var(--slot-size);
+    height: var(--slot-size);
+    border-radius: 6px;
+    background: var(--bg-sunk);
+    border: 1px solid var(--line-soft);
+    overflow: hidden;
+}
+
+/* 产出槽：和材料画在同一张网格里，用一圈主色描边区分开 */
+.slot.is-output {
+    border-color: rgba(62, 166, 255, 0.55);
+    box-shadow: inset 0 0 0 1px rgba(62, 166, 255, 0.18);
+}
+
+/* 点得动的槽位（配方里的每个材料）：悬停给个反馈，手机上有按下反馈 */
+.slot.is-clickable {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.slot.is-clickable:hover,
+.slot.is-clickable:focus-visible {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 1px var(--primary);
+}
+
+.slot.is-clickable:focus-visible {
+    outline: none;
+}
+
+.slot.is-clickable:active {
+    transform: scale(0.94);
+}
+
+/* 「这个材料手动指定过配方」的勾，占左上角（右下角留给数量） */
+.slot-chosen {
+    position: absolute;
+    z-index: 3;
+    left: 0;
+    top: 0;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 1px;
+    border-bottom-right-radius: 5px;
+    background: var(--primary);
+    color: var(--primary-ink);
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 13px;
+    text-align: center;
+    pointer-events: none;
+}
+
+.slot > .icon {
+    position: absolute;
+    inset: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.slot > .icon img:not(.is-missing) {
+    padding: 2px;
+}
+
+.slot-count,
+.slot-chance {
+    position: absolute;
+    z-index: 2;
+    padding: 0 3px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 14px;
+    pointer-events: none;
+}
+
+.slot-count {
+    right: 1px;
+    bottom: 1px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+}
+
+.slot-count.is-ok {
+    color: var(--ok);
+}
+
+.slot-count.is-dim {
+    color: var(--text-faint);
+}
+
+.slot-chance {
+    left: 1px;
+    top: 1px;
+    background: rgba(0, 0, 0, 0.72);
+    color: var(--warn);
+}
+
+/* ---------------------------------------------------------------- 材料行 */
+
+.material {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--card-radius);
+    background: var(--bg-elev);
+    box-shadow: var(--shadow);
+}
+
+.material-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.material-info {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.material-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font-size: 15px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.material-name:not(.is-link) {
+    cursor: default;
+}
+
+.material-name.is-link {
+    color: var(--primary);
+}
+
+/* 「指定了配方却又勾成原始材料」这种自相矛盾的状态，得说出来而不是干瞪眼 */
+.material-note {
+    margin: 2px 0 4px;
+    padding: 6px 8px;
+    border-left: 3px solid var(--warn);
+    border-radius: 0 6px 6px 0;
+    background: rgba(245, 182, 66, 0.12);
+    color: var(--warn);
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+/* 「为什么按原材料算」：一行小字，比什么都不说强 */
+.material-why {
+    margin-top: 2px;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.material-stat {
+    font-size: 12.5px;    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+.material-stat .need {
+    color: var(--text);
+}
+
+.material-stat .have {
+    color: var(--ok);
+}
+
+.material-stat .lack {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.material-stat .enough {
+    color: var(--ok);
+}
+
+.material-toggle {
+    padding-left: 50px;
+}
+
+/* ---------------------------------------------------------------- 计划页 */
+
+.summary {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+}
+
+.target {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.steps {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.step {
+    background: var(--bg-elev);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--card-radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.step-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: var(--tap);
+    padding: 10px 12px;
+    border: 0;
+    background: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.step-head:active {
+    background: var(--bg-elev-2);
+}
+
+.step-no {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.step-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* 步骤标题里的电压/耗时（折叠状态也看得见） */
+.step-power {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--bg-sunk);
+    color: var(--warn);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* 耗电 / 耗时：GT 配方才有。排产要看这几项，材料表说不清 */
+.recipe-power {
+    margin: 2px 0 6px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: var(--bg-sunk);
+    color: var(--warn);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 「也可以用：A / B / C」——矿物词典那种任意一种都行 */
+.alts-note {
+    flex-basis: 100%;
+    color: var(--text-faint);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* ---------------------------------------------------- 「一起做」计划清单 */
+
+.basket-add {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+}
+
+.basket-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.basket-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--card-radius);
+    background: var(--bg-elev);
+}
+
+/* 当前正在看的这一件：和清单里其它的区分开 */
+.basket-row.is-current {
+    border-color: rgba(62, 166, 255, 0.5);
+}
+
+.basket-info {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.basket-name {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.input-count.is-small {
+    width: 92px;
+    flex: none;
+}
+
+/* ---------------------------------------------------- 立刻出现的悬停提示 */
+
+/* 原生 title 有一秒延迟，这里自己画一个：鼠标一进就出现，位置跟着指针 */
+.tip {
+    position: fixed;
+    z-index: 60;
+    max-width: 280px;
+    padding: 6px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(20, 22, 26, 0.97);
+    color: var(--text);
+    font-size: 12.5px;
+    line-height: 1.5;
+    /* 提示里用换行分段（名称 / 数量 / 点一下干嘛） */
+    white-space: pre-line;
+    pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------------------------------------------------- 物品信息条（点格子弹出来） */
+
+/* 手机上没有 hover：点一下格子，这里就地说明「这是什么」。
+   固定贴底、不遮罩、点别处就收起来 —— 不打断正在看的配方。 */
+.item-info {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    max-width: var(--shell-max);
+    margin: 0 auto;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line);
+    background: var(--bg-elev);
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.item-info-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.item-info-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.item-info-name {
+    font-size: 15px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.item-info-count {
+    color: var(--text-dim);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+.item-info-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+/* ---------------------------------------------------- 同类型配方合并 */
+
+/* 一个处理器/机器一张卡片，卡内用左右箭头翻 —— 一个物品可能有几十条同类型的配方 */
+.recipe-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.recipe-nav-btn {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg-elev-2);
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.recipe-nav-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.recipe-nav-btn:not(:disabled):active {
+    background: var(--bg-sunk);
+}
+
+.recipe-nav-count {
+    flex: none;
+    min-width: 54px;
+    color: var(--text-dim);
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.group-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.group-icon {
+    flex: none;
+    display: inline-flex;
+}
+
+.group-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.group-total {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    color: var(--text-dim);
+    font-size: 11.5px;
+}
+
+/* 步骤里那张「照着想摆」的合成表 */
+.step-grid {
+    margin: 8px 0 4px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+
+/* 「现在可以做」里的合成表：槽位小一号，一屏能放下好几步 */
+.step-grid.is-compact {
+    --slot-size: 30px;
+    --slot-gap: 2px;
+    margin: 6px 0 2px;
+}
+
+/* ---------------------------------------------------- 施工进度 / 可并行步骤 */
+
+.done-box {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+/* 做完的步骤压暗并划掉产物名，扫一眼就知道还剩哪些 */
+.step.is-done {
+    opacity: 0.55;
+}
+
+.step.is-done .step-out {
+    color: var(--text-dim);
+    text-decoration: line-through;
+}
+
+.ready-list,
+.chosen-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ready-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--card-radius);
+    background: var(--bg-elev);
+    box-shadow: var(--shadow);
+}
+
+/* 开得动的这一步：左边一道主色竖条，一眼区分「现在能做的」 */
+.ready-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--primary);
+}
+
+.ready-item {
+    position: relative;
+}
+
+.ready-info {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ready-name {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 14.5px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 「还没指定配方」：一行一个，整行可点 */
+.unchosen-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: var(--tap);
+    padding: 8px 10px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--card-radius);
+    background: var(--bg-elev);
+    color: var(--text);
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.unchosen-item:hover,
+.unchosen-item:focus-visible {
+    border-color: var(--primary);
+    outline: none;
+}
+
+.unchosen-item:active {
+    background: var(--bg-elev-2);
+}
+
+/* 这一条已经做完了：压暗但仍留在原位，免得列表一边勾一边跳 */
+.unchosen-item.is-done {
+    opacity: 0.5;
+}
+
+.unchosen-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.unchosen-go {
+    flex: none;
+    color: var(--primary);
+    font-size: 12.5px;
+}
+
+.step-machine-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.step-machine {
+    display: block;
+    min-width: 0;
+    font-size: 14.5px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.step-line {
+    display: block;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    /* 带上「×25600（400×64）」之后一行放不下：宁可折行，也别把数字截成「×25600（…」——
+       那正好是玩家要看的那个数 */
+    white-space: normal;
+}
+
+.step-out {
+    color: var(--ok);
+}
+
+.caret {
+    flex: none;
+    color: var(--text-faint);
+    transition: transform 0.15s ease;
+}
+
+.step.is-open .caret {
+    transform: rotate(90deg);
+}
+
+.step-body {
+    padding: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-top: 1px solid var(--line-soft);
+    padding-top: 10px;
+}
+
+.mat-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.mat-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+.mat-line .name {
+    color: var(--text);
+}
+
+.mat-line .lack {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.mat-line .enough {
+    color: var(--ok);
+}
+
+.step-note {
+    font-size: 12.5px;
+    color: var(--warn);
+}
+
+/* ------------------------------------------------- 物品图标按钮（可点/可悬停） */
+
+/* 列表左侧那个物品图标：点一下能进「选择配方」，悬停有反馈，
+   手动指定过配方时右下角有个勾。
+   注意 overflow 不能开在 .icon 上（勾会被裁掉），所以勾挂在外面这层。 */
+.icon-btn {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+    border-radius: 8px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.08s ease;
+}
+
+.icon-btn:hover .icon,
+.icon-btn:focus-visible .icon {
+    box-shadow: 0 0 0 2px var(--primary);
+}
+
+.icon-btn:focus-visible {
+    outline: none;
+}
+
+.icon-btn:active {
+    transform: scale(0.93);
+}
+
+.icon-btn.is-chosen::after {
+    content: '✓';
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 2px;
+    border-radius: 8px;
+    background: var(--primary);
+    color: var(--primary-ink);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
+}
+
+.tag-chosen {
+    flex: none;
+    align-self: center;
+    padding: 1px 6px;
+    border: 1px solid rgba(62, 166, 255, 0.45);
+    border-radius: 999px;
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-size: 11px;
+    line-height: 16px;
+    white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- 提示横幅 */
+
+.banner {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text);
+}
+
+.banner-warn {
+    border: 1px solid rgba(255, 176, 32, 0.38);
+    background: rgba(255, 176, 32, 0.1);
+}
+
+.banner-warn strong {
+    color: #ffb020;
+    font-size: 13.5px;
+}
+
+/* ---------------------------------------------------------------- 底部操作栏 */
+
+.footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 25;
+    background: rgba(20, 22, 26, 0.96);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-top: 1px solid var(--line-soft);
+    padding-bottom: var(--safe-bottom);
+}
+
+.footer-inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: var(--shell-max);
+    margin: 0 auto;
+    padding: 10px 14px;
+    padding-left: calc(14px + var(--safe-left));
+    padding-right: calc(14px + var(--safe-right));
+}
+
+/* ---------------------------------------------------------------- 弹层 */
+
+.overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 0;
+}
+
+.modal {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: var(--shell-max);
+    max-height: 86vh;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    box-shadow: var(--shadow-lift);
+    padding-bottom: var(--safe-bottom);
+    animation: sheet-up 0.18s ease-out;
+}
+
+@keyframes sheet-up {
+    from {
+        transform: translateY(14px);
+        opacity: 0.4;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line-soft);
+}
+
+.modal-title {
+    font-size: 16px;
+    font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modal-body {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 14px calc(20px + var(--safe-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ---------------------------------------------------------------- 提示条 */
+
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(88px + var(--safe-bottom));
+    z-index: 80;
+    transform: translateX(-50%);
+    max-width: min(92vw, var(--shell-max));
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg-elev-2);
+    color: var(--text);
+    font-size: 13.5px;
+    text-align: center;
+    box-shadow: var(--shadow-lift);
+    animation: toast-in 0.18s ease-out;
+}
+
+.toast.is-error {
+    border-color: rgba(255, 107, 107, 0.5);
+    color: #ffd7d7;
+}
+
+.toast.is-ok {
+    border-color: rgba(91, 212, 138, 0.5);
+    color: #d6ffe6;
+}
+
+@keyframes toast-in {
+    from {
+        transform: translate(-50%, 8px);
+        opacity: 0;
+    }
+    to {
+        transform: translate(-50%, 0);
+        opacity: 1;
+    }
+}
+
+/* ---------------------------------------------------------------- 动画偏好 */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms;
+        animation-iteration-count: 1;
+        transition-duration: 0.01ms;
+    }
+}
+
+/* ---------------------------------------------------------------- 小屏微调 */
+
+@media (max-width: 379px) {
+    :root {
+        --slot-size: 30px;
+        --slot-gap: 2px;
+    }
+
+    .slot-count,
+    .slot-chance {
+        font-size: 9.5px;
+        line-height: 12px;
+    }
+}
+
+/* ---------------------------------------------------------------- 桌面微调 */
+
+@media (min-width: 600px) {
+    :root {
+        --slot-size: 40px;
+        --slot-gap: 4px;
+    }
+
+    .view {
+        padding: 20px;
+        padding-bottom: calc(120px + var(--safe-bottom));
+    }
+
+    .overlay {
+        align-items: center;
+        padding: 20px;
+    }
+
+    .modal {
+        border-radius: 16px;
+        max-height: 80vh;
+    }
+}
+
+/* ---------------------------------------------------------------- 兜底 */
+
+/*
+ * hidden 属性必须能压过组件自己的 display。
+ *
+ * [hidden] 是属性选择器、.overlay 是类选择器，特异性都是 (0,1,0) —— 谁写在后面谁赢。
+ * 而定位类组件（弹层、底栏、按钮）几乎都自带 display: flex/inline-flex，
+ * 一旦盖过 [hidden]，默认隐藏的弹层就会一直显示、还盖住整页；
+ * 更糟的是 closeModal() 开头判的是 overlay.hidden 这个「属性」，属性确实设着，
+ * 于是点「关闭」直接 return —— 表现就是弹层关不掉、整页点不动。
+ * 这是本文件里唯一必须用 !important 的地方。
+ */
+[hidden] {
+    display: none !important;
+}

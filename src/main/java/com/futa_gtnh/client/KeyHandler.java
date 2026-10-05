@@ -37,11 +37,13 @@ public final class KeyHandler {
     public static final String KEY_DUNGEON_MAP = "key.futa_gtnh.dungeon_map";
     public static final String KEY_DUNGEON_MINIMAP = "key.futa_gtnh.dungeon_minimap";
     public static final String KEY_RTS_TOGGLE = "key.futa_gtnh.rts_toggle";
+    public static final String KEY_WEB_RECIPE = "key.futa_gtnh.web_recipe";
 
     private static KeyBinding openTerminal;
     private static KeyBinding dungeonMap;
     private static KeyBinding dungeonMiniMap;
     private static KeyBinding rtsToggle;
+    private static KeyBinding webRecipe;
 
     public static void register() {
         openTerminal = new KeyBinding(KEY_OPEN_TERMINAL, Keyboard.KEY_B, KEY_CATEGORY);
@@ -52,6 +54,9 @@ public final class KeyHandler {
         ClientRegistry.registerKeyBinding(dungeonMiniMap);
         rtsToggle = new KeyBinding(KEY_RTS_TOGGLE, Keyboard.KEY_G, KEY_CATEGORY);
         ClientRegistry.registerKeyBinding(rtsToggle);
+        // P = 手机网页版合成向导：把访问地址打到聊天栏（服务本身是自动开的）
+        webRecipe = new KeyBinding(KEY_WEB_RECIPE, Keyboard.KEY_P, KEY_CATEGORY);
+        ClientRegistry.registerKeyBinding(webRecipe);
         FMLCommonHandler.instance()
             .bus()
             .register(new Listener());
@@ -94,6 +99,11 @@ public final class KeyHandler {
             // 俯瞰 HUD 开着时 G 键由 HUD 自己处理（keyTyped），这里只管「没开界面」的进入
             if (rtsToggle != null && rtsToggle.isPressed()) {
                 com.futa_gtnh.rts.client.RtsClientState.enter();
+            }
+
+            // 手机网页版合成向导：把访问地址贴出来（服务在启动时就已经开着了）
+            if (webRecipe != null && webRecipe.isPressed()) {
+                com.futa_gtnh.web.WebRecipeService.announce();
             }
         }
     }
