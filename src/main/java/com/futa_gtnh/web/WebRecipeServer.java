@@ -513,6 +513,9 @@ public final class WebRecipeServer {
                 .v(material.need)
                 .k("have")
                 .v(material.have)
+                // 流体的量是 mB，前端要按 mB 显示（写「64 个」会让人以为要 64 桶）
+                .k("fluid")
+                .v(WebStore.isFluidItem(material.itemId))
                 .k("missing")
                 .v(material.missing)
                 .k("craftable")
@@ -603,6 +606,8 @@ public final class WebRecipeServer {
                 .v(ingredient.need)
                 .k("have")
                 .v(ingredient.have)
+                .k("fluid")
+                .v(WebStore.isFluidItem(ingredient.itemId))
                 .k("missing")
                 .v(ingredient.missing)
                 .k("alternatives")
@@ -698,7 +703,11 @@ public final class WebRecipeServer {
             .k("altTotal")
             .v(slot.altTotal)
             .k("primary");
-        writeItemRef(json, slot.alts.length > 0 ? slot.alts[0] : -1, true);
+        int slotPrimary = slot.alts.length > 0 ? slot.alts[0] : -1;
+        writeItemRef(json, slotPrimary, true);
+        // 格子也要带「这是流体」标记：右下角那个数字是 mB，不加 L 会被当成个数
+        json.k("fluid")
+            .v(WebStore.isFluidItem(slotPrimary));
         json.k("alts")
             .arr();
         int shown = Math.min(slot.alts.length, WebRecipeIndex.MAX_ALT_DISPLAY);

@@ -298,6 +298,77 @@ public final class WebStore {
     }
 
     /**
+     * 这个物品是不是「流体显示物品」（配方里的流体）。
+     *
+     * <p>
+     * 判据是它带着一个 FluidStack 的 NBT —— 界面据此把数量写成 mB 而不是「个」。
+     * 一个方块的流体需求写成「64 个」，玩家会去准备 64 个单元。
+     */
+    /** GTNH 流体显示物品里的流体内部名（没有就返回 null）。 */
+    private static String fluidMaterialName(ItemStack stack) {
+        if (stack == null || !stack.hasTagCompound()) return null;
+        try {
+            net.minecraft.nbt.NBTTagCompound tag = stack.getTagCompound();
+            if (!tag.hasKey("mFluidMaterialName")) return null;
+            String name = tag.getString("mFluidMaterialName");
+            return name == null || name.isEmpty() ? null : name;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** GTNH 流体显示物品上写的用量（mB）；没有就返回 0。 */
+    public static long fluidDisplayAmount(ItemStack stack) {
+        if (stack == null || !stack.hasTagCompound()) return 0L;
+        try {
+            net.minecraft.nbt.NBTTagCompound tag = stack.getTagCompound();
+            if (!tag.hasKey("mFluidDisplayAmount")) return 0L;
+            long amount = tag.getLong("mFluidDisplayAmount");
+            return amount > 0 ? amount : 0L;
+        } catch (Throwable t) {
+            return 0L;
+        }
+    }
+
+    public static boolean isFluidItem(int id) {
+        if (id < 0) return false;
+        ItemStack stack = stackOf(id);
+        if (stack == null || stack.getItem() == null) return false;
+
+        // 判据一（最可靠）：GTNH 的流体显示物品把自己的键写在 NBT 上。
+        // 实测形如 {mFluidMaterialName:"BorosilicateGlass", mFluidDisplayAmount:144L, ...} ——
+        // Forge 那套标准解析认不出这些键，所以必须先看这里。
+        if (fluidMaterialName(stack) != null || fluidDisplayAmount(stack) > 0) return true;
+
+        // 判据二：标准的 FluidStack 的 NBT（GT 的流体单元是这种）
+        try {
+            if (stack.hasTagCompound()) {
+                net.minecraftforge.fluids.FluidStack fluid = net.minecraftforge.fluids.FluidStack
+                    .loadFluidStackFromNBT(stack.getTagCompound());
+                if (fluid != null && fluid.amount > 0) return true;
+            }
+        } catch (Throwable t) {
+            // 落到判据三
+        }
+
+        // 判据二：名字能对上仓库里的某种流体（NEI 那套显示物品走的是这条）。
+        // 两条都要有：只认 NBT 的话，NBT 结构不同的伪物品会被漏掉，
+        // 而漏掉的后果就是「流体的量按个数显示」。
+        String name = normName(displayName(stack));
+        if (name.isEmpty() || fluidStock.isEmpty()) return false;
+        Long exact = fluidStock.get(name);
+        if (exact != null) return true;
+        for (String fluidName : fluidStock.keySet()) {
+            if (fluidName.isEmpty() || !name.startsWith(fluidName)) continue;
+            String tail = name.substring(fluidName.length())
+                .trim();
+            if (AMOUNT_TAIL.matcher(tail)
+                .matches()) return true;
+        }
+        return false;
+    }
+
+    /**
      * 库存数据到底能不能用。
      *
      * <p>
@@ -322,20 +393,61 @@ public final class WebStore {
     }
 
     /** 库存里有多少这个物品（共享背包 + 玩家背包）。 */
-    public static long stockOf(int id) {
-        ItemStack stack = stackOf(id);
-        if (stack == null) return 0L;
-        Long value = stock.get(stockKey(stack));
-        if (value != null) return value.longValue();
+    /**
+     * 流体的库存（显示名 -> 有多少 mB）。
+     *
+     * <p>
+     * 流体在配方里是以「伪物品」出现的（GT 给每种流体造一个显示用 ItemStack），
+     * 而共享存储里的流体存在<b>流体页</b>、身份是<b>流体本身</b>。两边本来就是两套身份，
+     * 所以流体的需求以前<b>永远匹配不上库存</b> —— 页面上就会说「还缺」，
+     * 哪怕仓库里明明有一整罐。这里按<b>显示名</b>把两边对上：
+     * ofFluid 造的显示物品和配方里的伪物品走的是同一套机制，名字天然一致。
+     */
+    /**
+     * 前缀匹配时允许的尾巴：空，或者纯数量/单位（如 "(144l)"、"x144"、" 144 升"）。
+     *
+     * <p>
+     * 不允许出现单词 —— 「Molten Borosilicate Glass Cell」是个真物品（单元），
+     * 它同样以流体名开头，放行的话它的库存会显示成流体的 mB 数。
+     */
+    private static final java.util.regex.Pattern AMOUNT_TAIL = java.util.regex.Pattern.compile(
+        "^[\\s(（\\[【:：x×*\\-–—]*[\\d,.]*\\s*(l|ml|mb|b|升|liters?|litres?)?[\\s)）\\]】]*$",
+        java.util.regex.Pattern.CASE_INSENSITIVE);
 
-        // ★ 通配兜底。
-        //
-        // 共享存储里存的原型栈经常是「通配 damage」（32767，矿物词典那种：任意 meta 都算）。
-        // 而网页目录里的物品带的是真实 meta —— 两边键不相等，于是仓库里明明有，
-        // 页面却报「还缺」。同一个物品 id 下，通配库存本来就该覆盖任意 meta，所以查不到
-        // 精确键时再看一眼通配键。
-        Long wildcard = stock.get(wildcardKey(stack));
-        return wildcard == null ? 0L : wildcard.longValue();
+    /** 归一化：小写 + 去首尾空白（两边名字的写法差异只有这些）。 */
+    private static final Map<String, Long> fluidStock = new HashMap<>();
+
+    /** 最近的流体匹配失败（限流打印，便于照着实测字符串改规则）。 */
+    private static final java.util.Set<String> fluidMissLogged = new java.util.HashSet<>();
+
+    private static void logFluidMiss(String name) {
+        if (name == null || name.isEmpty()) return;
+        synchronized (fluidMissLogged) {
+            if (fluidMissLogged.size() >= 40 || !fluidMissLogged.add(name)) return;
+        }
+        StringBuilder keys = new StringBuilder();
+        int n = 0;
+        for (String k : fluidStock.keySet()) {
+            if (n++ >= 6) break;
+            keys.append('「')
+                .append(k)
+                .append('」');
+        }
+        FutaGtnhMod.LOG.info("网页配方：这个物品名没匹配上任何流体 —— 「{}」；现有流体键：{}", name, keys.toString());
+    }
+
+    /** 物品名/流体名的归一化（大小写与首尾空白不影响匹配）。 */
+    private static String normName(String name) {
+        return name == null ? ""
+            : name.trim()
+                .toLowerCase(java.util.Locale.ROOT);
+    }
+
+    public static long stockOf(int id) {
+        // ★ 必须走下面那个重载，不要在这里再写一份查找。
+        // 流体的匹配（配方里的伪物品 -> 仓库里的流体）加在那边；这里原来有一份内联实现，
+        // 结果「加了流体匹配却永远不生效」——接口查库存走的正是这个方法。
+        return stockOf(stackOf(id));
     }
 
     /** 同一个物品 id 的「通配 meta」键（原版 32767 = 任意 meta 都匹配）。 */
@@ -346,8 +458,42 @@ public final class WebStore {
     /** 库存里有多少这个物品（按栈本身查，配方里的任意候选都能问）。 */
     public static long stockOf(ItemStack stack) {
         if (stack == null || stack.getItem() == null) return 0L;
+
         Long value = stock.get(stockKey(stack));
-        return value == null ? 0L : value;
+        if (value != null) return value.longValue();
+
+        // 流体：配方里的「熔融聚乙烯」这类伪物品在物品库存里永远查不到，
+        // 得按名字去流体库存里找（详见 fluidStock 的说明）。
+        //
+        // 先精确、再前缀：NEI 那个流体显示物品的显示名常常带用量后缀
+        // （实测有「Molten Borosilicate Glass (144L)」这种），精确比就永远对不上；
+        // 而「某个物品名以某个流体名开头」在 GTNH 里基本就是「这是那个流体的显示物品」。
+        if (!fluidStock.isEmpty()) {
+            String name = normName(displayName(stack));
+            Long fluid = fluidStock.get(name);
+            if (fluid != null) return fluid.longValue();
+
+            for (Map.Entry<String, Long> fe : fluidStock.entrySet()) {
+                String fluidName = fe.getKey();
+                if (fluidName.isEmpty() || !name.startsWith(fluidName)) continue;
+
+                // 前缀后面只允许「单位/数量」，出现单词就不算 —— 否则
+                // 「Molten Borosilicate Glass Cell」（单元，一个<b>真物品</b>）
+                // 会因为以流体名开头而被当成那个流体，库存显示成流体的 mB 数。
+                String tail = name.substring(fluidName.length())
+                    .trim();
+                if (AMOUNT_TAIL.matcher(tail)
+                    .matches()) {
+                    return fe.getValue()
+                        .longValue();
+                }
+            }
+
+            // 还是没对上：把这个名字记一次（限流），下一次就能照着实测的字符串改匹配规则，
+            // 而不是继续猜
+            logFluidMiss(name);
+        }
+        return 0L;
     }
 
     // ==================================================================
@@ -390,6 +536,23 @@ public final class WebStore {
             FutaGtnhMod.LOG.warn("网页配方：读取玩家背包快照失败（本次按空处理）", t);
         }
 
+        // 流体单独一张表：它们和物品是两套身份，混在一张表里只会互相干扰
+        Map<String, Long> fluids = new HashMap<>(1024);
+        try {
+            if (ClientStorageCache.isReady()) {
+                for (StorageViewEntry entry : ClientStorageCache.fluids()) {
+                    String name = normName(entry.getDisplayName());
+                    if (name.isEmpty()) continue;
+                    Long old = fluids.get(name);
+                    fluids.put(name, Long.valueOf((old == null ? 0L : old.longValue()) + entry.getAmount()));
+                }
+            }
+        } catch (Throwable t) {
+            FutaGtnhMod.LOG.warn("网页配方：读取共享背包的流体快照失败（本次按空处理）", t);
+        }
+        fluidStock.clear();
+        fluidStock.putAll(fluids);
+
         stock = map;
 
         // 诊断：快照里有、但按现在的键查不回来的条目数。
@@ -414,7 +577,25 @@ public final class WebStore {
                 String identity = keyOf(new ItemStack(raw, 1, damage));
                 if (idOfKey(identity) < 0) misses++;
             }
-            FutaGtnhMod.LOG.info("网页配方：库存快照 {} 条（其中通配 meta {} 条），查不回来的 {} 条", map.size(), wildcards, misses);
+            // 诊断要把流体的名字也打出来：两边是按显示名匹配的，名字对不上时
+            // 光看「收到几种」什么都说明不了（这个坑已经踩过一次）。
+            StringBuilder sample = new StringBuilder();
+            int shown = 0;
+            for (Map.Entry<String, Long> fe : fluids.entrySet()) {
+                if (shown++ >= 3) break;
+                sample.append('「')
+                    .append(fe.getKey())
+                    .append('」')
+                    .append(fe.getValue())
+                    .append(' ');
+            }
+            FutaGtnhMod.LOG.info(
+                "网页配方：库存快照 {} 条（其中通配 meta {} 条，查不回来的 {} 条）+ 流体 {} 种 {}",
+                Integer.valueOf(map.size()),
+                Integer.valueOf(wildcards),
+                Integer.valueOf(misses),
+                Integer.valueOf(fluids.size()),
+                sample.toString());
         } catch (Throwable ignored) {
             // 只是日志
         }

@@ -24,7 +24,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
                 .indexOf('这台客户端上没有这个物品') >= 0;
             const hasSkipField = !!(plan && Object.prototype.hasOwnProperty.call(plan, 'skippedTargets'));
 
-            last = 'handlers=' + s.handlers + ' 新JS=' + hasNewJs + ' 新Java(skippedTargets)=' + hasSkipField;
+            last = 'handlers=' + s.handlers + ' 新JS=' + hasNewJs + ' 新Java=' + hasSkipField;
+    // 顺便看一眼服务端那条库存诊断（流体名对不上是最可能的原因）
+    let logLine = '';
+    try {
+        const log = require('fs').readFileSync('run/client/logs/fml-client-latest.log', 'utf8');
+        const lines = log.split(/\r?\n/).filter((l) => l.indexOf('库存快照') >= 0);
+        logLine = lines.length ? lines[lines.length - 1].split('] ').pop() : '';
+    } catch (e) {
+        logLine = '（读不到日志：' + String(e.message).slice(0, 30) + '）';
+    }
+    last += '  ' + logLine;
             if (hasNewJs && hasSkipField) {
                 console.log('✓ 服务端已是新代码：' + last);
                 process.exit(0);

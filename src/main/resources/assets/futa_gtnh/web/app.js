@@ -1441,6 +1441,8 @@
         // 这一步要做 times 次，所以这一格真正要备/要收的是 per × times。
         // 只写 NEI 那种「每次用量」会让玩家少备几十上百倍。
         var count = per * times;
+        // 流体格子的数字也是 mB（判据同后端：这个物品带流体 NBT）
+        var slotFluid = !!(slot && slot.fluid);
         var altCount = slot && slot.alts ? slot.alts.length : 0;
 
         var tip = label;
@@ -1474,7 +1476,8 @@
             } else if (kind === 'input' && item && num(item.stock, 0) <= 0) {
                 countCls += ' is-dim';
             }
-            cell.appendChild(el('span', countCls, compactCount(count)));
+            // 流体格子上的数字也是 mB：写「64」会被当成 64 个单元
+            cell.appendChild(el('span', countCls, compactCount(count) + (slotFluid ? 'L' : '')));
         }
 
         // 这个材料手动指定过配方：左上角一个小勾（右下角是数量，两个角各干各的）
@@ -2979,14 +2982,25 @@
         renderPlanBody(state.plan.plan);
     }
 
-    function materialStatText(need, have, missing) {
+    /**
+     * 数量文本：流体带上单位。
+     *
+     * <p>
+     * 流体的需求量单位是 **mB**（GTNH 里显示成 L），写成「64 个」会让人以为要 64 个单元。
+     * 后端在材料行上带了 fluid 标记（判据是那个伪物品有没有流体 NBT），这里照着加单位。
+     */
+    function amountText(value, isFluid) {
+        return countText(value) + (isFluid ? ' L' : '');
+    }
+
+    function materialStatText(need, have, missing, isFluid) {
         var wrap = el('div', 'material-stat');
-        wrap.appendChild(el('span', 'need', '需要 ' + countText(need)));
+        wrap.appendChild(el('span', 'need', '需要 ' + amountText(need, isFluid)));
         wrap.appendChild(document.createTextNode(' / '));
-        wrap.appendChild(el('span', 'have', '已有 ' + countText(have)));
+        wrap.appendChild(el('span', 'have', '已有 ' + amountText(have, isFluid)));
         wrap.appendChild(document.createTextNode(' / '));
         if (num(missing, 0) > 0) {
-            wrap.appendChild(el('span', 'lack', '还缺 ' + countText(missing)));
+            wrap.appendChild(el('span', 'lack', '还缺 ' + amountText(missing, isFluid)));
         } else {
             wrap.appendChild(el('span', 'enough', '已足够'));
         }
@@ -3048,8 +3062,12 @@
             });
             info.appendChild(back);
         }
-        info.appendChild(materialStatText(material ? material.need : 0, material ? material.have : 0,
-            material ? material.missing : 0));
+        info.appendChild(
+            materialStatText(
+                material ? material.need : 0,
+                material ? material.have : 0,
+                material ? material.missing : 0,
+                material ? !!material.fluid : false));
         // 每一行都写清楚「为什么它在这里」。没配方的那种是正常情况，不用强调；
         // 其余几种都是「本来可以做」的，得说明白，否则玩家只会觉得规划算错了
         var why = String((material && material.reason) || 'other');
@@ -3239,9 +3257,12 @@
         var need = num(entry ? entry.need : 0, 0);
         per = num(entry ? entry.perCraft : 0, 0);
         need = num(entry ? entry.need : 0, 0);
-        line.appendChild(el('span', null, '每个配方 ×' + per + '，共需 ' + countText(need)));
+        // 流体按 mB 显示（后端标了 fluid）：写成「共需 64」会让人以为要 64 个单元
+        var isFluid = !!(entry && entry.fluid);
+        line.appendChild(
+            el('span', null, '每个配方 ×' + amountText(per, isFluid) + '，共需 ' + amountText(need, isFluid)));
         if (num(entry ? entry.missing : 0, 0) > 0) {
-            line.appendChild(el('span', 'lack', '还缺 ' + countText(entry.missing)));
+            line.appendChild(el('span', 'lack', '还缺 ' + amountText(entry.missing, isFluid)));
         } else {
             line.appendChild(el('span', 'enough', '已足够'));
         }
