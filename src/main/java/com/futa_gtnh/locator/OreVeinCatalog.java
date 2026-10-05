@@ -125,6 +125,23 @@ public final class OreVeinCatalog {
             }
             return range;
         }
+
+        /**
+         * 主材料的本地化名（例如「铁」）。
+         *
+         * <p>
+         * 给 {@link VeinDatabaseLookup} 用的：VP 返回的矿脉名是 GT 拼出来的本地化名
+         * （「铁矿脉」），两边字段不同，只能靠「名字里含不含主材料」这种宽松比较兜底。
+         *
+         * @return 拿不到时返回空串
+         */
+        String getPrimaryMaterialName() {
+            try {
+                return layer.mPrimary == null ? "" : String.valueOf(layer.mPrimary.getLocalizedName());
+            } catch (Throwable t) {
+                return "";
+            }
+        }
     }
 
     private static List<Entry> entries;

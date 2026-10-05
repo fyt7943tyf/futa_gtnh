@@ -1,6 +1,8 @@
 package com.futa_gtnh.locator;
 
+import java.util.HashSet;
 import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.UUID;
 
 import net.minecraft.block.Block;
@@ -143,6 +145,16 @@ public final class LocatorScan {
     /** 当前列的 Y 游标。 */
     private int yCursor;
 
+    /**
+     * 已经问过 VisualProspecting 的区块（按 {@code (chunkX << 32) ^ chunkZ} 记账）。
+     *
+     * <p>
+     * 环是按<b>方块列</b>走的，同一个区块会被经过 256 次；不记账的话同一个问题要问
+     * 256 遍。命中过的区块另记一份，整块跳过逐方块扫描。
+     */
+    private final Set<Long> veinChecked = new HashSet<>();
+    private final Set<Long> veinHitChunks = new HashSet<>();
+
     private long bestDistanceSq = Long.MAX_VALUE;
     private int bestX;
     private int bestY;
@@ -214,6 +226,8 @@ public final class LocatorScan {
         this.centerZ = centerZ;
         this.maxRadius = Math.max(1, Config.locatorSearchRadius);
         this.vein = vein;
+        // 数据源状态说一句：搜不到时才知道该怪谁（没装 VP / 区块没生成过 / 名字没匹配上）
+        VeinDatabaseLookup.logAvailability();
         this.biome = null;
         this.biomeManager = null;
         this.biomeRadius = 0;
@@ -533,10 +547,48 @@ public final class LocatorScan {
             int wx = centerX + offset[0];
             int wz = centerZ + offset[1];
 
-            // 没加载的区块一律跳过 —— 扫一片空地不值得把上千个区块从磁盘拉起来
-            IChunkProvider provider = world.getChunkProvider();
             int cx = wx >> 4;
             int cz = wz >> 4;
+            long chunkKey = (((long) cx) << 32) ^ (cz & 0xFFFFFFFFL);
+
+            // ★ 先问 VisualProspecting：这个区块是哪条矿脉。
+            //
+            // 它读的是存档里已有的矿脉记录（见 VeinDatabaseLookup 的类注释），所以
+            // **没加载的区块也能答** —— 这正是玩家抱怨的那个场景：矿脉就在昨天路过、
+            // 现在已经卸载的地方，而原来这里直接 continue 跳过了。
+            //
+            // 环是按方块列走的，一个区块会被经过 256 次，所以按区块记账：
+            // 问过一次就不再问，命中的区块整块跳过（它这一列的答案已经知道了）。
+            if (vein != null && veinChecked.add(Long.valueOf(chunkKey))
+                && VeinDatabaseLookup.matches(world.provider.dimensionId, cx, cz, vein)) {
+                veinHitChunks.add(Long.valueOf(chunkKey));
+
+                long dx = (cx << 4) + 8 - centerX;
+                long dz = (cz << 4) + 8 - centerZ;
+                // Y 取矿脉自己的生成高度中值：VP 只告诉我们「这个区块是哪条矿脉」，
+                // 不给具体坐标，而它必然是长在这条矿脉的高度区间里的
+                int hitY = (scanMinY + scanMaxY) / 2;
+                long dy = hitY - centerY;
+                long distSq = dx * dx + dy * dy + dz * dz;
+                if (distSq < bestDistanceSq) {
+                    bestDistanceSq = distSq;
+                    bestX = (cx << 4) + 8;
+                    bestY = hitY;
+                    bestZ = (cz << 4) + 8;
+                    foundAnything = true;
+                }
+            }
+
+            if (veinHitChunks.contains(Long.valueOf(chunkKey))) {
+                ringCursor++;
+                yCursor = scanMinY;
+                budget -= columnHeight;
+                continue;
+            }
+
+            // 没加载的区块一律跳过 —— 扫一片空地不值得把上千个区块从磁盘拉起来。
+            // （矿脉模式下「有记录但没加载」的区块在上面那一步就已经出结果了）
+            IChunkProvider provider = world.getChunkProvider();
             if (provider == null || !provider.chunkExists(cx, cz)) {
                 ringCursor++;
                 yCursor = scanMinY;
