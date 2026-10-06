@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -20,6 +21,7 @@ import java.util.zip.GZIPOutputStream;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 
+import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 
 import codechicken.nei.PositionedStack;
@@ -62,7 +64,7 @@ public final class WebRecipeIndex {
     // 6：流体的「一次用多少」改成从流体 NBT 里读（原来一律读 stackSize，
     // 于是「每次 144 L」被当成 1）。用量是写进缓存的数据，所以必须让旧缓存作废 ——
     // 否则改完代码看着毫无变化，因为读的还是那份旧索引。
-    private static final int FILE_VERSION = 9;
+    private static final int FILE_VERSION = 14;
 
     private static final int MAGIC = 0x46574542; // "FWEB"
 
@@ -82,6 +84,17 @@ public final class WebRecipeIndex {
     private static volatile int handlersTotal;
     private static volatile long buildMillis;
     private static volatile Snapshot snapshot;
+
+    /**
+     * 每条配方的<b>稳定编号</b>（跨会话、跨索引重建都不变），按需算、算过就缓存。
+     *
+     * <p>
+     * 为什么不能用序号：序号是「这次索引里第几条配方」，处理器数量、索引顺序一变它就变了。
+     * 而玩家选的配方、施工进度都是按这个编号存在浏览器里的 ——
+     * 升级一次模组，玩家「选的配方」就悄悄变成了同名的另一条。
+     * 实测：给熔融焊锡选的提取机配方变成了另一条回收配方，规划于是绕回自己报缺料。
+     */
+    private static volatile int[] stableRids;
     private static volatile List<String> handlerNames = Collections.emptyList();
     private static volatile List<String> handlerTags = Collections.emptyList();
     /**
@@ -256,6 +269,7 @@ public final class WebRecipeIndex {
     public static synchronized void rebuild() {
         if (building) return;
         snapshot = null;
+        stableRids = null;
         ready = false;
         failed = false;
         buildThread = null;
@@ -453,6 +467,14 @@ public final class WebRecipeIndex {
 
     private static void buildAll() {
         List<ICraftingHandler> handlers = collectHandlers();
+        List<String> skippedHandlers = new ArrayList<>();
+        handlers = filterHandlers(handlers, skippedHandlers);
+        if (!skippedHandlers.isEmpty()) {
+            FutaGtnhMod.LOG.info(
+                "网页配方：按配置跳过 {} 个处理器（不是合成来源的，如战利品袋/任务奖励）：{}",
+                Integer.valueOf(skippedHandlers.size()),
+                String.join("；", skippedHandlers));
+        }
         List<String> names = new ArrayList<>(handlers.size());
         List<String> tags = new ArrayList<>(handlers.size());
         List<String> icons = new ArrayList<>(handlers.size());
@@ -492,9 +514,54 @@ public final class WebRecipeIndex {
 
         Snapshot built = builder.build();
         snapshot = built;
+        stableRids = null;
         ready = true;
         phase = "就绪";
         reportSummary(built, names, failedHandlers);
+    }
+
+    /**
+     * 按配置（{@code webRecipeSkipHandlers}）剔掉不该进索引的处理器。
+     *
+     * <p>
+     * 有些 NEI「配方」不是合成方法，而是「这东西能从哪来」：战利品袋、任务奖励、
+     * 世界生成战利品表。它们会把一堆东西标成「可合成」，默认挑配方时又因为材料极少
+     * 永远排第一，把真正的生产链挤掉。实测 BetterQuesting 一家就是 3685 条。
+     *
+     * <p>
+     * 匹配的是处理器<b>标签</b>（{@code 处理器类|配方表}，纯 ASCII），不是显示名 ——
+     * 显示名是中文、还会随语言变，标签是稳定的。
+     *
+     * @param skipped 被跳过的处理器标签会记进来，供日志说明「这次到底剔了什么」
+     */
+    private static List<ICraftingHandler> filterHandlers(List<ICraftingHandler> handlers, List<String> skipped) {
+        String config = Config.webRecipeSkipHandlers;
+        if (config == null || config.trim()
+            .isEmpty()) {
+            return handlers;
+        }
+        String[] patterns = config.toLowerCase(Locale.ROOT)
+            .split(",");
+        List<ICraftingHandler> kept = new ArrayList<>(handlers.size());
+        for (int i = 0; i < handlers.size(); i++) {
+            ICraftingHandler handler = handlers.get(i);
+            String tag = handlerTag(handler);
+            String lower = tag.toLowerCase(Locale.ROOT);
+            boolean hit = false;
+            for (int p = 0; p < patterns.length; p++) {
+                String pattern = patterns[p].trim();
+                if (!pattern.isEmpty() && lower.contains(pattern)) {
+                    hit = true;
+                    break;
+                }
+            }
+            if (hit) {
+                if (skipped.size() < 20) skipped.add(tag);
+            } else {
+                kept.add(handler);
+            }
+        }
+        return kept;
     }
 
     private static ICraftingHandler allRecipesOf(ICraftingHandler handler) {
@@ -575,6 +642,81 @@ public final class WebRecipeIndex {
         public int[] alts = EMPTY;
         /** 候选总数（{@link #alts} 可能被截断）。 */
         public int altTotal;
+    }
+
+    /**
+     * 配方的稳定编号（跨会话、跨索引重建都不变）。
+     *
+     * <p>
+     * 由配方<b>内容</b>算出来：处理器标签 + 耗电耗时 + 每个槽位的物品身份/数量/坐标/概率。
+     * 物品身份用稳定键（流体的形如 {@code fluid:显示名}），不用会话内的临时编号，
+     * 否则重建一次索引编号又变了 —— 那就等于没修。
+     *
+     * @return 正数编号；配方不存在时返回 0（0 不作任何配方的编号）
+     */
+    public static int stableRid(int ordinal) {
+        Snapshot local = snapshot;
+        if (local == null || ordinal < 0 || ordinal >= local.recipeCount) return 0;
+        int[] cache = stableRids;
+        if (cache == null || cache.length != local.recipeCount) {
+            cache = new int[local.recipeCount];
+            stableRids = cache;
+        }
+        int cached = cache[ordinal];
+        if (cached != 0) return cached;
+        int rid = computeStableRid(ordinal, local);
+        // 偶数会让「0 表示没有」这条判断变脆（哈希撞成 0 的概率虽小，但没必要留着）
+        if (rid <= 0) rid = 1;
+        cache[ordinal] = rid;
+        return rid;
+    }
+
+    private static int computeStableRid(int ordinal, Snapshot local) {
+        RecipeView view = view(ordinal);
+        if (view == null) return 0;
+
+        long hash = 0xcbf29ce484222325L;
+        hash = mix(hash, view.handler == null ? 0 : view.handler.hashCode());
+        hash = mix(hash, view.euPerTick);
+        hash = mix(hash, view.durationTicks);
+        hash = mix(hash, view.resultId < 0 ? -1 : stableKeyHash(view.resultId));
+        hash = mix(hash, view.resultAmount);
+        hash = mixSlots(hash, view.inputs);
+        hash = mixSlots(hash, view.outputs);
+        hash = mixSlots(hash, view.extras);
+
+        int rid = (int) (hash ^ (hash >>> 32)) & 0x7FFFFFFF;
+        return rid;
+    }
+
+    private static long mixSlots(long hash, Slot[] slots) {
+        if (slots == null) return mix(hash, -7);
+        long out = mix(hash, slots.length);
+        for (int i = 0; i < slots.length; i++) {
+            Slot slot = slots[i];
+            out = mix(out, slot.x);
+            out = mix(out, slot.y);
+            out = mix(out, slot.amount);
+            out = mix(out, slot.chance);
+            // 候选只取前几个：它们决定「这一格到底是什么东西」，后面的差异极小
+            int take = Math.min(slot.alts.length, 4);
+            out = mix(out, slot.altTotal * 31 + take);
+            for (int a = 0; a < take; a++) {
+                out = mix(out, stableKeyHash(slot.alts[a]));
+            }
+        }
+        return out;
+    }
+
+    /** 物品稳定键的哈希：会话内的 id 换来换去，键不会。 */
+    private static int stableKeyHash(int itemId) {
+        String key = WebStore.keyOfId(itemId);
+        return key.isEmpty() ? itemId * 31 : key.hashCode();
+    }
+
+    private static long mix(long hash, int value) {
+        long out = hash ^ (value & 0xFFFFFFFFL);
+        return out * 0x100000001b3L;
     }
 
     public static RecipeView view(int ordinal) {
@@ -926,9 +1068,10 @@ public final class WebRecipeIndex {
 
             ItemStack main = primaryOf(positioned);
             if (main == null) return;
-
             int mainId = WebStore.idOf(main);
             if (mainId < 0) return;
+
+            logFluidSlotOnce(main, mainId);
 
             int[] candidates = permutationIds(positioned.items, mainId);
             out.add(
@@ -1074,6 +1217,36 @@ public final class WebRecipeIndex {
      * 实测「Molten Borosilicate Glass」那格每次要 144 L，而这里原来一律读 stackSize，
      * 于是界面上写「每个配方 ×1，共需 64」：数字全都差了一个 144 倍。
      */
+    /**
+     * 把流体槽的<b>原始身份</b>打一次：注册名 / damage / NBT / 解析到的 id。
+     *
+     * <p>
+     * 「镍铬合金线圈的流体应该是熔融坎塔尔合金，页面却显示烯丙基氯」这类问题，
+     * 光看 id 是查不出来的 —— 得看那一格原始栈到底长什么样、以及它被解析成了谁。
+     */
+    private static void logFluidSlotOnce(ItemStack stack, int resolvedId) {
+        if (!WebStore.isFluidItem(resolvedId)) return;
+        String key;
+        try {
+            key = WebStore.keyOf(stack);
+        } catch (Throwable t) {
+            key = "?";
+        }
+        synchronized (fluidSlotLogged) {
+            if (fluidSlotLogged.size() >= 30 || !fluidSlotLogged.add(key)) return;
+        }
+        String nbt = stack.hasTagCompound() ? String.valueOf(stack.getTagCompound()) : "无";
+        if (nbt.length() > 200) nbt = nbt.substring(0, 200) + "…";
+        com.futa_gtnh.FutaGtnhMod.LOG.info(
+            "网页配方：流体槽身份 键={} 解析到 id={} 名字={} NBT={}",
+            key,
+            Integer.valueOf(resolvedId),
+            WebStore.nameOf(resolvedId),
+            nbt);
+    }
+
+    private static final java.util.Set<String> fluidSlotLogged = new java.util.HashSet<>();
+
     private static int amountOf(ItemStack stack, int itemId) {
         int fluidAmount = fluidAmountOf(stack, itemId);
         if (fluidAmount > 0) return fluidAmount;
@@ -1175,12 +1348,24 @@ public final class WebRecipeIndex {
             handlersTotal = nameCount;
 
             int itemCount = in.readInt();
-            String[] keys = new String[itemCount];
-            for (int i = 0; i < itemCount; i++) keys[i] = in.readUTF();
-            int[] remap = new int[itemCount];
+            String[] stackKeys = new String[itemCount];
+            String[] identityKeys = new String[itemCount];
             for (int i = 0; i < itemCount; i++) {
-                ItemStack stack = stackFromKey(keys[i]);
-                remap[i] = stack == null ? -1 : WebStore.idOf(stack);
+                stackKeys[i] = in.readUTF();
+                identityKeys[i] = in.readUTF();
+            }
+            int[] remap = new int[itemCount];
+            int unreadable = 0;
+            for (int i = 0; i < itemCount; i++) {
+                ItemStack stack = stackFromKey(stackKeys[i]);
+                // 按存下来的身份登记，不重新算键：身份键里含显示名，而显示名不能在索引线程上问
+                remap[i] = stack == null ? -1 : WebStore.adopt(stack, identityKeys[i]);
+                if (remap[i] < 0) unreadable++;
+            }
+            // ★ 找不回来的条目要说话。以前这里一声不响：流体身份键反解不出物品，
+            // 整批流体被丢掉，玩家看到的是「配方没了」，日志里却什么都没有。
+            if (unreadable > 0) {
+                FutaGtnhMod.LOG.info("网页配方：缓存里有 {} 个条目在当前客户端上找不到（已跳过，其余照常）", Integer.valueOf(unreadable));
             }
 
             Snapshot out = new Snapshot();
@@ -1249,6 +1434,7 @@ public final class WebRecipeIndex {
             out.byResult = byResult;
 
             snapshot = out;
+            stableRids = null;
             ready = true;
             phase = "就绪";
             return true;
@@ -1375,8 +1561,14 @@ public final class WebRecipeIndex {
             int itemTotal = WebStore.size();
             out.writeInt(itemTotal);
             for (int i = 0; i < itemTotal; i++) {
-                ItemStack stack = WebStore.stackOf(i);
-                out.writeUTF(stack == null ? "?" : WebStore.keyOf(stack));
+                ItemStack stack = WebStore.rawStackOf(i);
+                // 两份键都要存：
+                // registryKey（注册名@meta）用来把条目找回来，任何线程都能算；
+                // keyOfId 是身份键，流体的是「fluid:显示名」，反推不出是哪个物品。
+                // v12 只存了身份键，于是回读时所有流体条目都反解失败被丢掉 ——
+                // 表现是「重启之后流体全都没有配方了」，而且日志里一个字都没有。
+                out.writeUTF(stack == null ? "?" : WebStore.registryKey(stack));
+                out.writeUTF(WebStore.keyOfId(i));
             }
 
             out.writeInt(local.recipeCount);

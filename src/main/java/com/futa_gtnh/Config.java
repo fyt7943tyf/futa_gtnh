@@ -505,6 +505,25 @@ public class Config {
      */
     public static String webRecipeToken = "";
 
+    /**
+     * 网页配方索引要<b>跳过</b>的处理器（逗号分隔，匹配处理器的标签，忽略大小写）。
+     *
+     * <p>
+     * 有些 NEI「配方」根本不是合成方法，而是「这东西能从哪来」：战利品袋里能开出什么、
+     * 任务奖励给什么、世界生成箱子里的战利品表。它们有两个害处：
+     * <ul>
+     * <li>把一堆东西标成「可合成」，规划就会给你排出「从战利品袋里开出 64 个」这种步骤；</li>
+     * <li>默认挑配方时它们材料极少，永远排在最前面，把真正的生产链挤掉。</li>
+     * </ul>
+     * 实测：BetterQuesting 一个处理器 3685 条、战利品袋 52 条、世界生成战利品 280 条。
+     *
+     * <p>
+     * 默认值针对的就是上面三类。想连别的一起剔，往后加标签子串即可
+     * （标签在客户端日志的「处理器」一节里，形如 {@code gt.recipe.canner}）。
+     * 想一个都不剔就留空。
+     */
+    public static String webRecipeSkipHandlers = "bq_standard,betterquesting,enhancedlootbags,worldgenloot";
+
     /** 配置文件位置，在 {@link #synchronizeConfiguration} 里记下，供运行时回写用。 */
     private static File configFileRef;
 
@@ -672,6 +691,12 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             webRecipeToken,
             "访问口令。留空=不校验；填了就必须用带 ?k=口令 的完整地址打开（按键时聊天栏给的就是完整地址）。");
+
+        webRecipeSkipHandlers = configuration.getString(
+            "webRecipeSkipHandlers",
+            Configuration.CATEGORY_GENERAL,
+            webRecipeSkipHandlers,
+            "网页配方要跳过的处理器（逗号分隔，匹配处理器标签，忽略大小写）。默认剔掉战利品袋/任务奖励/世界生成战利品这类「不是合成方法」的配方；留空=一个都不剔。");
 
         enableLootMachine = configuration.getBoolean(
             "enableLootMachine",

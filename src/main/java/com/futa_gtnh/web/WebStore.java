@@ -77,6 +77,28 @@ public final class WebStore {
     private static final List<Boolean> CATALYST = new ArrayList<>();
     private static final Map<String, Integer> BY_KEY = new HashMap<>();
 
+    /**
+     * 每个编号指向的「正式编号」。
+     *
+     * <p>
+     * 身份重复的条目（同一种流体的另一套显示物品、注册表里的重复栈）<b>照样占一个编号</b>，
+     * 只是对外一律指向第一个。这么做的理由是<b>编号必须稳定</b>：
+     * 以前重复条目被直接跳过、不占号，于是「哪些条目算重复」一变（例如把 NEI 的流体伪物品
+     * 和 GT 的流体显示物品并成同一个身份），后面所有编号集体前移 ——
+     * 玩家存在浏览器里的计划、选好的配方就全部指向了别的物品，而且页面上看不出来。
+     * 现在编号只由「目录扫描顺序」决定，改身份规则再也不会动它。
+     */
+    private static final List<Integer> ALIAS = new ArrayList<>();
+
+    /** NEI 自己那套流体伪物品的注册名：它把流体写在 damage 上，NBT 是空的。 */
+    private static final String NEI_FLUID_ITEM = "NotEnoughItems:neiFluidDisplay";
+
+    /** 被并掉的重复条目数（诊断用：说明这次身份规整生效了多少条）。 */
+    private static int mergedEntries;
+
+    /** 合并的几个例子（诊断用：日志里能直接看到「谁和谁并了」）。 */
+    private static final List<String> mergedExamples = new ArrayList<>();
+
     private static volatile Map<Long, Long> stock = Collections.emptyMap();
     private static volatile boolean catalogReady;
     private static volatile boolean catalogFailed;
@@ -150,6 +172,15 @@ public final class WebStore {
             catalogReady = true;
             pending = null;
             FutaGtnhMod.LOG.info("网页配方：物品目录完成，共 {} 个条目", size());
+            // ★ 身份规整的实况：同一种流体的两套显示物品（GT 的 + NEI 的）在这里被并成一个身份。
+            // 「熔融焊锡有两个、我选的那条没配方」这类问题，这一行就是答案 ——
+            // 合并之后只剩正式那条带配方，重复的那条编号保留（老计划不会指到别的东西）但不展示。
+            if (mergedEntries() > 0) {
+                FutaGtnhMod.LOG.info(
+                    "网页配方：其中 {} 条与其他条目同身份（编号保留、不单独展示）。例：{}",
+                    Integer.valueOf(mergedEntries()),
+                    mergedExampleText());
+            }
         }
     }
 
@@ -170,10 +201,47 @@ public final class WebStore {
         }
     }
 
+    /**
+     * 按缓存里存下来的身份登记（回读缓存走这条）。
+     *
+     * <p>
+     * 键不能重算：身份键里含显示名（流体就是），而显示名要问语言表 ——
+     * 回读发生在索引线程上，那里不做这种事。存了什么就用什么。
+     */
+    public static int adopt(ItemStack stack, String key) {
+        if (stack == null || stack.getItem() == null || key == null || key.isEmpty()) return -1;
+        synchronized (LOCK) {
+            return registerLocked(stack, key);
+        }
+    }
+
     private static int registerLocked(ItemStack stack) {
-        String key = keyOf(stack);
+        return registerLocked(stack, keyOf(stack));
+    }
+
+    /**
+     * 登记一个物品条目。
+     *
+     * <p>
+     * <b>每个条目都占一个编号</b>，哪怕身份和前面某个条目重复（见 {@link #ALIAS}）：
+     * 重复的那个照样有自己的名字、图标、搜索文本，只是搜索列表里不单独展示、
+     * 被引用到时指向第一个。
+     *
+     * @return 这个身份的<b>正式编号</b>（重复条目则返回第一个的编号）
+     */
+    private static int registerLocked(ItemStack stack, String key) {
+        // ★ 编号只由「目录扫描顺序」决定，和身份规整无关。
+        //
+        // 关键点：<b>不能</b>因为「身份已经有了」就跳过一个条目、不给它编号。
+        // 一跳号，后面所有编号集体前移 —— 玩家存在浏览器里的计划、选好的配方
+        // 就全部指向了别的物品，而且页面上看不出来（这件事真的发生过：
+        // 把 NEI 的流体伪物品和 GT 的流体显示物品并成一个身份之后，
+        // 「熔融焊锡」的老计划指到了另一条同名的、没有配方的条目上）。
+        //
+        // 所以：每个条目都占号，身份重复的那个指向正式那条（{@link #ALIAS}）。
+        // 也不能按「同一个物品栈」（注册名+damage）跳过：GT 的流体显示物品
+        // 正是同注册名、同 damage、靠 NBT 区分不同流体，按栈跳会把两种流体并成一个。
         Integer existing = BY_KEY.get(key);
-        if (existing != null) return existing;
 
         int id = STACKS.size();
         ItemStack copy = stack.copy();
@@ -185,8 +253,75 @@ public final class WebStore {
         SEARCH.add(buildSearchText(copy, name));
         CATALYST.add(looksLikeCatalyst(key, name));
         KEYS.add(key);
-        BY_KEY.put(key, id);
+
+        if (existing != null) {
+            ALIAS.add(existing);
+            mergedEntries++;
+            synchronized (mergedExamples) {
+                if (mergedExamples.size() < 8) {
+                    mergedExamples.add("「" + key + "」← " + registryKey(copy));
+                }
+            }
+            return existing.intValue();
+        }
+
+        BY_KEY.put(key, Integer.valueOf(id));
+        ALIAS.add(Integer.valueOf(id));
         return id;
+    }
+
+    /**
+     * 编号的「正式身份」：重复条目的号指向第一个（见 {@link #ALIAS}）。
+     *
+     * <p>
+     * 网页/书签里存的编号可能是旧会话留下的，所以每个进来的编号都要过这一道，
+     * 而不是假设它一定是正式的。认出重复条目、把它指回正式编号，
+     * 玩家那边的表现就是「我以前存的计划又对了」，而不是「它指向了另一个同名的东西」。
+     */
+    public static int canonicalId(int id) {
+        synchronized (LOCK) {
+            return canonicalLocked(id);
+        }
+    }
+
+    private static int canonicalLocked(int id) {
+        int current = id;
+        for (int hop = 0; hop < 4; hop++) {
+            if (current < 0 || current >= ALIAS.size()) return id;
+            int next = ALIAS.get(current)
+                .intValue();
+            if (next == current) return current;
+            current = next;
+        }
+        return current;
+    }
+
+    /** 这个编号是不是「和别人同身份」的重复条目（搜索列表里不单独展示）。 */
+    public static boolean isAlias(int id) {
+        synchronized (LOCK) {
+            return id >= 0 && id < ALIAS.size()
+                && ALIAS.get(id)
+                    .intValue() != id;
+        }
+    }
+
+    /** 身份规整并掉了多少条重复（诊断用）。 */
+    public static int mergedEntries() {
+        synchronized (LOCK) {
+            return mergedEntries;
+        }
+    }
+
+    /** 合并例子的可读文本（诊断用：日志里直接写清楚谁并到了谁）。 */
+    public static String mergedExampleText() {
+        synchronized (mergedExamples) {
+            StringBuilder builder = new StringBuilder();
+            for (int i = 0; i < mergedExamples.size(); i++) {
+                if (i > 0) builder.append("；");
+                builder.append(mergedExamples.get(i));
+            }
+            return builder.toString();
+        }
     }
 
     /**
@@ -230,7 +365,8 @@ public final class WebStore {
      */
     public static boolean isCatalyst(int id) {
         synchronized (LOCK) {
-            return id >= 0 && id < CATALYST.size() && CATALYST.get(id);
+            int real = canonicalLocked(id);
+            return real >= 0 && real < CATALYST.size() && CATALYST.get(real);
         }
     }
 
@@ -240,20 +376,37 @@ public final class WebStore {
 
     public static ItemStack stackOf(int id) {
         synchronized (LOCK) {
+            int real = canonicalLocked(id);
+            return real < 0 || real >= STACKS.size() ? null : STACKS.get(real);
+        }
+    }
+
+    /**
+     * 不做身份规整的取栈。
+     *
+     * <p>
+     * 只给索引缓存写盘用：重复条目（同一种流体的另一套显示物品）要按<b>它自己那个物品</b>
+     * 记下来，回读时才能原样重建出来。别的调用方一律用 {@link #stackOf(int)}，
+     * 那个会把重复条目的号指回正式编号。
+     */
+    static ItemStack rawStackOf(int id) {
+        synchronized (LOCK) {
             return id < 0 || id >= STACKS.size() ? null : STACKS.get(id);
         }
     }
 
     public static String nameOf(int id) {
         synchronized (LOCK) {
-            return id < 0 || id >= NAMES.size() ? "" : NAMES.get(id);
+            int real = canonicalLocked(id);
+            return real < 0 || real >= NAMES.size() ? "" : NAMES.get(real);
         }
     }
 
     /** 物品的稳定键（{@code registryName@meta}），编号换了它也不变。 */
     public static String keyOfId(int id) {
         synchronized (LOCK) {
-            return id < 0 || id >= KEYS.size() ? "" : KEYS.get(id);
+            int real = canonicalLocked(id);
+            return real < 0 || real >= KEYS.size() ? "" : KEYS.get(real);
         }
     }
 
@@ -273,7 +426,8 @@ public final class WebStore {
 
     public static String modOf(int id) {
         synchronized (LOCK) {
-            return id < 0 || id >= MODS.size() ? "" : MODS.get(id);
+            int real = canonicalLocked(id);
+            return real < 0 || real >= MODS.size() ? "" : MODS.get(real);
         }
     }
 
@@ -335,10 +489,10 @@ public final class WebStore {
         ItemStack stack = stackOf(id);
         if (stack == null || stack.getItem() == null) return false;
 
-        // 判据一（最可靠）：GTNH 的流体显示物品把自己的键写在 NBT 上。
-        // 实测形如 {mFluidMaterialName:"BorosilicateGlass", mFluidDisplayAmount:144L, ...} ——
-        // Forge 那套标准解析认不出这些键，所以必须先看这里。
-        if (fluidMaterialName(stack) != null || fluidDisplayAmount(stack) > 0) return true;
+        // 判据一（最可靠）：两套流体显示物品 —— GT 的（NBT 上带 mFluid* 键）
+        // 和 NEI 的（注册名 neiFluidDisplay，流体写在 damage 上）。
+        // Forge 那套标准解析认不出这两种，所以必须先看这里。
+        if (isFluidDisplay(stack)) return true;
 
         // 判据二：标准的 FluidStack 的 NBT（GT 的流体单元是这种）
         try {
@@ -671,6 +825,11 @@ public final class WebStore {
         int total = 0;
         synchronized (LOCK) {
             for (int id = 0; id < STACKS.size(); id++) {
+                // 身份重复的条目（同一种流体的另一套显示物品、注册表里的重复栈）不单独出现：
+                // 它们和正式那条同名同图，列出来只会让人点中「没有配方」的那一个 ——
+                // 「熔融焊锡有两三条、我选的那条没配方」就是这么来的
+                if (ALIAS.get(id)
+                    .intValue() != id) continue;
                 if (!empty && !matches(id, words)) continue;
                 if (total >= offset && out.size() < limit) out.add(id);
                 total++;
@@ -716,11 +875,91 @@ public final class WebStore {
     // 工具
     // ==================================================================
 
-    /** 物品身份键：{@code 注册名@metadata}（不含 NBT，理由见类注释）。 */
+    /**
+     * 物品的身份键。
+     *
+     * <p>
+     * ★ 流体显示物品的身份是<b>「哪一种流体」</b>，不是「哪个物品」。
+     *
+     * <p>
+     * GTNH 里同一种流体有好几套显示物品，模组之间各造各的：
+     * <ul>
+     * <li>GT 的 {@code gregtech:gt.GregTech_FluidDisplay@N} —— 有材质的流体在 NBT 里带
+     * {@code mFluidMaterialName}，而水、岩浆、冷却液这种没有材质的流体只有
+     * {@code mFluidDisplayAmount}；</li>
+     * <li>NEI 的 {@code NotEnoughItems:neiFluidDisplay@N} —— 靠 damage 认流体，NBT 里什么都没有。</li>
+     * </ul>
+     * 它们在玩家眼里是同一个东西（都叫「熔融焊锡」）。历史上两种错法都犯过：
+     * 键里不带流体名 → 所有流体挤成一个 id，谁先索引到就归谁（格子显示成别的流体，时对时错）；
+     * 键里带上具体的显示物品 → 一种流体散成好几个 id，而玩家的配方选择是按 id 存的，
+     * 选了一个、规划里解析到另一个，于是「我明明选了它的合成方式，还是把它当原料」。
+     *
+     * <p>
+     * 归一到<b>显示名</b>（而不是 GT 的材质名）：两套显示物品唯一共有的身份就是它 ——
+     * NEI 那套没有材质名，GT 那套没有材质名的流体也不在少数。
+     */
     public static String keyOf(ItemStack stack) {
+        if (isFluidDisplay(stack)) {
+            String name = displayName(stack);
+            if (!name.isEmpty()) return "fluid:" + name;
+            // 名字都读不出来的极端情况：退回材质名，至少不会把不同流体混成一个
+            String material = fluidMaterialName(stack);
+            if (material != null) return "fluid:" + material;
+        }
+        return registryKey(stack);
+    }
+
+    /**
+     * 这是不是「流体显示物品」（GT 的和 NEI 的各一套）。
+     *
+     * <p>
+     * GT 那套的判据是 NBT 上的 {@code mFluid*} 键，而且几个键里认出一个就算：
+     * {@code mFluidMaterialName} 只有材质流体才有（水、岩浆、冷却液、氙都没有），
+     * 用量为 0 时 {@code mFluidDisplayAmount} 也会缺（氦、氟那种）——
+     * 只认其中一个，就会有一批流体被当成普通物品。
+     *
+     * <p>
+     * NEI 那套只能认注册名：它的流体写在 damage 上，NBT 是空的。
+     *
+     * <p>
+     * <b>GT 的流体单元不在这里面</b>：单元是<b>真物品</b>（能拿在手上、能装能倒），
+     * NBT 是 Forge 标准的 {@code FluidName/Amount}，没有 {@code mFluid*} 键，
+     * 所以不会被并进流体本体。
+     */
+    public static boolean isFluidDisplay(ItemStack stack) {
+        if (stack == null || stack.getItem() == null) return false;
+        try {
+            if (stack.hasTagCompound()) {
+                net.minecraft.nbt.NBTTagCompound tag = stack.getTagCompound();
+                if (tag.hasKey("mFluidMaterialName") || tag.hasKey("mFluidDisplayAmount")
+                    || tag.hasKey("mFluidDisplayHeat")
+                    || tag.hasKey("mFluidState")) {
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            // NBT 读不出来就当它不是流体：一条坏数据不能把整个目录带崩
+        }
+        return NEI_FLUID_ITEM.equals(registryNameOf(stack));
+    }
+
+    /**
+     * 「物品本身」的键（{@code 注册名@metadata}）。
+     *
+     * <p>
+     * 和 {@link #keyOf} 的区别：这个只描述「哪个物品栈」，不含身份规整。
+     * 目录缓存用它把条目找回来 —— 流体的身份键是 {@code fluid:显示名}，
+     * 反推不出是哪个物品，所以缓存里两份都要存（v12 只存了身份键，
+     * 回读时流体条目整批反解失败、被丢掉，重启后所有流体都没有配方）。
+     */
+    public static String registryKey(ItemStack stack) {
+        if (stack == null || stack.getItem() == null) return "";
+        return registryNameOf(stack) + '@' + stack.getItemDamage();
+    }
+
+    private static String registryNameOf(ItemStack stack) {
         Object registered = Item.itemRegistry.getNameForObject(stack.getItem());
-        String base = registered != null ? registered.toString() : "id" + Item.getIdFromItem(stack.getItem());
-        return base + '@' + stack.getItemDamage();
+        return registered != null ? registered.toString() : "id" + Item.getIdFromItem(stack.getItem());
     }
 
     private static long stockKey(ItemStack stack) {

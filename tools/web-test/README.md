@@ -78,3 +78,27 @@ msedge --headless=new --disable-gpu --window-size=400,1520 \
 
 页面里几个位置可以直接用 hash 路由打开，省得一路点进去：
 `#/search`、`#/item/<物品id>`、`#/plan/<物品id>?count=64`。
+
+## 离线诊断工具（不用重开游戏）
+
+「网页上看着不对」时，先分清是**索引里的数据不对**还是**规划算法不对**。
+下面这两个工具直接读索引缓存（`config/futa_gtnh/web_recipes.dat`），
+不用开游戏、不用连接口，最适合查「这个 id 到底是谁」「这件东西的配方到底有没有进索引」：
+
+```bash
+java tools/web-test/DumpIndexKeys.java <缓存> 36885,43173        # id ↔ 身份键（流体形如 fluid:显示名）
+java tools/web-test/DumpRecipes.java  <缓存> --handlers          # 每个处理器各贡献多少条配方
+java tools/web-test/DumpRecipes.java  <缓存> --produces 36885     # 谁产出这个 id（材料一并列出）
+java tools/web-test/DumpRecipes.java  <缓存> --item 36885         # 什么配方用到它（产出/消耗都算）
+java tools/web-test/DumpRecipes.java  <缓存> --handler alloysmelter  # 按处理器标签翻（ASCII，避免中文乱码）
+```
+
+两个都用 JDK 的单文件模式直接跑（`java 文件.java`），不需要编译。
+
+**`fluid-identity.js`**（`node tools/web-test/fluid-identity.js`）盯的是一条被反复踩出来的规律：
+同一种流体在 GTNH 里有两套显示物品（GT 的 `GregTech_FluidDisplay` 和 NEI 的
+`neiFluidDisplay`），它们在玩家眼里是同一个东西。脚本断言每个流体名在搜索里**只有一条**、
+计划认得它，并可用 `--alias <重复编号> <正式编号>` 核对老编号会被指回正式那条。
+
+排查「明明能做却报缺」时，规划接口加 `&debug=1`：警告里会逐条写出被掐断的物品
+**各自选中了哪条配方、材料是谁** —— 光看材料表只知道它被掐断了，看不出是被哪条配方带进环里的。
