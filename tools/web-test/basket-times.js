@@ -500,6 +500,67 @@ const rowOf = (rows, id) => rows.find((r) => r.id === id) || null;
         check('旧键 basket 还在（降级也能用）', !!leftovers.basket, String(leftovers.basket).slice(0, 60));
         check('玩家的配方选择 choices 没被动过', leftovers.choices === JSON.stringify({ 111: 222 }), String(leftovers.choices));
 
+        // 10) 「目标不扣库存」这个模式：开关在、点了会带上参数、和「从零算」互斥
+        //     （语义本身由 target-stock.js 打接口验，这里只验界面这条线）
+        const tgtUI = JSON.parse(await session.eval(`(() => {
+            const btn = Array.from(document.querySelectorAll('.target button'))
+                .find((b) => /目标/.test(b.textContent));
+            return JSON.stringify({
+                found: !!btn,
+                text: btn ? btn.textContent : null,
+                pressed: btn ? btn.getAttribute('aria-pressed') : null,
+                disabled: btn ? !!btn.disabled : null,
+                store: localStorage.getItem('futa_gtnh.targetstock')
+            });
+        })()`));
+        check('计划页有「目标…库存」开关', tgtUI.found === true, JSON.stringify(tgtUI));
+        check('默认是「目标也扣库存」（老行为不变）',
+            tgtUI.text === '目标也扣库存' && tgtUI.pressed === 'false', String(tgtUI.text));
+
+        await session.eval(`(() => {
+            window.__planUrls = [];
+            const btn = Array.from(document.querySelectorAll('.target button'))
+                .find((b) => /目标/.test(b.textContent));
+            if (btn) btn.click();
+            return true;
+        })()`);
+        await waitFor(session, `(() => {
+            const btn = Array.from(document.querySelectorAll('.target button'))
+                .find((b) => /目标/.test(b.textContent));
+            return btn && /目标不扣库存/.test(btn.textContent) ? true : null;
+        })()`, 15000, '切到「目标不扣库存」');
+        const tgtAfter = JSON.parse(await session.eval(`(() => {
+            const urls = window.__planUrls || [];
+            const btn = Array.from(document.querySelectorAll('.target button'))
+                .find((b) => /目标/.test(b.textContent));
+            return JSON.stringify({
+                text: btn ? btn.textContent : null,
+                store: localStorage.getItem('futa_gtnh.targetstock'),
+                lastPlan: urls.length ? urls[urls.length - 1] : ''
+            });
+        })()`));
+        check('点一下就切到「目标不扣库存」并记在本地',
+            tgtAfter.text === '目标不扣库存' && tgtAfter.store === '0', JSON.stringify(tgtAfter));
+        check('重算的请求里带上了 targetstock=0',
+            /targetstock=0/.test(decodeURIComponent(tgtAfter.lastPlan)), decodeURIComponent(tgtAfter.lastPlan).slice(0, 160));
+
+        await session.eval(`(() => {
+            localStorage.setItem('futa_gtnh.ignorestock', '1');
+            localStorage.setItem('futa_gtnh.targetstock', '1');
+            return true;
+        })()`);
+        await session.goto(BASE + '/#/plan/' + target.id + '?count=4');
+        await session.send('Page.reload', { ignoreCache: true });
+        await waitFor(session, "!!document.querySelector('.target')", 30000, '从零算模式下重画');
+        const exclusive = JSON.parse(await session.eval(`(() => {
+            const btn = Array.from(document.querySelectorAll('.target button'))
+                .find((b) => /目标/.test(b.textContent));
+            return JSON.stringify({ disabled: btn ? !!btn.disabled : null, text: btn ? btn.textContent : null });
+        })()`));
+        check('「从零算」时这个开关是灰的（那时谁都不扣，它没有意义）',
+            exclusive.disabled === true, JSON.stringify(exclusive));
+        await session.eval(`localStorage.setItem('futa_gtnh.ignorestock', '0'); true`);
+
         const file = await session.shot('basket-times');
         console.log('  截图: ' + file);
 

@@ -9,6 +9,9 @@
  * 于是浏览器拿到的是新前端、真后端。
  *
  * 用法：node tools/web-test/serve-live.js [端口，默认 8766]
+ *      WEB_DIR=<某个目录> node tools/web-test/serve-live.js 8767
+ *      —— 指定页面资源目录时可以用它跑「改动前那一版」，和新版对比着测
+ *         （比如拿 git show HEAD:... 导出的旧 app.js 做回归对照）
  */
 const http = require('http');
 const fs = require('fs');
@@ -16,7 +19,8 @@ const path = require('path');
 
 const PORT = Number(process.argv[2] || 8766);
 const UPSTREAM = 'http://127.0.0.1:8765';
-const WEB_DIR = path.join(__dirname, '..', '..', 'build', 'resources', 'main', 'assets', 'futa_gtnh', 'web');
+const WEB_DIR = process.env.WEB_DIR
+    || path.join(__dirname, '..', '..', 'build', 'resources', 'main', 'assets', 'futa_gtnh', 'web');
 
 const TYPES = {
     '.html': 'text/html; charset=utf-8',

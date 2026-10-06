@@ -26,6 +26,7 @@
     var LS_CATALYST = 'futa_gtnh.catalyst';
     var LS_CONSUMABLE = 'futa_gtnh.consumable';
     var LS_IGNORE_STOCK = 'futa_gtnh.ignorestock';
+    var LS_TARGET_STOCK = 'futa_gtnh.targetstock';   // '0' = 目标产物不扣库存（中间产物照扣）
     var LS_BASKET = 'futa_gtnh.basket';
     var LS_GROUPS = 'futa_gtnh.groups';   // 书签组（组里有清单；旧键保留作镜像）
     var LS_ALTS = 'futa_gtnh.alts';
@@ -836,6 +837,28 @@
         return ignoreStock() ? '0' : '1';
     }
 
+    /**
+     * 「目标产物不扣库存」：中间产物照旧按库存算。
+     *
+     * <p>
+     * 场景是补货 / 交付：我要 64 个 A，仓库里那 2 个不算数 —— 要的是<b>再做 64 个</b>，
+     * 不是再做 62 个。中间产物没这个语义，手里有的当然要用掉，不然会凭空多做一批。
+     *
+     * <p>
+     * 「从零算」（{@link #ignoreStock}）是另一个方向：谁都不扣。两个都开着时以从零算为准。
+     */
+    function targetIgnoresStock() {
+        return lsGet(LS_TARGET_STOCK) === '0';
+    }
+
+    function setTargetIgnoresStock(on) {
+        lsSet(LS_TARGET_STOCK, on ? '0' : '1');
+    }
+
+    function targetStockParam() {
+        return targetIgnoresStock() ? '0' : '1';
+    }
+
     /* ------------------------------------------------------------ 非消耗品 */
 
     /**
@@ -943,6 +966,40 @@
         return Array.isArray(list) ? list.map(String) : [];
     }
 
+    /**
+     * 这份计划里「哪些 rid 已经做完了」（按当前计划的身份取值）。
+     *
+     * <p>
+     * ★ 别拿 {@link #doneSet} 的<b>条数</b>当完成步数。进度是按键（目标 + 数量）存的，
+     * 而同一个键下面会留着<b>上一版计划</b>的 rid：改过某个物品的配方、切过库存模式、
+     * 仓库里多了东西导致步骤变少，都会换掉一批 rid。旧 rid 对不上新步骤，
+     * 条数却可能比步骤数还多 —— 界面上就成了「所有步骤都已完成 🎉」，而其实一步都没勾
+     * （玩家报过：只能翻到下面的合成顺序接着做）。
+     */
+    function doneMapFor(plan) {
+        var target = plan && plan.target ? plan.target : {};
+        var itemId = target.id !== undefined ? target.id : (plan ? plan.id : undefined);
+        var count = target.count !== undefined ? target.count : 0;
+        var list = doneSet(itemId, count);
+        var map = {};
+        for (var i = 0; i < list.length; i++) {
+            map[list[i]] = true;
+        }
+        return map;
+    }
+
+    /** 当前这份计划里真正做完了几步（只数对得上的 rid）。 */
+    function doneCountOf(plan) {
+        var steps = plan && Array.isArray(plan.steps) ? plan.steps : [];
+        if (steps.length === 0) return 0;
+        var done = doneMapFor(plan);
+        var n = 0;
+        for (var i = 0; i < steps.length; i++) {
+            if (done[String(steps[i].rid)]) n++;
+        }
+        return n;
+    }
+
     function isDone(itemId, count, rid) {
         return doneSet(itemId, count)
             .indexOf(String(rid)) >= 0;
@@ -978,11 +1035,7 @@
      */
     function readySteps(plan) {
         var steps = plan && Array.isArray(plan.steps) ? plan.steps : [];
-        var done = {};
-        var list = doneSet(plan && plan.target ? plan.target.id : plan.id, plan && plan.target ? plan.target.count : 0);
-        for (var d = 0; d < list.length; d++) {
-            done[list[d]] = true;
-        }
+        var done = doneMapFor(plan);
         var out = [];
         for (var i = 0; i < steps.length; i++) {
             var step = steps[i];
@@ -1319,7 +1372,9 @@
     function apiPlan(id, count, stock, choices, raw) {
         var url = '/api/plan?id=' + encodeURIComponent(String(id)) +
             '&count=' + encodeURIComponent(String(count)) +
-            '&stock=' + encodeURIComponent(String(stock));
+            '&stock=' + encodeURIComponent(String(stock)) +
+            // targetstock=0：目标产物不扣库存，中间产物照扣（补货/交付时要的是「再做 N 个」）
+            '&targetstock=' + encodeURIComponent(targetStockParam());
         // 一起做的清单 = 当前这一件 + 清单里的其它东西（「合成 A 64 个 + B 3 个」）。
         // 后端只认 targets，所以当前目标必须一起塞进去，否则它会被清单顶掉
         var targets = [];
@@ -3511,7 +3566,8 @@
 
         var targetId = target.id !== undefined ? target.id : state.plan.id;
         var targetCount = target.count !== undefined ? target.count : state.plan.count;
-        var doneCount = doneSet(targetId, targetCount).length;
+        // ★ 只数「对得上这份计划的」rid：同一个键下面还留着上一版计划的 rid（见 doneMapFor）
+        var doneCount = doneCountOf(data);
 
         /* 顶部：目标物品 + 重新规划 */
         var head = el('div', 'card');
@@ -3540,6 +3596,30 @@
             refreshPlan();
         });
         targetRow.appendChild(stockToggle);
+
+        // 第二个开关：目标产物自己不扣库存（中间产物照扣）。
+        // 「从零算」是全都不扣，这个是只放过目标 —— 补货/交付时要的正是它：
+        // 我要 64 个，仓库里那 2 个不算数，但做它要的钢板还是先用仓库里的。
+        var targetToggle = btn(
+            'btn btn-small btn-ghost' + (targetIgnoresStock() ? ' is-on' : ''),
+            targetIgnoresStock() ? '目标不扣库存' : '目标也扣库存');
+        targetToggle.setAttribute('aria-pressed', targetIgnoresStock() ? 'true' : 'false');
+        targetToggle.disabled = ignoreStock();
+        targetToggle.title = ignoreStock()
+            ? '现在是「从零算」，谁都不扣库存，这个开关没有意义（先改回按库存算）'
+            : (targetIgnoresStock()
+                ? '当前：目标按你要的数量做满（仓库里那点不算数），中间产物照旧用库存（点一下改回）'
+                : '当前：目标也扣库存。点一下改成「目标不扣库存」——我要 64 个就做 64 个，'
+                    + '哪怕仓库里已经有 2 个（中间产物仍然用库存）');
+        targetToggle.addEventListener('click', function () {
+            setTargetIgnoresStock(!targetIgnoresStock());
+            toast(
+                targetIgnoresStock()
+                    ? '目标按你要的数量做满，中间产物照旧用库存。'
+                    : '目标也按库存扣了。');
+            refreshPlan();
+        });
+        targetRow.appendChild(targetToggle);
         if (doneCount > 0) {
             var resetDone = btn('btn btn-small btn-ghost', '清零进度');
             resetDone.setAttribute('aria-label', '清空这份计划的施工进度');
@@ -3650,7 +3730,7 @@
         title.appendChild(el('span', 'count', '(' + ready.length + ')'));
         section.appendChild(title);
 
-        if (steps.length > 0 && doneSet(targetId, targetCount).length >= steps.length) {
+        if (steps.length > 0 && doneCountOf(plan) >= steps.length) {
             section.appendChild(el('div', 'card muted', '所有步骤都已完成 🎉'));
             return section;
         }
@@ -4115,11 +4195,28 @@
         if (!entry || entry.id === undefined || entry.id === null) {
             return;
         }
-        var id = entry.id;
         state.modalOpener = document.activeElement;
         state.modalRepaints = [];   // 本次弹层里各组的重画回调（换候选之后要用）
         state.modalOrigin = currentRoute().name;
-        var fromPlan = state.modalOrigin === 'plan';
+        // 每次打开都从后端的默认条数开始（「加载更多」加到多少只影响这一次）
+        state.modalRlimit = 0;
+        renderRecipeModal(entry, state.modalOrigin === 'plan');
+    }
+
+    /**
+     * 画「选择配方」弹层的内容。
+     *
+     * <p>
+     * 单独一个函数是为了「加载更多配方」：那个按钮要把同一个弹层再画一遍（条数更多），
+     * 而不是关掉重开 —— 关掉重开会丢掉滚动位置，玩家刚翻到一半就回到顶上。
+     *
+     * <p>
+     * 这里和物品页一样要给「加载更多」的出路：回收类物品的候选配方能有上万条，
+     * 后端默认只回前 80 条。没有入口的话，第 81 条之后的做法在这台客户端上就<b>选不到</b>
+     * （玩家报过：规划页的选择配方被卡在 80 条）。
+     */
+    function renderRecipeModal(entry, fromPlan) {
+        var id = entry.id;
 
         var body = byId('modal-body');
         byId('modal-title').textContent = (entry.name ? String(entry.name) : '物品') + ' · 选择配方';
@@ -4127,10 +4224,11 @@
         body.appendChild(el('div', 'box', '正在读取配方…'));
         showModal();
 
-        apiItem(id, state.item && state.item.rlimit).then(function (data) {
+        apiItem(id, state.modalRlimit).then(function (data) {
             clear(body);
             var item = data.item || entry;
             var recipes = Array.isArray(data.recipes) ? data.recipes : [];
+            var total = num(data.recipeTotal, recipes.length);
 
             var head = el('div', 'row');
             head.appendChild(makeIcon(item, 'icon-40'));
@@ -4138,7 +4236,10 @@
             info.appendChild(el('div', 'item-name', item.name ? String(item.name) : String(entry.name)));
             var meta = el('div', 'material-stat');
             meta.appendChild(el('span', 'need', '库存 ' + countText(item.stock)));
-            meta.appendChild(document.createTextNode(' · 配方 ' + recipes.length + ' 条'));
+            // 照实写「(80 / 共 578)」：只写 80 会让玩家以为这件东西就这么几种做法
+            meta.appendChild(
+                document.createTextNode(
+                    ' · 配方 ' + recipes.length + (total > recipes.length ? ' / 共 ' + total : '') + ' 条'));
             info.appendChild(meta);
             head.appendChild(info);
             body.appendChild(head);
@@ -4161,6 +4262,22 @@
             rawToggle.appendChild(rawBox);
             rawToggle.appendChild(el('span', null, '当作原始材料（不展开它的配方）'));
             body.appendChild(rawToggle);
+
+            if (total > recipes.length) {
+                body.appendChild(
+                    el('div', 'muted',
+                        '这个物品有 ' + total + ' 条配方，这里只列出前 ' + recipes.length + ' 条。'));
+                var more = btn('btn btn-block', '加载更多配方（还有 ' + (total - recipes.length) + ' 条）');
+                more.setAttribute('aria-label', '再加载一批这个物品的配方');
+                more.addEventListener('click', function () {
+                    more.disabled = true;
+                    more.textContent = '正在加载…';
+                    // 一次翻三倍（上限和后端一致），免得一条条点
+                    state.modalRlimit = Math.min(2000, Math.max(recipes.length * 3, recipes.length + 80));
+                    renderRecipeModal(entry, fromPlan);
+                });
+                body.appendChild(more);
+            }
 
             var cards = el('div', 'stack');
             if (recipes.length === 0) {

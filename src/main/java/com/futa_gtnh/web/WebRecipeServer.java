@@ -443,6 +443,10 @@ public final class WebRecipeServer {
         // id/count 只当兜底（老前端、老书签仍然能用）
         request.targets.addAll(parseTargets(query.get("targets")));
         request.useStock = !"0".equals(query.get("stock"));
+        // targetstock=0：「目标产物不按库存扣，中间产物照旧扣」——
+        // 我要 64 个 A、仓库里有 2 个，那还是要做 64 个（补货/交付），不是 62 个。
+        // stock=0（全都不扣）时这个开关没有意义，自然被忽略（见 WebPlanner 的 usesStockFor）
+        request.targetIgnoresStock = "0".equals(query.get("targetstock"));
         // debug=1：把「被掐断的物品各自选了什么配方」也写进警告里（排查「明明能做却报缺」用）
         request.debug = "1".equals(query.get("debug"));
         request.choices = parseChoices(query.get("choices"));

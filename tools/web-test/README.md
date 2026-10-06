@@ -16,6 +16,7 @@ node tools/web-test/ui.js        # 页面交互：无头 Edge 真的去点
 node tools/web-test/groups.js    # 书签组兼容：旧清单迁移、切组、旧键保留
 node tools/web-test/basket-times.js  # 「做几套」：兼容、按比例回落、切组后仍在
 node tools/web-test/settings.js  # 本地数据页（清空 / 导出 / 恢复）
+node tools/web-test/target-stock.js  # 「目标不扣库存、中间产物照扣」（纯 HTTP）
 ```
 
 `ui.js` / `groups.js` / `basket-times.js` / `settings.js` 都**自己起一个无头 Edge**
