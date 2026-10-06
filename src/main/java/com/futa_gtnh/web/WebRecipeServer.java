@@ -263,6 +263,10 @@ public final class WebRecipeServer {
                 sendJson(exchange, 200, planJson(query));
                 return;
             }
+            if (endpoint.equals("stock")) {
+                sendJson(exchange, 200, stockJson(query));
+                return;
+            }
             if (endpoint.startsWith("icon/")) {
                 sendIcon(exchange, endpoint.substring(5));
                 return;
@@ -664,6 +668,94 @@ public final class WebRecipeServer {
                 .v(WebStore.stockOf(itemId));
         }
         json.end();
+    }
+
+    /**
+     * 库存诊断（{@code /api/stock?q=过硫酸钠&id=53040}，不进界面，纯粹给排查用）。
+     *
+     * <p>
+     * 「仓库里明明有 426k 过硫酸钠，规划却说缺 216500L」这类问题，光看计划页永远查不出来：
+     * 缺的可能不是数量，而是两边的<b>身份</b>对不上（存储里存的是流体的本地化名 + 注册名，
+     * 配方里用的是 GT 造的流体显示物品）。这个接口把两边的原始身份并排摆出来：
+     * <ul>
+     * <li>{@code fluids} —— 共享存储流体表：显示名 / 注册名 / 数量；</li>
+     * <li>{@code items} —— 共享存储物品表：栈键 / 数量 / 目录 id（-1 = 目录里没有这个身份）；</li>
+     * <li>{@code probe} —— 指定 id 的目录身份：目录里存的名字、身份键、栈键、
+     * <b>现读</b>显示名、认出来的流体注册名、以及最终查到的库存。</li>
+     * </ul>
+     * 名字对不上时，{@code name} 和 {@code freshName} 这两个字段就会不一样 —— 一眼可见。
+     */
+    private static String stockJson(Map<String, String> query) {
+        WebStore.requestFreshStock();
+
+        WebJson json = WebJson.object();
+        json.k("ok")
+            .v(true)
+            .k("stockReady")
+            .v(WebStore.stockReady())
+            .k("itemEntries")
+            .v(WebStore.stockSize())
+            .k("fluidEntries")
+            .v(WebStore.fluidTableSize());
+
+        int probe = clampInt(query.get("id"), -1, -1, Integer.MAX_VALUE);
+        if (probe >= 0) {
+            json.k("probe")
+                .obj()
+                .k("id")
+                .v(probe)
+                .k("name")
+                .v(WebStore.nameOf(probe))
+                // 目录里存的身份键（建索引时拿真栈算的）与栈键
+                .k("key")
+                .v(WebStore.keyOfId(probe))
+                .k("stackKey")
+                .v(WebStore.stackKeyOf(probe))
+                // 缓存回读出来的栈没有 NBT，这里现读的名字可能和上面那个不一样
+                .k("freshName")
+                .v(WebStore.freshNameOf(probe))
+                .k("fluidRegistry")
+                .v(WebStore.fluidRegistryOfId(probe) == null ? "" : WebStore.fluidRegistryOfId(probe))
+                .k("fluid")
+                .v(WebStore.isFluidItem(probe))
+                .k("stock")
+                .v(WebStore.stockOf(probe))
+                .end();
+        }
+
+        int limit = clampInt(query.get("limit"), 40, 1, 200);
+        String q = query.containsKey("q") ? query.get("q") : "";
+
+        json.k("fluids")
+            .arr();
+        for (String[] row : WebStore.fluidRows(q, limit)) {
+            json.obj()
+                .k("name")
+                .v(row[0])
+                .k("registry")
+                .v(row[1])
+                .k("amount")
+                .v(row[2])
+                .end();
+        }
+        json.end();
+
+        json.k("items")
+            .arr();
+        for (String[] row : WebStore.itemRows(q, limit)) {
+            json.obj()
+                .k("key")
+                .v(row[0])
+                .k("amount")
+                .v(row[1])
+                .k("id")
+                .v(Long.parseLong(row[2]))
+                .k("name")
+                .v(row[3])
+                .end();
+        }
+        json.end();
+        return json.toString();
     }
 
     private static void writeRecipe(WebJson json, WebRecipeIndex.RecipeView view) {
