@@ -87,6 +87,20 @@ public final class WebPlanner {
         public boolean useStock = true;
 
         /**
+         * 目标产物<b>不扣库存</b>，中间产物照旧扣。
+         *
+         * <p>
+         * 「我要 64 个 A，仓库里已经有 2 个」——玩家要的往往是<b>再做 64 个</b>
+         * （补货、交付、给别人），而不是再做 62 个。中间产物没有这个语义：
+         * 手里有的当然要用掉，不然会凭空多做一批中间产物。
+         *
+         * <p>
+         * 和 {@link #useStock} 的关系：{@code useStock=false} 是「所有东西都不扣库存」
+         * （从零算），那时这个开关自然不起作用（见 {@code usesStockFor}）。
+         */
+        public boolean targetIgnoresStock;
+
+        /**
          * 这次要一起做的东西。
          *
          * <p>
@@ -239,6 +253,24 @@ public final class WebPlanner {
             if (target != null && target.itemId == itemId) return true;
         }
         return false;
+    }
+
+    /**
+     * 这件东西要不要按库存扣。
+     *
+     * <p>
+     * 三种模式都从这里出去，别在各处再写一遍判断：
+     * <ul>
+     * <li>默认：谁都扣；</li>
+     * <li>{@code targetIgnoresStock}：<b>目标不扣</b>，中间产物照扣 ——
+     * 「我要 64 个 A，仓库里那 2 个不算数，但做 A 要的钢板还是先用仓库里的」；</li>
+     * <li>{@code useStock=false}（从零算）：谁都不扣。</li>
+     * </ul>
+     */
+    private static boolean usesStockFor(int itemId, Request request) {
+        if (!request.useStock) return false;
+        if (!request.targetIgnoresStock) return true;
+        return !isTarget(itemId, request);
     }
 
     public static final class Step {
@@ -448,7 +480,7 @@ public final class WebPlanner {
             long required = entry.getValue();
             // 已经展开过的物品，它的库存已经在「要不要多做几次」那一步扣过了，
             // 这里再扣一次等于把同一批库存花两遍
-            long have = request.useStock && !expansion.expanded.contains(itemId)
+            long have = usesStockFor(itemId, request) && !expansion.expanded.contains(itemId)
                 ? Math.min(required, stock(itemId, expansion.stockCache))
                 : 0L;
             long missing = Math.max(0L, required - have);
@@ -468,7 +500,7 @@ public final class WebPlanner {
         for (Map.Entry<Integer, Long> entry : expansion.catalystNeed.entrySet()) {
             int itemId = entry.getKey();
             long required = Math.max(1L, entry.getValue());
-            long have = request.useStock ? Math.min(required, stock(itemId, expansion.stockCache)) : 0L;
+            long have = usesStockFor(itemId, request) ? Math.min(required, stock(itemId, expansion.stockCache)) : 0L;
             long missing = Math.max(0L, required - have);
             if (missing <= 0L) continue;
             Material material = new Material();
@@ -572,7 +604,7 @@ public final class WebPlanner {
                 // 只有流体/能量输入的配方也不能拿来指导（见 pickRecipe 的说明）：
                 // 那种配方在物品形态上看就是「凭空产出」，照着它算出来的步骤是假的
                 if (view != null && perCraft > 0 && view.inputs.length > 0) {
-                    long available = request.useStock ? stock(work.itemId, out.stockCache) : 0L;
+                    long available = usesStockFor(work.itemId, request) ? stock(work.itemId, out.stockCache) : 0L;
                     long effective = Math.max(0L, out.need.get(work.itemId) - available);
                     long wantedCrafts = ceilDiv(effective, perCraft);
 
@@ -969,7 +1001,9 @@ public final class WebPlanner {
         for (int i = 0; i < order.size(); i++) {
             Ingredient ingredient = order.get(i);
             ingredient.need = Math.min(MAX_AMOUNT, (long) ingredient.perCraft * times);
-            ingredient.have = request.useStock ? Math.min(ingredient.need, stockOfAny(ingredient, stockCache)) : 0L;
+            ingredient.have = usesStockFor(ingredient.itemId, request)
+                ? Math.min(ingredient.need, stockOfAny(ingredient, stockCache))
+                : 0L;
             ingredient.missing = Math.max(0L, ingredient.need - ingredient.have);
             out.add(ingredient);
         }
