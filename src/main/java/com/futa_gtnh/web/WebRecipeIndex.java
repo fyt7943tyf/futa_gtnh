@@ -182,8 +182,22 @@ public final class WebRecipeIndex {
      */
     public static int builtHandlerCount() {
         if (snapshot == null) return -1;
-        return handlerNames.size();
+        // ★ 这里必须是 NEI <b>注册</b>的数量，不是索引里实际收了多少个。
+        //
+        // 两者在「按配置跳过处理器」之后会不一样（实测：注册 367、收 364）。
+        // 拿收下的数量去比，就永远满足「现在比上次多」，于是每 10 秒重建一次索引 ——
+        // 玩家看到的就是「每点几下就重新建索引」。
+        return handlersRegisteredAtBuild;
     }
+
+    /**
+     * 上次建索引时 NEI <b>注册</b>了多少个处理器（含被 {@code webRecipeSkipHandlers} 跳过的）。
+     *
+     * <p>
+     * 和 {@link #handlerCount()}（索引里实际收下的数量）是两个数，别混用：
+     * 前者用来判断「要不要重建」，后者用来显示和读缓存。
+     */
+    private static volatile int handlersRegisteredAtBuild = -1;
 
     public static String phase() {
         return phase;
@@ -246,6 +260,9 @@ public final class WebRecipeIndex {
             if (loadFromDisk()) {
                 phase = "就绪（缓存）";
                 buildMillis = System.currentTimeMillis() - begin;
+                // 缓存里只有「收下的」处理器；重建判据要的是 NEI 此刻注册了多少个，
+                // 所以这里按当前注册数记（NEI 之后注册得更多时会照常触发一次重建）
+                handlersRegisteredAtBuild = registeredHandlerCount();
                 FutaGtnhMod.LOG
                     .info("网页配方：索引缓存命中，{} 条配方 / {} 个处理器，耗时 {} ms", recipeCount(), handlerCount(), buildMillis);
                 return;
@@ -254,7 +271,15 @@ public final class WebRecipeIndex {
             saveToDisk();
             phase = "就绪";
             buildMillis = System.currentTimeMillis() - begin;
-            FutaGtnhMod.LOG.info("网页配方：索引建立完成，{} 条配方 / {} 个处理器，耗时 {} ms", recipeCount(), handlerCount(), buildMillis);
+            // 两个数都写出来：注册数（重建判据）和收下的数（跳过配置之后可能更少），
+            // 混用时就是「每 10 秒重建一次索引」那个 bug
+            FutaGtnhMod.LOG.info(
+                "网页配方：索引建立完成，{} 条配方 / 收下 {} 个处理器（NEI 注册 {} 个，按配置跳过 {} 个），耗时 {} ms",
+                recipeCount(),
+                Integer.valueOf(handlerCount()),
+                Integer.valueOf(handlersRegisteredAtBuild),
+                Integer.valueOf(Math.max(0, handlersRegisteredAtBuild - handlerCount())),
+                buildMillis);
         } catch (Throwable t) {
             failed = true;
             lastError = String.valueOf(t);
@@ -467,6 +492,8 @@ public final class WebRecipeIndex {
 
     private static void buildAll() {
         List<ICraftingHandler> handlers = collectHandlers();
+        // ★ 先记「NEI 注册了多少个」，再过滤。重建判据用的是这个数（见 builtHandlerCount）
+        handlersRegisteredAtBuild = handlers.size();
         List<String> skippedHandlers = new ArrayList<>();
         handlers = filterHandlers(handlers, skippedHandlers);
         if (!skippedHandlers.isEmpty()) {

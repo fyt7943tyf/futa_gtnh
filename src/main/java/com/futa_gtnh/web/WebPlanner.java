@@ -1075,20 +1075,61 @@ public final class WebPlanner {
             }
         }
 
-        // 第一轮：正规配方 + 不绕回自己
+        // 第一轮：正规配方 + 材料有正规来源 + 不绕回自己
         for (int i = 0; i < scoredCount; i++) {
             WebRecipeIndex.RecipeView view = WebRecipeIndex.view(scored[i]);
-            if (view == null || isRecycling(view)) continue;
-            if (!usesTargetProduct(view, itemId)) return scored[i];
+            if (view == null || isRecycling(view) || deadEndFor(view, itemId)) continue;
+            if (inputsHaveCleanSource(view)) return scored[i];
         }
         // 第二轮：这件东西只有回收来源（或者正规配方都绕回自己），那就用回收的
         for (int i = 0; i < scoredCount; i++) {
             WebRecipeIndex.RecipeView view = WebRecipeIndex.view(scored[i]);
-            if (view == null) continue;
-            if (!usesTargetProduct(view, itemId)) return scored[i];
+            if (view == null || isRecycling(view) || deadEndFor(view, itemId)) continue;
+            return scored[i];
+        }
+        // 第三轮：连正规来源都没有，用回收的
+        for (int i = 0; i < scoredCount; i++) {
+            WebRecipeIndex.RecipeView view = WebRecipeIndex.view(scored[i]);
+            if (view == null || deadEndFor(view, itemId)) continue;
+            return scored[i];
         }
         // 全都被排掉了：还是按打分来，别因为「怕绕路」就凭空变成「没有配方」
         return scored[0];
+    }
+
+    /**
+     * 这条配方的材料里，是不是每一样都备得出来。
+     *
+     * <p>
+     * 判据是「至少有一条<b>正规</b>（非回收）来源，或者它本来就是原材料」。<b>是</b>才用它 ——
+     * 这样「熔融焊锡 ← 提取机 ← 焊锡锭 ← 合金炉」这种正常链会排在
+     * 「… ← 焊锡箔 ← 焊锡粉 ← 研磨机回收」这种绕一大圈（而且要靠回炉）的前面。
+     */
+    private static boolean inputsHaveCleanSource(WebRecipeIndex.RecipeView view) {
+        for (int s = 0; s < view.inputs.length; s++) {
+            int[] alts = view.inputs[s].alts;
+            if (alts.length == 0) continue;
+            boolean clean = false;
+            int altTake = Math.min(alts.length, 4);
+            for (int a = 0; a < altTake && !clean; a++) {
+                int[] producers = WebRecipeIndex.recipesFor(alts[a]);
+                if (producers.length == 0) {
+                    // 本来就是要去挖/去换的原材料，没问题
+                    clean = true;
+                    break;
+                }
+                int limit = Math.min(producers.length, 8);
+                for (int p = 0; p < limit; p++) {
+                    WebRecipeIndex.RecipeView produced = WebRecipeIndex.view(producers[p]);
+                    if (produced != null && !isRecycling(produced)) {
+                        clean = true;
+                        break;
+                    }
+                }
+            }
+            if (!clean) return false;
+        }
+        return true;
     }
 
     /** 排序用：分数高的优先；同分时非回收的优先。 */
@@ -1186,8 +1227,19 @@ public final class WebPlanner {
         return builder.toString();
     }
 
-    /** 这条配方的材料里，有没有哪一个是「靠本物品做出来的」（只看一层）。 */
-    private static boolean usesTargetProduct(WebRecipeIndex.RecipeView view, int itemId) {
+    /**
+     * 这条配方的材料里，有没有哪一个是「死路」—— 它<b>每一条</b>来源都要用到本物品。
+     *
+     * <p>
+     * 注意是「每一条」，不是「有一条」。只看一条会误伤正经配方：焊锡锭既能用合金炉
+     * （锡+锑+铅）做，也能用流体固化器从熔融焊锡做 —— 有前者在，
+     * 「焊锡锭 → 熔融焊锡」这条正规提取配方就不该被排掉（实测误伤过，
+     * 结果规划绕成「焊锡箔 → 焊锡粉 → 提取」一大圈）。
+     *
+     * <p>
+     * 来源多到看不完（超过 12 条）时保守放行：宁可让它试，也别把可能存在的正规链堵死。
+     */
+    private static boolean deadEndFor(WebRecipeIndex.RecipeView view, int itemId) {
         for (int s = 0; s < view.inputs.length; s++) {
             int[] alts = view.inputs[s].alts;
             int take = Math.min(alts.length, 4);
@@ -1195,11 +1247,16 @@ public final class WebPlanner {
                 int alt = alts[a];
                 if (alt < 0 || alt == itemId) continue;
                 int[] producers = WebRecipeIndex.recipesFor(alt);
-                int limit = Math.min(producers.length, 12);
-                for (int p = 0; p < limit; p++) {
+                if (producers.length == 0 || producers.length > 12) continue;
+                boolean allNeedTarget = true;
+                for (int p = 0; p < producers.length; p++) {
                     WebRecipeIndex.RecipeView produced = WebRecipeIndex.view(producers[p]);
-                    if (produced != null && consumesItem(produced, itemId)) return true;
+                    if (produced == null || !consumesItem(produced, itemId)) {
+                        allNeedTarget = false;
+                        break;
+                    }
                 }
+                if (allNeedTarget) return true;
             }
         }
         return false;
