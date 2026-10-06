@@ -24,7 +24,8 @@ public class DumpRecipes {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
-            System.out.println("用法: java DumpRecipes.java <web_recipes.dat> --handlers | --item <id> | --produces <id> | --handler <标签子串>");
+            System.out.println(
+                "用法: java DumpRecipes.java <web_recipes.dat> --handlers | --item <id> | --produces <id> | --handler <标签子串> | --handlerstat <标签子串>");
             return;
         }
         String mode = args[1];
@@ -122,6 +123,65 @@ public class DumpRecipes {
                     }
                 }
                 if (shown == 0) System.out.println("（没有任何配方涉及这个 id）");
+            } else if (mode.equals("--suspect")) {
+                // 找出「条目一大堆、主产物却几乎只有一个」的处理器。
+                //
+                // 这是「NEI 的展示页面被当成配方读进来」的指纹：燃料页、基因采样页这种页面
+                // 只是罗列物品（能不能烧、能采什么基因），结果槽里留着模板上的东西，
+                // 索引一读就变成「几千种物品都能变成同一个产物」，凭空造出一堆假配方和假环。
+                int[] counts = new int[handlers];
+                java.util.Map<Integer, java.util.HashSet<Integer>> seen = new java.util.HashMap<>();
+                for (int o = 0; o < recipeCount; o++) {
+                    int slot = Math.max(0, Math.min(handlers - 1, handlerSlot[o]));
+                    counts[slot]++;
+                    seen.computeIfAbsent(Integer.valueOf(slot), k -> new java.util.HashSet<>())
+                        .add(Integer.valueOf(primaryResult[o]));
+                }
+                Integer[] order = new Integer[handlers];
+                for (int i = 0; i < handlers; i++) order[i] = Integer.valueOf(i);
+                java.util.Arrays.sort(order, (a, b) -> counts[b.intValue()] - counts[a.intValue()]);
+                for (int i = 0; i < handlers; i++) {
+                    int slot = order[i].intValue();
+                    if (counts[slot] < 100) break;
+                    java.util.HashSet<Integer> set = seen.get(Integer.valueOf(slot));
+                    int distinct = set == null ? 0 : set.size();
+                    if ((double) distinct / (double) counts[slot] > 0.02D) continue;
+                    System.out.println(
+                        "  " + counts[slot] + " 条 / 主产物只有 " + distinct + " 种\t" + handlerTags.get(slot) + "\t"
+                            + handlerNames.get(slot));
+                }
+            } else if (mode.equals("--handlerstat")) {
+                // 某个处理器在索引里到底长什么样：条目数、不同主产物个数、最常见的主产物。
+                //
+                // 「条目几千条、主产物却只有一个」是模板被读串了的典型特征（NEI 的燃料页就是
+                // 把燃料槽画在熔炉模板上，结果槽里留着上一条熔炉配方的产物）。
+                int[] counts = new int[handlers];
+                java.util.Map<Integer, Integer> results = new java.util.HashMap<>();
+                for (int o = 0; o < recipeCount; o++) {
+                    int slot = Math.max(0, Math.min(handlers - 1, handlerSlot[o]));
+                    if (!handlerTags.get(slot)
+                        .contains(value)) continue;
+                    counts[slot]++;
+                    Integer key = Integer.valueOf(primaryResult[o]);
+                    results.put(key, Integer.valueOf(results.getOrDefault(key, Integer.valueOf(0)).intValue() + 1));
+                }
+                int total = 0;
+                for (int i = 0; i < handlers; i++) {
+                    if (counts[i] == 0) continue;
+                    total += counts[i];
+                    System.out.println("  " + counts[i] + "\t" + handlerTags.get(i) + "\t" + handlerNames.get(i));
+                }
+                System.out.println("合计 " + total + " 条，不同主产物 " + results.size() + " 个");
+                results.entrySet()
+                    .stream()
+                    .sorted((a, b) -> b.getValue()
+                        .intValue()
+                        - a.getValue()
+                            .intValue())
+                    .limit(8)
+                    .forEach(
+                        e -> System.out.println(
+                            "   " + e.getValue() + " 条 -> " + key(e.getKey().intValue(), identities)));
             } else if (mode.equals("--handler")) {
                 int shown = 0;
                 for (int o = 0; o < recipeCount; o++) {

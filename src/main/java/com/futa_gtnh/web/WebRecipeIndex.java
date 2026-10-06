@@ -472,6 +472,15 @@ public final class WebRecipeIndex {
         StringBuilder builder = new StringBuilder(8192);
         builder.append(FILE_VERSION)
             .append(';');
+        // 跳过清单也算指纹的一部分：改了 webRecipeSkipHandlers 之后必须重建，
+        // 否则「配置改了却毫无变化」——玩家只会觉得这个开关是坏的
+        builder.append(Config.webRecipeSkipHandlers == null ? "" : Config.webRecipeSkipHandlers)
+            .append(';');
+        for (int i = 0; i < NOISE_HANDLER_TAGS.length; i++) {
+            builder.append(NOISE_HANDLER_TAGS[i])
+                .append(',');
+        }
+        builder.append(';');
         try {
             List<String> entries = new ArrayList<>();
             for (cpw.mods.fml.common.ModContainer mod : cpw.mods.fml.common.Loader.instance()
@@ -498,7 +507,7 @@ public final class WebRecipeIndex {
         handlers = filterHandlers(handlers, skippedHandlers);
         if (!skippedHandlers.isEmpty()) {
             FutaGtnhMod.LOG.info(
-                "网页配方：按配置跳过 {} 个处理器（不是合成来源的，如战利品袋/任务奖励）：{}",
+                "网页配方：跳过 {} 个处理器（战利品袋/任务奖励这类不是合成来源的，以及燃料页、基因页这种展示页）：{}",
                 Integer.valueOf(skippedHandlers.size()),
                 String.join("；", skippedHandlers));
         }
@@ -548,7 +557,35 @@ public final class WebRecipeIndex {
     }
 
     /**
-     * 按配置（{@code webRecipeSkipHandlers}）剔掉不该进索引的处理器。
+     * 这些处理器在 NEI 里只是<b>展示页</b>，不是配方：不看配置，永远不进索引。
+     *
+     * <p>
+     * 怎么发现的：把索引缓存按处理器统计「条目数 / 不同主产物个数」，这几个的比值低到离谱 ——
+     * 燃料页 3883 条<b>全部</b>产出铁锭、基因采样页 9281 条全部产出基因样本、伪装板 6795 条
+     * 全部产出同一个 id。原因是这些页面把物品罗列在熔炉/机器的模板上，结果槽里留着上一条
+     * 配方的东西，索引一读就成了「几千种物品都能变成同一个产物」。
+     *
+     * <p>
+     * 危害不是「多一点噪音」：凭空多出来的「X → 铁锭」让<i>任何</i>含铁的东西都能绕回铁锭，
+     * 于是规划里到处是假环（实测一次计划里 185 样东西互相咬合、整份计划退化成 1 步，
+     * 玩家看到的就是「熔融焊锡明明能提取却报缺 9216」）。
+     * 另外冶炼炉熔化、发酵机、GT 的各种图表页在索引里连产物都读不出来（产物为空），
+     * 留着只会在物品页里显示成一条没有结果的「配方」。
+     *
+     * <p>
+     * 用完整类名匹配（不看 {@code |配方表} 那段）：类名稳定，也不会误伤名字里带 extractor
+     * 的正规处理器（比如 {@code gt.recipe.fluid_extractor_recycling}）。
+     */
+    private static final String[] NOISE_HANDLER_TAGS = { "codechicken.nei.recipe.fuelrecipehandler",
+        "net.bdew.gendustry.nei.samplerhandler", "net.bdew.gendustry.nei.extractorhandler",
+        "net.bdew.gendustry.nei.mutatronhandler", "net.bdew.neiaddons.forestry.bees.beebreedinghandler",
+        "net.bdew.neiaddons.forestry.trees.treebreedinghandler", "neicustomdiagram.diagramgroup",
+        "com.gtnewhorizon.cropsnh.compatibility.nei", "tconstruct.plugins.nei.recipehandlermelting",
+        "tconstruct.plugins.nei.recipehandlertoolmaterials", "forestry.factory.recipes.nei.neihandlerfermenter",
+        "appeng.integration.modules.neihelpers.neifacaderecipehandler" };
+
+    /**
+     * 按配置（{@code webRecipeSkipHandlers}）+ 内置清单剔掉不该进索引的处理器。
      *
      * <p>
      * 有些 NEI「配方」不是合成方法，而是「这东西能从哪来」：战利品袋、任务奖励、
@@ -563,32 +600,31 @@ public final class WebRecipeIndex {
      */
     private static List<ICraftingHandler> filterHandlers(List<ICraftingHandler> handlers, List<String> skipped) {
         String config = Config.webRecipeSkipHandlers;
-        if (config == null || config.trim()
-            .isEmpty()) {
-            return handlers;
-        }
-        String[] patterns = config.toLowerCase(Locale.ROOT)
-            .split(",");
+        String[] patterns = config == null || config.trim()
+            .isEmpty() ? new String[0]
+                : config.toLowerCase(Locale.ROOT)
+                    .split(",");
         List<ICraftingHandler> kept = new ArrayList<>(handlers.size());
         for (int i = 0; i < handlers.size(); i++) {
             ICraftingHandler handler = handlers.get(i);
             String tag = handlerTag(handler);
             String lower = tag.toLowerCase(Locale.ROOT);
-            boolean hit = false;
-            for (int p = 0; p < patterns.length; p++) {
-                String pattern = patterns[p].trim();
-                if (!pattern.isEmpty() && lower.contains(pattern)) {
-                    hit = true;
-                    break;
-                }
-            }
-            if (hit) {
+            if (matchesAny(lower, patterns, 0) || matchesAny(lower, NOISE_HANDLER_TAGS, 0)) {
                 if (skipped.size() < 20) skipped.add(tag);
             } else {
                 kept.add(handler);
             }
         }
         return kept;
+    }
+
+    /** {@code lower} 里含不含 {@code patterns} 里的任意一条（空串不算）。 */
+    private static boolean matchesAny(String lower, String[] patterns, int from) {
+        for (int p = from; p < patterns.length; p++) {
+            String pattern = patterns[p] == null ? "" : patterns[p].trim();
+            if (!pattern.isEmpty() && lower.contains(pattern)) return true;
+        }
+        return false;
     }
 
     private static ICraftingHandler allRecipesOf(ICraftingHandler handler) {
