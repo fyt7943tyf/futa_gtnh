@@ -9,9 +9,11 @@
  * 于是「我明明给它选了合成方式，规划还是把它当原料」「还缺熔融焊锡」。
  *
  * 断言：
- *   1. 每个流体名在搜索里只有一条（重复条目不该单独出现）；
- *   2. 那一条在计划里被认成流体，或者本身能展开出步骤；
- *   3. 老计划里存的「重复条目」编号，规划结果要和正式那条**一模一样**
+ *   1. 这个流体名在目录里找得到（同名条目至少一条）；
+ *   2. 同名的几条**指向同一种流体**：库存数字必须一样（名字匹配到的就是那份流体）；
+ *   3. 能规划的那一条在计划里是可用的 —— 认成流体、能展开出步骤，
+ *      或者**已经被库存覆盖**（那时计划本来就是 0 步：不需要再做，这不是坏事）；
+ *   4. 老计划里存的「重复条目」编号，规划结果要和正式那条**一模一样**
  *      （接口层会把编号指回正式那条，见 WebStore.canonicalId）。
  *
  * 用法：
@@ -39,6 +41,28 @@ async function api(path) {
     return res.json();
 }
 
+/**
+ * 按名字找同名条目。
+ *
+ * <p>
+ * 不能只看前 40 条：搜索是「名字 + 拼音」的子串匹配，搜「水」会命中一千多条
+ * （紫水晶、水桶、粗水之魔晶矿石…），精确同名的那条可能排在很后面。
+ * 所以翻几页找，找到就停。
+ */
+async function findExact(name, pages) {
+    const hits = [];
+    for (let page = 0; page < (pages || 5); page++) {
+        const search = await api(
+            '/api/search?q=' + encodeURIComponent(name) + '&limit=200&offset=' + (page * 200));
+        const items = search.items || [];
+        for (const it of items) {
+            if (it.name === name) hits.push(it);
+        }
+        if (items.length < 200) break;
+    }
+    return hits;
+}
+
 const DEFAULTS = ['熔融焊锡', '熔融坎塔尔合金', '熔融镍铬合金', '熔融白铜', '水', '岩浆', '冷却液'];
 
 /** 只比较「这个物品本身」的字段：编号规整之后应当完全一致。 */
@@ -64,23 +88,34 @@ function shape(plan) {
 
     console.log('对象：' + BASE);
     for (const name of names) {
-        const search = await api('/api/search?q=' + encodeURIComponent(name) + '&limit=40');
-        const exact = (search.items || []).filter((it) => it.name === name);
+        const exact = await findExact(name);
         check(
-            name + ' 只有一条同名条目',
-            exact.length === 1,
+            name + ' 在目录里找得到',
+            exact.length >= 1,
             '命中 ' + exact.length + ' 条：' + exact.map((i) => i.id + '/' + i.mod).join(', ')
         );
-        if (exact.length !== 1) continue;
+        if (exact.length === 0) continue;
 
-        const id = exact[0].id;
+        // 同名的几条必须是同一种流体：它们都要按名字匹配到那份库存，数字就得一样
+        const stocks = exact.map((i) => i.stock);
+        const sameStock = stocks.every((s) => s === stocks[0]);
+        check(name + ' 的同名条目指向同一种流体（库存数字一致）', sameStock,
+            'id/库存：' + exact.map((i) => i.id + '/' + i.stock).join(', '));
+
+        // 挑「能规划的那一条」来验可用性（其余是别的模组里同名的真物品，craftable=false）
+        const usableItem = exact.find((i) => i.craftable) || exact[0];
+        const id = usableItem.id;
         const plan = await api('/api/plan?id=' + id + '&count=1');
         const mine = (plan.materials || []).find((m) => m.id === id);
-        const usable = plan.ok === true && ((mine && mine.fluid === true) || (plan.steps || []).length > 0);
+        const covered = !!mine === false && (plan.steps || []).length === 0 && usableItem.stock > 0;
+        const usable = plan.ok === true
+            && ((mine && mine.fluid === true) || (plan.steps || []).length > 0 || covered);
         check(
-            name + ' 的编号在计划里是可用的（认成流体，或能展开出步骤）',
+            name + ' 的编号在计划里是可用的（认成流体、能展开，或已被库存覆盖）',
             usable,
-            'id=' + id + ' steps=' + (plan.steps || []).length + ' fluid=' + (mine ? mine.fluid : '—')
+            'id=' + id + ' steps=' + (plan.steps || []).length
+                + ' fluid=' + (mine ? mine.fluid : '—') + ' 库存=' + usableItem.stock
+                + (covered ? '（够用，所以不需要做）' : '')
         );
     }
 

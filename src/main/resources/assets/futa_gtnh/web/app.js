@@ -473,6 +473,19 @@
         return out;
     }
 
+    /**
+     * 组的「做几套」。
+     *
+     * <p>
+     * 旧数据里根本没有这个字段（那时候一套就是一套），所以读不到时按 1 处理 ——
+     * 升级不能让已经存好的清单变成 0 份，也不能把它当坏数据丢掉。
+     */
+    function normalizeTimes(raw) {
+        var n = Number(raw);
+        if (!isFinite(n) || n < 1) return 1;
+        return Math.min(1000000, Math.round(n));
+    }
+
     /** 读组存储；没有就迁移旧清单。返回 {version, activeId, groups}。 */
     function readGroupStore() {
         var raw = lsGet(LS_GROUPS);
@@ -487,6 +500,8 @@
                         groups.push({
                             id: g.id ? String(g.id) : newGroupId(),
                             name: g.name ? String(g.name).slice(0, 40) : DEFAULT_GROUP_NAME,
+                            // times 是后来加的字段：老数据读出来是 undefined，按 1 套处理
+                            times: normalizeTimes(g.times),
                             items: normalizeItems(g.items)
                         });
                     }
@@ -516,7 +531,7 @@
         } catch (e) {
             legacy = [];
         }
-        var first = { id: newGroupId(), name: DEFAULT_GROUP_NAME, items: legacy };
+        var first = { id: newGroupId(), name: DEFAULT_GROUP_NAME, times: 1, items: legacy };
         var store = { version: GROUP_SCHEMA, activeId: first.id, groups: [first] };
         writeGroupStore(store);
         return store;
@@ -559,6 +574,7 @@
         var g = {
             id: newGroupId(),
             name: (name && String(name).slice(0, 40)) || ('新组 ' + (store.groups.length + 1)),
+            times: 1,
             items: []
         };
         store.groups.push(g);
@@ -602,6 +618,8 @@
             var g = {
                 id: newGroupId(),
                 name: (src.name + ' 副本').slice(0, 40),
+                // 复制的是「已经乘好的这一套」：套数跟着一起复制，不然副本会显得少做了几份
+                times: normalizeTimes(src.times),
                 items: normalizeItems(src.items)
             };
             store.groups.push(g);
@@ -643,6 +661,44 @@
         }
         group.items = normalizeItems(list);
         writeGroupStore(store);
+    }
+
+    /** 当前组的「做几套」。 */
+    function activeGroupTimes() {
+        var group = activeGroup();
+        return group ? normalizeTimes(group.times) : 1;
+    }
+
+    /**
+     * 改「这一套做几套」：把组里每一样按比例缩放，并把套数记在组上。
+     *
+     * <p>
+     * 为什么是「按比例」而不是「再乘一遍」：套数是「这套做几份」，不是「再做几遍」——
+     * 从 3 套改回 2 套，要的是 2 套，不是 6 套。所以缩放系数是 新套数 ÷ 旧套数。
+     *
+     * <p>
+     * 缩放用 round 并至少留 1：玩家手改过某一行之后比例可能除不尽（64 个改成 65 个再 ×3÷2），
+     * 那时候给一个能用的整数，比留个小数或者把某样东西变成 0 份要有用。
+     *
+     * @return 有没有真的改动（套数没变返回 false，界面据此决定要不要重算）
+     */
+    function setGroupTimes(groupId, times) {
+        var store = readGroupStore();
+        for (var i = 0; i < store.groups.length; i++) {
+            var g = store.groups[i];
+            if (g.id !== String(groupId)) continue;
+            var from = normalizeTimes(g.times);
+            var to = normalizeTimes(times);
+            if (to === from) return false;
+            for (var j = 0; j < g.items.length; j++) {
+                var scaled = Math.round(g.items[j].count * to / from);
+                g.items[j].count = Math.max(1, Math.min(1000000, scaled));
+            }
+            g.times = to;
+            writeGroupStore(store);
+            return true;
+        }
+        return false;
     }
 
     function addToBasket(itemId, count) {
@@ -2548,6 +2604,56 @@
     }
 
     /**
+     * 就地输入一行字（不用 {@code window.prompt}）。
+     *
+     * <p>
+     * 系统 prompt 在手机上体验很差，有些 WebView 还会**直接拦掉** ——
+     * 拦掉时点击就是「没反应」，玩家根本不知道发生了什么（「点了删除本组没反应」就是这么来的）。
+     * 所以改成在栏内自己长出一个输入框：看得见、能回车确认、能取消。
+     *
+     * @param host    往哪个容器里长出这一行
+     * @param label   这一行问的是什么
+     * @param initial 预填内容
+     * @param onOk    确认时回调（拿到的是 trim 过的字符串，可能是空的 —— 由调用方决定怎么办）
+     */
+    function inlineAsk(host, label, initial, onOk) {
+        var previous = host.querySelector('.group-ask');
+        if (previous && previous.parentNode) previous.parentNode.removeChild(previous);
+
+        var row = el('div', 'group-ask');
+        row.appendChild(el('span', 'group-ask-label', label));
+
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'input group-ask-input';
+        input.maxLength = 40;
+        input.value = initial || '';
+        input.setAttribute('aria-label', label);
+        row.appendChild(input);
+
+        var close = function () {
+            if (row.parentNode) row.parentNode.removeChild(row);
+        };
+        var submit = function () {
+            var value = String(input.value || '').trim();
+            close();
+            onOk(value);
+        };
+
+        row.appendChild(makeButton('确定', 'btn btn-small', submit));
+        row.appendChild(makeButton('取消', 'btn btn-small btn-ghost', close));
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') submit();
+            if (event.key === 'Escape') close();
+        });
+
+        host.appendChild(row);
+        input.focus();
+        if (input.setSelectionRange) input.setSelectionRange(input.value.length, input.value.length);
+        return row;
+    }
+
+    /**
      * 「点两次才算数」的按钮。
      *
      * <p>
@@ -2734,6 +2840,10 @@
                 if (group.items.length > 0) {
                     tab.appendChild(el('span', 'group-count', String(group.items.length)));
                 }
+                // 套数挂在标签上：切走之前就能看出哪一组是「做 3 套」的那一组
+                if (normalizeTimes(group.times) > 1) {
+                    tab.appendChild(el('span', 'group-times-badge', '×' + normalizeTimes(group.times)));
+                }
                 tab.setAttribute('aria-label', '切换到书签组「' + group.name + '」');
                 tab.addEventListener('click', function () {
                     if (!setActiveGroup(group.id)) return;
@@ -2753,11 +2863,15 @@
         var tools = el('div', 'group-tools');
         var add = btn('btn btn-small', '＋ 新建组');
         add.addEventListener('click', function () {
-            var name = prompt('新书签组的名字（里面先放空，之后往里加方块）', '新组 ' + (readGroupStore().groups.length + 1));
-            if (name === null) return;
-            var g = createGroup(name);
-            render();
-            toast('已新建「' + g.name + '」', 'ok');
+            inlineAsk(
+                box,
+                '新书签组的名字',
+                '新组 ' + (readGroupStore().groups.length + 1),
+                function (name) {
+                    var g = createGroup(name);
+                    render();
+                    toast('已新建「' + g.name + '」', 'ok');
+                });
         });
         tools.appendChild(add);
 
@@ -2765,10 +2879,10 @@
         if (active) {
             var rename = btn('btn btn-small', '重命名');
             rename.addEventListener('click', function () {
-                var name = prompt('「' + active.name + '」改成什么名字？', active.name);
-                if (name === null) return;
-                renameGroup(active.id, name);
-                render();
+                inlineAsk(box, '改成什么名字', active.name, function (name) {
+                    renameGroup(active.id, name);
+                    render();
+                });
             });
             tools.appendChild(rename);
 
@@ -2782,9 +2896,11 @@
             tools.appendChild(copy);
 
             if (readGroupStore().groups.length > 1) {
-                var del = btn('btn btn-small btn-danger', '删除本组');
-                del.addEventListener('click', function () {
-                    if (!confirm('删掉「' + active.name + '」？组里的清单会一起没掉（配方选择不受影响）。')) return;
+                // ★ 不用 window.confirm：有些浏览器/WebView 会把对话框吞掉（或者玩家勾过
+                // 「不再显示」），那时 confirm 直接返回 false —— 表现就是「点删除本组没反应」。
+                // 改成点两次确认：第一次只是把按钮变成确认态，5 秒不动自己改回来。
+                var del = makeButton('删除本组', 'btn btn-small btn-danger', function () {});
+                armConfirm(del, '删除本组', '再点一次确认删除', function () {
                     deleteGroup(active.id);
                     render();
                     toast('已删除「' + active.name + '」', 'ok');
@@ -2793,7 +2909,110 @@
             }
         }
         box.appendChild(tools);
+        box.appendChild(makeTimesBar());
         return box;
+    }
+
+    /**
+     * 「做几套」那一行。
+     *
+     * <p>
+     * 成套的东西经常要做好几份（同一套电路板机器做 3 台），一件一件去改数量很容易漏。
+     * 套数记在<b>组</b>上：切到这一组就是几套，切走再切回来还是几套 ——
+     * 所以它是「某个清单做几个」，不是页面上的一次性倍数。
+     *
+     * <p>
+     * 它缩放的是<b>这一整套</b>：组里的每一样，以及页面上「当前」那一件。
+     *
+     * <p>
+     * ★ 「当前」那一件必须一起乘。计划页下面那张材料表算的是「这一套 + 你正在看的这一件」，
+     * 而玩家点开的那件东西往往正是这一套里的主体（做完机器要做 3 台）——
+     * 早先只乘组里的东西时，玩家的实测就是「选了 3 套，下面材料数量一个都没变」。
+     */
+    function makeTimesBar() {
+        var group = activeGroup();
+        var bar = el('div', 'group-times');
+        if (!group) return bar;
+
+        var times = normalizeTimes(group.times);
+
+        bar.appendChild(el('span', 'group-times-label', '做几套'));
+
+        var minus = btn('btn btn-small', '−');
+        minus.setAttribute('aria-label', '这一套少做一份');
+        if (times <= 1) minus.disabled = true;
+        minus.addEventListener('click', function () {
+            applyTimes(times - 1);
+        });
+        bar.appendChild(minus);
+
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'input input-count is-small';
+        input.min = '1';
+        input.max = '1000000';
+        input.value = String(times);
+        input.setAttribute('aria-label', '这一套做几份');
+        input.addEventListener('change', function () {
+            var value = clampInt(input.value, 1, 1000000, times);
+            input.value = String(value);
+            applyTimes(value);
+        });
+        bar.appendChild(input);
+
+        var plus = btn('btn btn-small', '＋');
+        plus.setAttribute('aria-label', '这一套多做一份');
+        plus.addEventListener('click', function () {
+            applyTimes(times + 1);
+        });
+        bar.appendChild(plus);
+
+        if (group.items.length === 0) {
+            bar.appendChild(el('span', 'dim', '这一套还是空的'));
+        } else if (times > 1) {
+            bar.appendChild(el('span', 'dim', '每一样都按 ×' + times + ' 算'));
+        }
+
+        /**
+         * 换套数：整组一起缩放，正在看的那一件也跟着走，然后重算这份计划。
+         *
+         * <p>
+         * 比例用<b>存档里记着的份数</b>当基准（不用闭包里那个），
+         * 这样连点两下 ＋ 不会因为读到旧值而算错。
+         */
+        var applyTimes = function (next) {
+            var from = activeGroupTimes();
+            var to = normalizeTimes(next);
+            if (!setGroupTimes(group.id, to)) {
+                render();
+                return;
+            }
+            scaleCurrentTarget(from, to);
+            render();
+            refreshPlan();
+            toast('「' + group.name + '」按 ' + to + ' 套算', 'ok');
+        };
+
+        return bar;
+    }
+
+    /**
+     * 把「正在看的那一件」的数量按份数比例缩放。
+     *
+     * <p>
+     * 计划 = 这一套 + 当前这一件，所以份数一变它也得跟着变；不然材料表看起来毫无反应
+     * （玩家实测报过这一点）。它只存在页面状态里，不是一个组属性 ——
+     * 切到别的组不会把它改回去，那本来也说不清该改成多少。
+     */
+    function scaleCurrentTarget(from, to) {
+        if (!(from >= 1) || !(to >= 1) || to === from) return;
+        var scale = function (value) {
+            var n = Number(value);
+            if (!isFinite(n) || n < 1) n = 1;
+            return Math.max(1, Math.min(1000000, Math.round(n * to / from)));
+        };
+        state.item.count = scale(state.item.count);
+        state.plan.count = scale(state.plan.count);
     }
 
     function makeBasketSection(currentId, currentCount) {
@@ -2801,14 +3020,23 @@
         var section = el('div', 'section');
         // 组栏放在标题之前：先选「算哪一套」，再看「这套里有什么」
         section.appendChild(makeGroupBar());
+        var times = activeGroupTimes();
         var title = el('div', 'section-title');
         title.appendChild(document.createTextNode('一起做'));
-        title.appendChild(el('span', 'count', '(' + (list.length + (currentId !== null ? 1 : 0)) + ')'));
+        title.appendChild(
+            el('span', 'count',
+                times > 1
+                    ? '(' + (list.length + (currentId !== null ? 1 : 0)) + ' 样 ×' + times + ')'
+                    : '(' + (list.length + (currentId !== null ? 1 : 0)) + ')'));
         section.appendChild(title);
 
         section.appendChild(
             el('div', 'muted',
                 '这里的东西会放进同一份计划一起算：共用的中间产物只做一批，步骤表里也会合并。'));
+        section.appendChild(
+            el('div', 'muted',
+                '整份清单要重复做几份，用上面的「做几套」——它把这一套里的每一样'
+                    + '（以及你正在看的这一件）一起翻倍，下面的材料表会跟着重算。'));
 
         // 空组要说一句：不然玩家新建完组、看到一个空箱子，会以为坏了
         var groupNow = activeGroup();
@@ -3181,7 +3409,15 @@
     /* ------------------------------------------------------------ 计划页 */
 
     function renderPlanPage(id, query) {
-        var count = clampInt(query && query.count !== undefined ? query.count : 64, 1, 1000000, 64);
+        // ★ 同一个目标**重新渲染**时（切书签组、改「做几套」、改数量之后的重画），
+        // 数量以页面状态为准，不要每次都从地址栏那个 count 重置回来。
+        //
+        // 踩过的坑：改份数时先 render() 再 refreshPlan()，而 render() 把刚乘上去的数量
+        // 按地址栏的旧 count 抹掉了 —— 表现就是玩家报的「选了 n 套，下面材料数量没变」。
+        // 换目标（id 不同）或新开页面时才用地址栏里的数。
+        var fromQuery = clampInt(query && query.count !== undefined ? query.count : 64, 1, 1000000, 64);
+        var sameTarget = state.plan.id === id && state.plan.count >= 1;
+        var count = sameTarget ? clampInt(state.plan.count, 1, 1000000, 64) : fromQuery;
         var planState = state.plan;
         planState.id = id;
         planState.count = count;
