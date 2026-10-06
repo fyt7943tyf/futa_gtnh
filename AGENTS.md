@@ -6,6 +6,7 @@
 - `src/main/resources/` 存放 `mcmod.info`、Mixin 配置、翻译文件，以及 `assets/futa_gtnh/` 下的纹理资源。
 - `docs/` 存放开发和 API 笔记；`tools/pinyin/` 存放独立的辅助工具。
 - `gradle.properties`、`dependencies.gradle` 和 `build.gradle.kts` 定义 GTNH/RetroFuturaGradle 构建流程。请保留 `gtnhShared/` 中的格式化配置；发布版本只修改 `version.txt`。
+- **迭代构建不要动 `version.txt`**：版本号表示"已测过并推送的那一版"，不是构建号。改代码 → 构建 → 交给用户测（版本号保持不变，jar 同名覆盖）→ 用户确认后再更新 `version.txt`、重新构建并推送。索引内容变了要换缓存时，改 `WebRecipeIndex.FILE_VERSION`（内部缓存版本），不要借模组版本号来触发重建。
 
 ## 构建、测试与开发命令
 
