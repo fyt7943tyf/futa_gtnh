@@ -13,7 +13,23 @@
 node tools/web-test/smoke.js     # 接口契约：38 项
 node tools/web-test/fuzz.js      # 规划压力：沿目录抽样 40 个物品
 node tools/web-test/ui.js        # 页面交互：无头 Edge 真的去点
+node tools/web-test/groups.js    # 书签组兼容：旧清单迁移、切组、旧键保留
+node tools/web-test/basket-times.js  # 「做几套」：兼容、按比例回落、切组后仍在
+node tools/web-test/settings.js  # 本地数据页（清空 / 导出 / 恢复）
 ```
+
+`ui.js` / `groups.js` / `basket-times.js` / `settings.js` 都**自己起一个无头 Edge**
+（各自的临时 `--user-data-dir`），不碰你正在用的浏览器 —— 它们会 `localStorage.clear()`，
+连错浏览器就是把别人的清单清了。
+
+**点按钮要用真鼠标**：`element.click()` 是直接派发事件，元素被别的东西盖住也照样"成功"。
+破坏性按钮（删除本组之类）在 `groups.js` 里走 CDP 的 `Input.dispatchMouseEvent`，
+并且先检查按钮中心点上"最上层的是谁"、再断言**全程没有系统对话框**
+（`window.confirm` 被浏览器吞掉时，表现就是"点了没反应"）。
+
+改前端时不用重开游戏：`node tools/web-test/serve-live.js` 在 8766 起一个代理，
+页面文件取 `build/resources/main/assets/futa_gtnh/web`（先跑一次 `gradlew processResources`），
+`/api/*` 转给正在跑的游戏。然后 `--base http://127.0.0.1:8766` 跑上面这些脚本。
 
 环境变量：
 
@@ -95,10 +111,15 @@ java tools/web-test/DumpRecipes.java  <缓存> --handler alloysmelter  # 按处�
 
 两个都用 JDK 的单文件模式直接跑（`java 文件.java`），不需要编译。
 
-**`fluid-identity.js`**（`node tools/web-test/fluid-identity.js`）盯的是一条被反复踩出来的规律：
+**`fluid-identity.js`**（`node tools/web-test/fluid-identity.js`）盯的是流体身份：
 同一种流体在 GTNH 里有两套显示物品（GT 的 `GregTech_FluidDisplay` 和 NEI 的
-`neiFluidDisplay`），它们在玩家眼里是同一个东西。脚本断言每个流体名在搜索里**只有一条**、
-计划认得它，并可用 `--alias <重复编号> <正式编号>` 核对老编号会被指回正式那条。
+`neiFluidDisplay`），它们在玩家眼里是同一个东西。脚本断言每个流体名在目录里找得到、
+同名的几条**指向同一种流体**（库存数字必须一致），并且能规划的那一条在计划里可用 ——
+「可用」包括**已被库存覆盖**（那时计划就是 0 步：不需要再做）。
+另可用 `--alias <重复编号> <正式编号>` 核对老编号会被指回正式那条。
+
+> 搜名字要翻页找：搜索是「名字 + 拼音」的子串匹配，搜「水」会命中一千多条
+> （紫水晶、水桶、粗水之魔晶矿石…），精确同名的那条可能排在很后面。
 
 排查「明明能做却报缺」时，规划接口加 `&debug=1`：警告里会逐条写出被掐断的物品
 **各自选中了哪条配方、材料是谁** —— 光看材料表只知道它被掐断了，看不出是被哪条配方带进环里的。

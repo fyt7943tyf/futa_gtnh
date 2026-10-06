@@ -11,10 +11,45 @@
  */
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { spawn } = require('child_process');
 
-const PORT = 9222;
+// 自己起一个无头实例（自己的临时 profile），不要连 9222：
+// 那个端口上可能是别的浏览器（玩家自己的、或上一次没退干净的实例），
+// 而这个脚本会 localStorage.clear() —— 连错浏览器就是把别人的清单清了。
+const PORT = 9446;
 const BASE = process.env.BASE || 'http://127.0.0.1:8765';
 const OUT = process.argv[2] || path.join(process.env.TEMP, 'futa-shots', 'groups-compat.png');
+const EDGE_CANDIDATES = [
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+];
+
+/** 起无头 Edge 并等它的调试端口就绪。 */
+async function launchEdge() {
+    const exe = EDGE_CANDIDATES.find((p) => fs.existsSync(p));
+    if (!exe) throw new Error('找不到 msedge.exe');
+    const profile = path.join(os.tmpdir(), 'futa-edge-groups-' + Date.now());
+    const child = spawn(exe, [
+        '--headless=new',
+        '--disable-gpu',
+        '--no-first-run',
+        '--remote-debugging-port=' + PORT,
+        '--user-data-dir=' + profile,
+        '--window-size=420,1400',
+        'about:blank'
+    ], { stdio: 'ignore' });
+    for (let i = 0; i < 60; i++) {
+        try {
+            const res = await fetch('http://127.0.0.1:' + PORT + '/json/version');
+            if (res.ok) return child;
+        } catch (e) {
+            // 还没起来
+        }
+        await sleep(250);
+    }
+    throw new Error('无头 Edge 没起来');
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -30,6 +65,9 @@ function check(name, ok, detail) {
     }
 }
 
+/** 浏览器弹出的 native 对话框（confirm/prompt/alert）。测试要求一个都不出现。 */
+const dialogs = [];
+
 async function connect() {
     const res = await fetch('http://127.0.0.1:' + PORT + '/json/list');
     const targets = await res.json();
@@ -44,6 +82,13 @@ async function connect() {
     const pending = new Map();
     ws.addEventListener('message', (ev) => {
         const msg = JSON.parse(ev.data);
+        // 系统对话框：记下来（测试最后断言「一个都没有」），然后立刻关掉，
+        // 否则无头页面会卡在对话框上再也点不动
+        if (msg.method === 'Page.javascriptDialogOpening') {
+            dialogs.push(msg.params.type + ': ' + String(msg.params.message).slice(0, 60));
+            ws.send(JSON.stringify({ id: ++id, method: 'Page.handleJavaScriptDialog', params: { accept: true } }));
+            return;
+        }
         const done = pending.get(msg.id);
         if (done) {
             pending.delete(msg.id);
@@ -79,6 +124,7 @@ async function waitFor(send, expression, timeoutMs) {
 }
 
 (async () => {
+    const child = await launchEdge();
     const send = await connect();
 
     // 先用一件真实存在的物品，这样条目是「能用」的（而不是随便编个号）
@@ -113,6 +159,15 @@ async function waitFor(send, expression, timeoutMs) {
     // 2) 真正重新加载：只改 hash 不会重新加载文档
     await send('Page.reload', { ignoreCache: true });
     await waitFor(send, "document.querySelectorAll('.slot, .plan, #plan-host').length > 0 || document.body.textContent.length > 50", 30000);
+
+    // 计划页的「一起做」区要等 /api/plan 回来才画出来（骨架先出现、清单后到）。
+    // 不等这一步就去找 .group-tab，量到的永远是 0 —— 那不是功能坏了，是读早了一帧。
+    const tabsReady = await waitFor(send, `(() => {
+        const n = document.querySelectorAll('.group-tab').length;
+        return n > 0 ? n : null;
+    })()`, 30000);
+    check('计划页把清单区画出来了（这一步以前是在抢跑）', tabsReady > 0,
+        tabsReady ? (tabsReady + ' 个组标签') : '没等到');
 
     // 3) 断言
     const after = await evalIn(send, `(() => {
@@ -178,18 +233,33 @@ async function waitFor(send, expression, timeoutMs) {
 
     // 5) 功能：建组 → 切回旧组 → 旧组的东西还在（这就是「书签组」要干的事）
     //
-    // prompt/confirm 在无头浏览器里会阻塞，先换成返回值。
+    // ★ 这里**不再替换 window.prompt**：新建/重命名已经改成栏内就地输入（系统 prompt 会被
+    //   某些 WebView 拦掉，拦掉时点击就是「没反应」）。测试点的是真按钮、填的是真输入框。
     // ★ 每一步之后都要**等页面重绘**：建组/切组走的是 render()，它会重新拉数据，
     //   同步读 DOM 只会读到旧的那一帧（这里踩过，看着像功能坏了，其实是测试没等）。
     await evalIn(send, `(() => {
-        window.prompt = function () { return '测试组A'; };
-        window.confirm = function () { return true; };
         const store = JSON.parse(localStorage.getItem('futa_gtnh.groups'));
         window.__firstGroupId = store.groups[0].id;
         window.__firstGroupItems = store.groups[0].items.length;
         const addBtn = Array.from(document.querySelectorAll('.group-tools button'))
             .find((b) => /新建组/.test(b.textContent));
         if (addBtn) addBtn.click();
+        return true;
+    })()`);
+
+    const askShown = await waitFor(send, `(() => {
+        const row = document.querySelector('.group-ask');
+        return row && row.querySelector('.group-ask-input') ? true : null;
+    })()`, 15000);
+    check('新建组改成就地输入了（不再弹系统 prompt）', askShown === true, String(askShown));
+    check('就地输入不弹系统对话框', dialogs.length === 0, dialogs.join(' | '));
+
+    await evalIn(send, `(() => {
+        const row = document.querySelector('.group-ask');
+        const input = row.querySelector('.group-ask-input');
+        input.value = '测试组A';
+        const ok = Array.from(row.querySelectorAll('button')).find((b) => /确定/.test(b.textContent));
+        if (ok) ok.click();
         return true;
     })()`);
 
@@ -238,11 +308,64 @@ async function waitFor(send, expression, timeoutMs) {
     })()`);
     check('切回去之后原来组里的清单还在', finalItems === 2, '切回后 ' + finalItems + ' 条');
 
+    // 6) 删除本组：用**真鼠标点击**（Input.dispatchMouseEvent），而不是 element.click()。
+    //
+    // 玩家报过「点击删除本组没反应」：那时它用的是 window.confirm，而有些浏览器/WebView
+    // 会把对话框吞掉（或者玩家勾过「不再显示」）——confirm 直接返回 false，于是什么都没发生。
+    // 现在改成点两次确认，这里就断言：第一次只变文案、第二次才真删、且全程没有系统对话框。
+    const delBox = await evalIn(send, `(() => {
+        const btn = Array.from(document.querySelectorAll('.group-tools button'))
+            .find((b) => /删除本组/.test(b.textContent));
+        if (!btn) return JSON.stringify({ found: false });
+        const r = btn.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const top = document.elementFromPoint(cx, cy);
+        return JSON.stringify({
+            found: true,
+            x: Math.round(cx),
+            y: Math.round(cy),
+            clickable: top === btn,
+            groups: JSON.parse(localStorage.getItem('futa_gtnh.groups')).groups.length
+        });
+    })()`);
+    const del = JSON.parse(delBox);
+    check('删除本组按钮点得到（没有被别的东西盖住）', del.found && del.clickable === true, delBox);
+
+    const clickAt = async (x, y) => {
+        await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x, y: y, button: 'left', clickCount: 1 });
+        await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x, y: y, button: 'left', clickCount: 1 });
+        await sleep(600);
+    };
+    if (del.found) {
+        await clickAt(del.x, del.y);
+        const afterFirst = await evalIn(send, `(() => {
+            const btn = Array.from(document.querySelectorAll('.group-tools button'))
+                .find((b) => /删除|确认/.test(b.textContent));
+            return JSON.stringify({
+                text: btn ? btn.textContent : null,
+                groups: JSON.parse(localStorage.getItem('futa_gtnh.groups')).groups.length
+            });
+        })()`);
+        const f = JSON.parse(afterFirst);
+        check('第一次点击只是变成确认态（还没删）',
+            f.groups === del.groups && /再点一次/.test(String(f.text)), afterFirst);
+
+        await clickAt(del.x, del.y);
+        const afterSecond = await evalIn(send, `(() => {
+            const store = JSON.parse(localStorage.getItem('futa_gtnh.groups'));
+            return JSON.stringify({ groups: store.groups.length, active: store.activeId });
+        })()`);
+        const s2 = JSON.parse(afterSecond);
+        check('第二次点击真的删掉了', s2.groups === del.groups - 1, afterSecond);
+        check('删除本组全程没有系统对话框', dialogs.length === 0, dialogs.join(' | ') || '（一个都没有）');
+    }
+
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
     fs.writeFileSync(OUT, Buffer.from(shot.result.data, 'base64'));
     console.log('  截图: ' + OUT);
 
+    child.kill();
     console.log('\n结果: ' + pass + ' 通过 / ' + fail + ' 失败');
     process.exit(fail === 0 ? 0 : 1);
 })();
