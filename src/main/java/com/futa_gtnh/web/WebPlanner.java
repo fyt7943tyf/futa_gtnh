@@ -90,6 +90,24 @@ public final class WebPlanner {
         public final List<Target> targets = new ArrayList<>();
         /** 玩家指定的配方：物品 id -> 配方序号。 */
         public Map<Integer, Integer> choices = new HashMap<>();
+        /**
+         * 玩家给过配方、但那条配方在当前索引里找不到的物品。
+         *
+         * <p>
+         * 配方编号是稳定编号（见 {@code WebRecipeIndex.stableRid}），跨索引重建不变；
+         * 真找不到只可能是模组/配方变了。这种情况必须说出来 ——
+         * 「我明明选了它的合成方式，规划却按别的配方算」正是这么来的。
+         */
+        public final Set<Integer> unmatchedChoices = new LinkedHashSet<>();
+        /**
+         * 调试模式（请求里带 {@code debug=1}）：把「被掐断的那些物品各自选了什么配方、
+         * 材料是谁」一并写进警告里。
+         *
+         * <p>
+         * 「为什么这件东西明明能做却报缺」只能靠这个查 —— 光看材料表只知道它被掐断了，
+         * 不知道是被哪条配方、哪个材料带进环里的。默认关着（正常玩家不需要看这些）。
+         */
+        public boolean debug;
 
         /**
          * 玩家给「多候选材料」指定的选择：{@code "谁的配方:格子的x:格子的y" -> 用哪个候选}。
@@ -380,6 +398,50 @@ public final class WebPlanner {
         }
         if (!expansion.cycleBroken.isEmpty()) {
             plan.warnings.add("有 " + expansion.cycleBroken.size() + " 种物品的配方绕回了自己，已经当作需要你自己准备的材料。");
+        }
+        // 玩家手动选过配方、而那条配方正处在环上：直接点名。
+        // 「我明明选了它的合成方式，规划还是把它当原料」多半就是这个 ——
+        // 选中的那条是回收/提取类配方（材料本身来自这个物品），走一步就回到原点。
+        Set<Integer> chosenOnCycle = new LinkedHashSet<>();
+        for (Integer id : expansion.cycleBroken) {
+            if (request.choices.containsKey(id)) chosenOnCycle.add(id);
+        }
+        if (!chosenOnCycle.isEmpty()) {
+            plan.warnings.add("这几样你手动选过配方，但那条配方展开时绕回了自己：" + nameList(chosenOnCycle) + "。换一条配方通常就能绕开。");
+        }
+        // 给过配方、却在当前索引里找不到那一条：说清楚，别让它以为自己的选择生效了
+        if (!request.unmatchedChoices.isEmpty()) {
+            plan.warnings.add(
+                "这几样你之前选过配方，但当前索引里找不到那一条（配方编号在重建索引后会变，换过模组也会）：" + nameList(request.unmatchedChoices)
+                    + "。已经按自动挑选处理，在物品页重新选一次就好。");
+        }
+        if (request.debug) {
+            for (Integer id : expansion.cycleBroken) {
+                Integer ordinal = expansion.chosen.get(id);
+                WebRecipeIndex.RecipeView view = ordinal == null ? null : WebRecipeIndex.view(ordinal.intValue());
+                StringBuilder line = new StringBuilder("[调试] ").append(WebStore.nameOf(id.intValue()))
+                    .append(" #")
+                    .append(id);
+                if (view == null) {
+                    line.append(" 没选中任何配方");
+                } else {
+                    line.append(" 选中=")
+                        .append(view.machine)
+                        .append(" [")
+                        .append(view.handler)
+                        .append("] 材料=");
+                    for (int s = 0; s < view.inputs.length; s++) {
+                        if (s > 0) line.append(" + ");
+                        WebRecipeIndex.Slot slot = view.inputs[s];
+                        line.append(slot.alts.length == 0 ? "?" : WebStore.nameOf(slot.alts[0]));
+                        if (slot.amount > 1) {
+                            line.append('x')
+                                .append(slot.amount);
+                        }
+                    }
+                }
+                plan.warnings.add(line.toString());
+            }
         }
 
         // 原材料 = 「没能展开成配方」的那些需求。
@@ -958,60 +1020,142 @@ public final class WebPlanner {
      * 这里只保证默认值不离谱。
      */
     private static int pickRecipe(Request request, int itemId) {
-        Integer forced = request.choices.get(itemId);
-        if (forced != null && isUsable(forced, itemId)) return forced;
+        Integer forcedRid = request.choices.get(itemId);
+        if (forcedRid != null) {
+            int forced = ordinalOfRid(itemId, forcedRid.intValue());
+            if (forced >= 0 && isUsable(forced, itemId)) return forced;
+            // 玩家存的编号在当前索引里找不到（模组或配方变过）：记下来，最后在警告里说清楚。
+            // 不能一声不响地换成别的配方 —— 那正是「我明明选了它的合成方式」的来源。
+            request.unmatchedChoices.add(Integer.valueOf(itemId));
+        }
 
         int[] candidates = WebRecipeIndex.recipesFor(itemId);
         if (candidates.length == 0) return -1;
 
-        int best = -1;
-        double bestScore = Double.NEGATIVE_INFINITY;
+        // ★ 先按原来的打分排序，再从上往下取第一条「不绕回自己」的。
+        //
+        // 为什么要多这一步：回收/提取/固化/装罐类配方（熔融焊锡单元 → 熔融焊锡、
+        // 焊锡滚珠 → 熔融焊锡……）材料少、在打分里最占便宜，于是默认总挑中它们；
+        // 可沿着它走一步就绕回原点，最后整件东西被当成「要你自己准备的材料」——
+        // 玩家看到的就是「明明能做的流体，却报缺」。
+        //
+        // 先排序再逐个检查，是因为那个检查要翻材料的配方（比打分贵得多）：
+        // 排在最前面的候选通常一次就通过，代价可以忽略。
         int limit = Math.min(candidates.length, MAX_CANDIDATES_SCORED);
+        int[] scored = new int[limit];
+        double[] scores = new double[limit];
+        int scoredCount = 0;
         for (int i = 0; i < limit; i++) {
-            int ordinal = candidates[i];
-            WebRecipeIndex.RecipeView view = WebRecipeIndex.view(ordinal);
-            if (view == null || perCraftOf(view, itemId) <= 0) continue;
+            WebRecipeIndex.RecipeView view = WebRecipeIndex.view(candidates[i]);
+            if (!isDefaultCandidate(view, itemId)) continue;
+            scored[scoredCount] = candidates[i];
+            scores[scoredCount] = scoreOf(view);
+            scoredCount++;
+        }
+        if (scoredCount == 0) return -1;
 
-            // 一个物品形态的材料都没有的配方，在这张表里就等于「凭空产出」——
-            // GT 的铸造盆、只能吃流体的那些机器都是这样（配方表里只有流体，没有物品槽）。
-            // 照着它规划会得出「8 个铁块不需要任何东西」这种假步骤，所以直接不算数：
-            // 这种物品一律当成要玩家自己准备的材料。
-            if (view.inputs.length == 0) continue;
-
-            // 「把自己变成自己」的配方（NEI 里一大堆 1:1 转换，比如电路板 ↔ 编程电路）
-            // 也不能当默认：沿着它往下走必然绕回原点，最后算出一棵「A 做 B、B 做 A」的鬼树。
-            if (consumesItself(view, itemId)) continue;
-
-            // 同名的另一个变体（不同 meta）1:1 换成本物品，也不能当默认。
-            // 这类配方在数据上不是自循环（输入是另一个物品 id），但玩家看到的是一句废话：
-            // 「做 64 次：藻类农场 → 藻类农场」，材料还写着「藻类农场 需要 64」。
-            // GT 的多方块控制器就有这种「换个变体」的配方。
-            if (swapsSameName(view, itemId)) continue;
-
-            double coverage = 0.0D;
-            int slots = 0;
-            for (int s = 0; s < view.inputs.length; s++) {
-                WebRecipeIndex.Slot slot = view.inputs[s];
-                if (slot.alts.length == 0) continue;
-                slots++;
-                long have = 0L;
-                for (int a = 0; a < slot.alts.length; a++) {
-                    have += Math.max(0L, WebStore.stockOf(slot.alts[a]));
-                }
-                if (slot.amount > 0) coverage += Math.min(1.0D, (double) have / (double) slot.amount);
+        // 排序：先按分数，同分时「回收类」排后面。
+        //
+        // ★ 回收类配方（处理器标签里带 {@code _recycling}）必须排最后：它们是「把成品拆回原料」，
+        // 不是生产方法。材料少、打分高，索引顺序又常常靠前，于是默认总挑中它们，
+        // 然后一条条绕回原点（实测：熔融焊锡挑成了「焊锡螺栓 → 小撮焊锡粉 → 熔融焊锡」这种回炉环，
+        // 而它其实有正规配方「焊锡锭 → 熔融焊锡」，规划就再也不肯用它了）。
+        for (int i = 0; i < scoredCount; i++) {
+            int bestAt = i;
+            for (int j = i + 1; j < scoredCount; j++) {
+                if (betterCandidate(scored[j], scores[j], scored[bestAt], scores[bestAt])) bestAt = j;
             }
-            if (slots > 0) coverage /= slots;
-
-            double score = 2.0D * coverage - 0.08D * view.inputs.length
-                + (isHandCraftable(view.machine) ? 0.35D : 0.0D);
-            if (score > bestScore) {
-                bestScore = score;
-                best = ordinal;
+            if (bestAt != i) {
+                double tmpScore = scores[i];
+                scores[i] = scores[bestAt];
+                scores[bestAt] = tmpScore;
+                int tmpOrdinal = scored[i];
+                scored[i] = scored[bestAt];
+                scored[bestAt] = tmpOrdinal;
             }
         }
-        // 一条可用的都没有就返回 -1：调用方会把它当成「要自己弄到的原材料」，
-        // 这比硬着头皮用一条自循环配方算出鬼树诚实得多
-        return best;
+
+        // 第一轮：正规配方 + 不绕回自己
+        for (int i = 0; i < scoredCount; i++) {
+            WebRecipeIndex.RecipeView view = WebRecipeIndex.view(scored[i]);
+            if (view == null || isRecycling(view)) continue;
+            if (!usesTargetProduct(view, itemId)) return scored[i];
+        }
+        // 第二轮：这件东西只有回收来源（或者正规配方都绕回自己），那就用回收的
+        for (int i = 0; i < scoredCount; i++) {
+            WebRecipeIndex.RecipeView view = WebRecipeIndex.view(scored[i]);
+            if (view == null) continue;
+            if (!usesTargetProduct(view, itemId)) return scored[i];
+        }
+        // 全都被排掉了：还是按打分来，别因为「怕绕路」就凭空变成「没有配方」
+        return scored[0];
+    }
+
+    /** 排序用：分数高的优先；同分时非回收的优先。 */
+    private static boolean betterCandidate(int ordinalA, double scoreA, int ordinalB, double scoreB) {
+        if (scoreA != scoreB) return scoreA > scoreB;
+        WebRecipeIndex.RecipeView a = WebRecipeIndex.view(ordinalA);
+        WebRecipeIndex.RecipeView b = WebRecipeIndex.view(ordinalB);
+        boolean recyclingA = a != null && isRecycling(a);
+        boolean recyclingB = b != null && isRecycling(b);
+        if (recyclingA != recyclingB) return !recyclingA;
+        return false;
+    }
+
+    /** 这条配方是不是「回收类」（处理器标签里带 {@code _recycling}）。 */
+    private static boolean isRecycling(WebRecipeIndex.RecipeView view) {
+        String handler = view.handler;
+        if (handler == null || handler.isEmpty()) return false;
+        return handler.toLowerCase(java.util.Locale.ROOT)
+            .contains("_recycling");
+    }
+
+    /**
+     * 这条配方能不能当默认候选（与「挑哪条更好」无关的那几条硬性排除）。
+     *
+     * <p>
+     * 排掉的三类：没有物品形态材料的（等于凭空产出）、要消耗自己的、
+     * 以及同名的另一个变体 1:1 换成本物品的。
+     */
+    private static boolean isDefaultCandidate(WebRecipeIndex.RecipeView view, int itemId) {
+        if (view == null || perCraftOf(view, itemId) <= 0) return false;
+
+        // 一个物品形态的材料都没有的配方，在这张表里就等于「凭空产出」——
+        // GT 的铸造盆、只能吃流体的那些机器都是这样（配方表里只有流体，没有物品槽）。
+        // 照着它规划会得出「8 个铁块不需要任何东西」这种假步骤，所以直接不算数：
+        // 这种物品一律当成要玩家自己准备的材料。
+        if (view.inputs.length == 0) return false;
+
+        // 「把自己变成自己」的配方（NEI 里一大堆 1:1 转换，比如电路板 ↔ 编程电路）
+        // 也不能当默认：沿着它往下走必然绕回原点，最后算出一棵「A 做 B、B 做 A」的鬼树。
+        if (consumesItself(view, itemId)) return false;
+
+        // 同名的另一个变体（不同 meta）1:1 换成本物品，也不能当默认。
+        // 这类配方在数据上不是自循环（输入是另一个物品 id），但玩家看到的是一句废话：
+        // 「做 64 次：藻类农场 → 藻类农场」，材料还写着「藻类农场 需要 64」。
+        // GT 的多方块控制器就有这种「换个变体」的配方。
+        if (swapsSameName(view, itemId)) return false;
+
+        return true;
+    }
+
+    /** 默认候选的打分：材料种类少、手头已有的比例高、能在工作台里做。 */
+    private static double scoreOf(WebRecipeIndex.RecipeView view) {
+        double coverage = 0.0D;
+        int slots = 0;
+        for (int s = 0; s < view.inputs.length; s++) {
+            WebRecipeIndex.Slot slot = view.inputs[s];
+            if (slot.alts.length == 0) continue;
+            slots++;
+            long have = 0L;
+            for (int a = 0; a < slot.alts.length; a++) {
+                have += Math.max(0L, WebStore.stockOf(slot.alts[a]));
+            }
+            if (slot.amount > 0) coverage += Math.min(1.0D, (double) have / (double) slot.amount);
+        }
+        if (slots > 0) coverage /= slots;
+
+        return 2.0D * coverage - 0.08D * view.inputs.length + (isHandCraftable(view.machine) ? 0.35D : 0.0D);
     }
 
     /** 这条配方是不是要消耗它自己（任意一个候选槽里出现了同一个物品）。 */
@@ -1023,6 +1167,62 @@ public final class WebPlanner {
             }
         }
         return false;
+    }
+
+    /** 把一组物品 id 写成「名字、名字 等 N 种」（只列前几个，够玩家对上号就行）。 */
+    private static String nameList(Set<Integer> ids) {
+        StringBuilder builder = new StringBuilder();
+        int n = 0;
+        for (Integer id : ids) {
+            if (n >= 5) break;
+            if (n > 0) builder.append('、');
+            String name = WebStore.nameOf(id.intValue());
+            builder.append(name.isEmpty() ? ("#" + id) : name);
+            n++;
+        }
+        if (ids.size() > n) builder.append(" 等 ")
+            .append(ids.size())
+            .append(" 种");
+        return builder.toString();
+    }
+
+    /** 这条配方的材料里，有没有哪一个是「靠本物品做出来的」（只看一层）。 */
+    private static boolean usesTargetProduct(WebRecipeIndex.RecipeView view, int itemId) {
+        for (int s = 0; s < view.inputs.length; s++) {
+            int[] alts = view.inputs[s].alts;
+            int take = Math.min(alts.length, 4);
+            for (int a = 0; a < take; a++) {
+                int alt = alts[a];
+                if (alt < 0 || alt == itemId) continue;
+                int[] producers = WebRecipeIndex.recipesFor(alt);
+                int limit = Math.min(producers.length, 12);
+                for (int p = 0; p < limit; p++) {
+                    WebRecipeIndex.RecipeView produced = WebRecipeIndex.view(producers[p]);
+                    if (produced != null && consumesItem(produced, itemId)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** 这条配方的材料里有没有 {@code itemId}。 */
+    private static boolean consumesItem(WebRecipeIndex.RecipeView view, int itemId) {
+        for (int i = 0; i < view.inputs.length; i++) {
+            int[] alts = view.inputs[i].alts;
+            for (int a = 0; a < alts.length; a++) {
+                if (alts[a] == itemId) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 在这个物品的配方里找「稳定编号 == rid」的那一条；找不到返回 -1。 */
+    private static int ordinalOfRid(int itemId, int rid) {
+        int[] candidates = WebRecipeIndex.recipesFor(itemId);
+        for (int i = 0; i < candidates.length; i++) {
+            if (WebRecipeIndex.stableRid(candidates[i]) == rid) return candidates[i];
+        }
+        return -1;
     }
 
     /**

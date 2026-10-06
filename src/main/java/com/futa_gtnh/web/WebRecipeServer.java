@@ -379,6 +379,9 @@ public final class WebRecipeServer {
 
         int id = clampInt(query.get("id"), -1, -1, Integer.MAX_VALUE);
         if (id < 0 || WebStore.stackOf(id) == null) return errorJson("这台客户端上没有这个物品（物品编号是每台客户端自己的，换客户端或存档后旧编号会失效）");
+        // 身份重复的条目（同一种流体的另一套显示物品）指回正式那条：
+        // 老计划、老书签里存的往往正是这些编号，不规整就会查到「0 条配方」那条
+        id = WebStore.canonicalId(id);
 
         WebJson json = WebJson.object();
         json.k("ok")
@@ -426,6 +429,8 @@ public final class WebRecipeServer {
 
         int id = clampInt(query.get("id"), -1, -1, Integer.MAX_VALUE);
         if (id < 0 || WebStore.stackOf(id) == null) return errorJson("这台客户端上没有这个物品（物品编号是每台客户端自己的，换客户端或存档后旧编号会失效）");
+        // 同上：规划的目标也要指回正式编号，否则「熔融焊锡」可能落在没有配方的那条重复条目上
+        id = WebStore.canonicalId(id);
 
         WebPlanner.Request request = new WebPlanner.Request();
         request.itemId = id;
@@ -434,6 +439,8 @@ public final class WebRecipeServer {
         // id/count 只当兜底（老前端、老书签仍然能用）
         request.targets.addAll(parseTargets(query.get("targets")));
         request.useStock = !"0".equals(query.get("stock"));
+        // debug=1：把「被掐断的物品各自选了什么配方」也写进警告里（排查「明明能做却报缺」用）
+        request.debug = "1".equals(query.get("debug"));
         request.choices = parseChoices(query.get("choices"));
         // 多候选材料的指定：alts=主人的物品:格子的x:格子的y:选中的物品,...
         request.alts = parseAlts(query.get("alts"));
@@ -545,7 +552,8 @@ public final class WebRecipeServer {
                 .k("n")
                 .v(step.n)
                 .k("rid")
-                .v(String.valueOf(step.ordinal))
+                // ★ 稳定编号，不是序号：序号随索引重建而变，而玩家选的配方是按它存的
+                .v(String.valueOf(WebRecipeIndex.stableRid(step.ordinal)))
                 .k("machine")
                 .v(step.machine)
                 .k("itemId")
@@ -638,6 +646,8 @@ public final class WebRecipeServer {
 
     /** 物品引用：{@code {id,name,mod,stock,craftable,icon}}。 */
     private static void writeItemRef(WebJson json, int itemId, boolean withStock) {
+        // 重复条目的编号指回正式那条：界面上的名字、图标、配方数才和玩家点开的那个对得上
+        itemId = WebStore.canonicalId(itemId);
         json.obj()
             .k("id")
             .v(itemId)
@@ -659,7 +669,9 @@ public final class WebRecipeServer {
     private static void writeRecipe(WebJson json, WebRecipeIndex.RecipeView view) {
         json.obj()
             .k("rid")
-            .v(String.valueOf(view.ordinal))
+            // ★ 稳定编号（见 WebRecipeIndex.stableRid）：玩家「选这个配方」存的就是它，
+            // 用序号的话，升级一次模组/重建一次索引，存下来的选择就变成了同名的另一条配方
+            .v(String.valueOf(WebRecipeIndex.stableRid(view.ordinal)))
             .k("machine")
             .v(view.machine)
             .k("handler")
@@ -820,7 +832,7 @@ public final class WebRecipeServer {
                 int x = Integer.parseInt(fields[1].trim());
                 int y = Integer.parseInt(fields[2].trim());
                 int chosen = Integer.parseInt(fields[3].trim());
-                out.put(owner + ":" + x + ":" + y, Integer.valueOf(chosen));
+                out.put(WebStore.canonicalId(owner) + ":" + x + ":" + y, Integer.valueOf(WebStore.canonicalId(chosen)));
             } catch (NumberFormatException ignored) {
                 // 这一条不要了
             }
@@ -843,7 +855,7 @@ public final class WebRecipeServer {
                 int ordinal = Integer.parseInt(
                     pairs[i].substring(colon + 1)
                         .trim());
-                if (itemId >= 0 && ordinal >= 0) out.put(itemId, ordinal);
+                if (itemId >= 0 && ordinal >= 0) out.put(WebStore.canonicalId(itemId), ordinal);
             } catch (Throwable ignored) {
                 // 单个坏值跳过，不影响其余的
             }
@@ -858,7 +870,7 @@ public final class WebRecipeServer {
         for (int i = 0; i < parts.length && out.size() < 2048; i++) {
             try {
                 int value = Integer.parseInt(parts[i].trim());
-                if (value >= 0) out.add(value);
+                if (value >= 0) out.add(WebStore.canonicalId(value));
             } catch (Throwable ignored) {
                 // 同上
             }
@@ -967,11 +979,11 @@ public final class WebRecipeServer {
             int colon = part.indexOf(':');
             try {
                 if (colon < 0) {
-                    out.add(new WebPlanner.Target(Integer.parseInt(part), 1L));
+                    out.add(new WebPlanner.Target(WebStore.canonicalId(Integer.parseInt(part)), 1L));
                 } else {
                     out.add(
                         new WebPlanner.Target(
-                            Integer.parseInt(part.substring(0, colon)),
+                            WebStore.canonicalId(Integer.parseInt(part.substring(0, colon))),
                             Long.parseLong(part.substring(colon + 1))));
                 }
             } catch (NumberFormatException ignored) {
