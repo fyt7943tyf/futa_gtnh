@@ -2115,6 +2115,9 @@
         } else if (route.name === 'search') {
             document.title = '合成向导';
             renderSearchPage(route.query.q ? String(route.query.q) : '');
+        } else if (route.name === 'settings') {
+            document.title = '本地数据 · 合成向导';
+            renderSettingsPage();
         } else {
             document.title = '合成向导';
             go('#/search');
@@ -2375,6 +2378,15 @@
         bar.appendChild(input);
         panel.appendChild(bar);
 
+        // 「本地数据」入口：清选择 / 导出恢复备份。升级模组后「选过的配方对不上号」时用它
+        var tools = el('div', 'search-tools');
+        var settingsLink = document.createElement('a');
+        settingsLink.className = 'link-quiet';
+        settingsLink.href = '#/settings';
+        settingsLink.textContent = '本地数据（清空 / 备份）';
+        tools.appendChild(settingsLink);
+        panel.appendChild(tools);
+
         var results = el('div', 'section');
         results.id = 'search-results';
         panel.appendChild(results);
@@ -2408,6 +2420,276 @@
         } catch (e) {
             /* 某些 WebView 不允许自动聚焦 */
         }
+    }
+
+    /* ------------------------------------------------------------ 本地数据页 */
+
+    /**
+     * 浏览器本地存储。
+     *
+     * <p>
+     * 这一页解决的是「清一下站点数据」只能在浏览器设置里做的问题 —— 手机上找那个入口很麻烦，
+     * 而升级模组之后「选过的配方对不上号」偏偏就需要清一次。
+     *
+     * <p>
+     * 分成两类清：<b>选择类</b>（选过的配方/候选/原料标记/进度）是一次性的，
+     * 清掉只影响「这次算出来的结果」；<b>清单和书签组</b>是玩家攒下来的东西，
+     * 所以单独一个按钮、还要点两次才算数。
+     */
+    var LS_PREFIX = 'futa_gtnh.';
+    var LS_SELECTION_KEYS = [LS_CHOICES, LS_ALTS, LS_RAW, LS_CATALYST, LS_CONSUMABLE, LS_DONE];
+    var LS_LABELS = {};
+    LS_LABELS[LS_CHOICES] = '选过的配方';
+    LS_LABELS[LS_ALTS] = '选过的候选材料';
+    LS_LABELS[LS_RAW] = '标成「自己准备」的材料';
+    LS_LABELS[LS_CATALYST] = '标成「非消耗品」的';
+    LS_LABELS[LS_CONSUMABLE] = '标成「按消耗算」的';
+    LS_LABELS[LS_DONE] = '施工进度（哪几步做完了）';
+    LS_LABELS[LS_BASKET] = '当前清单（旧键，和书签组同步）';
+    LS_LABELS[LS_GROUPS] = '书签组（清单都存在这里）';
+
+    /** 本页面在 localStorage 里存的东西（空值不算，那是清过之后留下的空壳）。 */
+    function localEntries() {
+        var out = [];
+        try {
+            for (var i = 0; i < window.localStorage.length; i++) {
+                var key = window.localStorage.key(i);
+                if (!key || key.indexOf(LS_PREFIX) !== 0) {
+                    continue;
+                }
+                var value = lsGet(key) || '';
+                if (!value) {
+                    continue;
+                }
+                out.push({ key: key, label: LS_LABELS[key] || '（未知）', value: value });
+            }
+        } catch (e) {
+            /* 隐私模式下拿不到列表也无所谓，页面照常显示「空的」 */
+        }
+        out.sort(function (a, b) {
+            return a.key < b.key ? -1 : 1;
+        });
+        return out;
+    }
+
+    /** 一份内容有多少条（JSON 对象/数组按条数，别的按字符数）。 */
+    function localCountText(text) {
+        try {
+            var parsed = JSON.parse(text);
+            if (Array.isArray(parsed)) {
+                return parsed.length + ' 项';
+            }
+            if (parsed && typeof parsed === 'object') {
+                return Object.keys(parsed).length + ' 项';
+            }
+        } catch (e) {
+            /* 不是 JSON 就按字符数报 */
+        }
+        return text.length + ' 字符';
+    }
+
+    function exportLocalJson() {
+        var out = {};
+        var entries = localEntries();
+        for (var i = 0; i < entries.length; i++) {
+            try {
+                out[entries[i].key] = JSON.parse(entries[i].value);
+            } catch (e) {
+                out[entries[i].key] = entries[i].value;
+            }
+        }
+        return JSON.stringify(out, null, 2);
+    }
+
+    /** 把备份写回去；只认自己的键，别的键一个字都不动。返回写了几项。 */
+    function importLocalJson(text) {
+        var parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('这不是一份备份（应该是一个 JSON 对象）');
+        }
+        var count = 0;
+        var keys = Object.keys(parsed);
+        for (var i = 0; i < keys.length; i++) {
+            if (keys[i].indexOf(LS_PREFIX) !== 0) {
+                continue;
+            }
+            var value = parsed[keys[i]];
+            lsSet(keys[i], typeof value === 'string' ? value : JSON.stringify(value));
+            count += 1;
+        }
+        return count;
+    }
+
+    /** 清掉这些键；{@code keys} 为空表示全清。返回清了几项。 */
+    function clearLocalKeys(keys) {
+        var entries = localEntries();
+        var removed = 0;
+        for (var i = 0; i < entries.length; i++) {
+            if (keys && keys.indexOf(entries[i].key) < 0) {
+                continue;
+            }
+            try {
+                window.localStorage.removeItem(entries[i].key);
+                removed += 1;
+            } catch (e) {
+                /* 删不掉就跳过 */
+            }
+        }
+        return removed;
+    }
+
+    function makeButton(text, cls, handler) {
+        var node = document.createElement('button');
+        node.type = 'button';
+        node.className = cls;
+        node.textContent = text;
+        node.addEventListener('click', handler);
+        return node;
+    }
+
+    /**
+     * 「点两次才算数」的按钮。
+     *
+     * <p>
+     * 手机上用系统 confirm 弹窗体验很差（有些 WebView 还会拦掉），所以第一次点击只把按钮
+     * 变成「再点一次…」，5 秒没动静就自己改回来 —— 破坏性操作照样要两次意图。
+     */
+    function armConfirm(node, normalText, confirmText, action) {
+        var armed = false;
+        var timer = null;
+        node.addEventListener('click', function () {
+            if (!armed) {
+                armed = true;
+                node.textContent = confirmText;
+                node.classList.add('is-armed');
+                timer = window.setTimeout(function () {
+                    armed = false;
+                    node.textContent = normalText;
+                    node.classList.remove('is-armed');
+                }, 5000);
+                return;
+            }
+            if (timer) {
+                window.clearTimeout(timer);
+            }
+            armed = false;
+            node.textContent = normalText;
+            node.classList.remove('is-armed');
+            action();
+        });
+        return node;
+    }
+
+    function renderSettingsPage() {
+        state.plan.active = false;
+        var panel = el('div', 'panel');
+
+        var intro = el('div', 'section');
+        intro.appendChild(el('div', 'section-title', '浏览器本地数据'));
+        intro.appendChild(
+            el(
+                'div',
+                'muted',
+                '网页本身不保存任何东西：你的清单、书签组、选过的配方都只存在这个浏览器里。'
+                    + '换手机、换浏览器就是另一份数据。升级模组之后如果出现「选过的配方对不上号」，'
+                    + '用下面的「只清选择」清一次就好 —— 清单和书签组会留着。'));
+        panel.appendChild(intro);
+
+        var status = el('div', 'muted');
+        status.id = 'local-status';
+        status.textContent = '还没做任何操作。';
+        function say(text) {
+            status.textContent = text;
+        }
+
+        var list = el('div', 'section');
+        list.appendChild(el('div', 'section-title', '存了什么'));
+        var entries = localEntries();
+        if (entries.length === 0) {
+            list.appendChild(el('div', 'muted', '（空的：这个浏览器里还没有任何记录）'));
+        } else {
+            for (var i = 0; i < entries.length; i++) {
+                var row = el('div', 'data-row');
+                row.appendChild(el('span', 'data-name', entries[i].label));
+                row.appendChild(el('span', 'data-count', localCountText(entries[i].value)));
+                row.appendChild(el('span', 'data-key', entries[i].key));
+                list.appendChild(row);
+            }
+        }
+        panel.appendChild(list);
+
+        var box = document.createElement('textarea');
+        box.className = 'data-box';
+        box.id = 'local-backup';
+        box.placeholder = '备份会导出到这里；也可以把备份粘进来点「从文本恢复」。换浏览器、换手机时用它搬数据。';
+
+        var actions = el('div', 'data-actions');
+        actions.appendChild(
+            makeButton('导出备份到文本框', 'btn btn-ghost', function () {
+                var text = exportLocalJson();
+                if (!text || text === '{}') {
+                    say('这里还没有东西可导出。');
+                    return;
+                }
+                box.value = text;
+                box.focus();
+                box.select();
+                say('已导出 ' + localEntries().length + ' 项，全选复制走就留了底。');
+            }));
+        actions.appendChild(
+            makeButton('从文本框恢复', 'btn btn-ghost', function () {
+                if (!box.value.trim()) {
+                    say('文本框是空的：先粘一份备份进来。');
+                    return;
+                }
+                try {
+                    var written = importLocalJson(box.value);
+                    say('已写回 ' + written + ' 项。刷新页面后生效（下面「存了什么」已经更新）。');
+                    render();
+                } catch (e) {
+                    say('恢复失败：' + (e && e.message ? e.message : e));
+                }
+            }));
+        panel.appendChild(actions);
+
+        var danger = el('div', 'data-actions');
+        danger.appendChild(
+            armConfirm(
+                makeButton('只清选择（保留清单和书签组）', 'btn', function () {}),
+                '只清选择（保留清单和书签组）',
+                '再点一次确认：清掉选择',
+                function () {
+                    var removed = clearLocalKeys(LS_SELECTION_KEYS);
+                    render();
+                    var now = byId('local-status');
+                    if (now) {
+                        now.textContent = '已清掉 ' + removed + ' 项选择。清单和书签组没动 —— 页面上的记录已更新。';
+                    }
+                }));
+        danger.appendChild(
+            armConfirm(
+                makeButton('全部清空（连清单和书签组一起）', 'btn', function () {}),
+                '全部清空（连清单和书签组一起）',
+                '再点一次确认：全部清空',
+                function () {
+                    var removed = clearLocalKeys(null);
+                    render();
+                    var now = byId('local-status');
+                    if (now) {
+                        now.textContent = '已清空全部 ' + removed + ' 项（清单和书签组也清了）。';
+                    }
+                }));
+        panel.appendChild(danger);
+
+        panel.appendChild(box);
+        panel.appendChild(status);
+        var back = el('div', 'data-actions');
+        back.appendChild(makeButton('返回搜索', 'btn btn-ghost', function () {
+            go('#/search');
+        }));
+        panel.appendChild(back);
+
+        VIEW.appendChild(panel);
     }
 
     /* ------------------------------------------------------------ 物品页 */
