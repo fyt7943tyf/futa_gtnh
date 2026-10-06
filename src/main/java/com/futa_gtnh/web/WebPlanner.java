@@ -63,8 +63,18 @@ public final class WebPlanner {
     /** 挑配方时最多看多少个候选（有的物品在 GT 里有上千条配方）。 */
     private static final int MAX_CANDIDATES_SCORED = 32;
 
-    /** 最多重来几次来拆掉「互相依赖」的配方环。 */
+    /** 一次掐一个，最多重来几次来拆掉「互相依赖」的配方环。 */
     private static final int MAX_CYCLE_BREAKS = 12;
+
+    /**
+     * 一次一个掐不完时，最多再来几轮「把环上的全钉成原材料」。
+     *
+     * <p>
+     * 每一轮都要重新展开一遍（配方会变），所以这个数字直接乘在规划耗时上。
+     * 五轮封顶：实测最坏情况下一轮展开只要几十毫秒，而这个上限换来的是一份
+     * 不会退化成「1 步 + 一百多件自己准备」的计划。
+     */
+    private static final int MAX_CYCLE_ROUNDS = 4;
 
     // ==================================================================
     // 输入 / 输出
@@ -344,33 +354,33 @@ public final class WebPlanner {
         // 而且最后给出的说法是诚实的：「这一样你得自己弄到」。
         Set<Integer> forcedRaw = new HashSet<>();
         Expansion expansion = null;
-        for (int attempt = 0; attempt <= MAX_CYCLE_BREAKS; attempt++) {
+        int breaks = 0;
+        int rounds = 0;
+        while (rounds <= MAX_CYCLE_ROUNDS) {
             expansion = expand(request, forcedRaw);
             expansion.deps = resolveDependencies(expansion.pushedEdges, expansion.chosen, expansion.crafts);
 
             Set<Integer> cyclic = findUnorderable(expansion.crafts, expansion.deps);
             if (cyclic.isEmpty()) break;
 
-            if (attempt == MAX_CYCLE_BREAKS) {
-                // 兜底：拆了这么多次还有环（深层计划里可能同时存在好几组互相依赖），
-                // 就把环上的物品一次性全钉成原材料再展开一遍。宁可多让玩家自己准备几样，
-                // 也不能交出一份顺序乱掉的步骤表 —— 那个比「材料多列了两样」有害得多。
-                boolean changed = false;
-                for (Integer ordinal : cyclic) {
-                    WebRecipeIndex.RecipeView view = WebRecipeIndex.view(ordinal);
-                    if (view == null || view.resultId < 0 || isTarget(view.resultId, request)) continue;
-                    changed |= forcedRaw.add(view.resultId);
+            // 先一次一个地掐：掐最深的那个，对整棵树的扰动最小，能拆掉大部分环
+            if (breaks < MAX_CYCLE_BREAKS) {
+                int victim = pickCycleBreaker(cyclic, expansion, request, forcedRaw);
+                if (victim >= 0) {
+                    forcedRaw.add(victim);
+                    breaks++;
+                    continue;
                 }
-                if (changed) {
-                    expansion = expand(request, forcedRaw);
-                    expansion.deps = resolveDependencies(expansion.pushedEdges, expansion.chosen, expansion.crafts);
-                }
-                break;
             }
 
-            int victim = pickCycleBreaker(cyclic, expansion, request, forcedRaw);
-            if (victim < 0) break;
-            forcedRaw.add(victim);
+            // 一个掐不完（互相咬合的环有好几组），把「真的在环上」的那些一次钉完再展开确认。
+            //
+            // 第一轮不碰玩家明确选过配方的物品：他选了哪条就是哪条，掐环从环上的
+            // 另一样下手；实在绕不开（环上全是玩家选的）才在后面的轮次里动它。
+            rounds++;
+            // 轮次用完了就别再钉：钉了也没有下一次展开来验证，只会凭空多几样「自己准备」
+            if (rounds > MAX_CYCLE_ROUNDS) break;
+            if (!pinCycleMembers(cyclic, expansion, request, forcedRaw, rounds > 1)) break;
         }
         if (expansion == null) {
             plan.error = "规划失败";
@@ -417,30 +427,13 @@ public final class WebPlanner {
         }
         if (request.debug) {
             for (Integer id : expansion.cycleBroken) {
-                Integer ordinal = expansion.chosen.get(id);
-                WebRecipeIndex.RecipeView view = ordinal == null ? null : WebRecipeIndex.view(ordinal.intValue());
-                StringBuilder line = new StringBuilder("[调试] ").append(WebStore.nameOf(id.intValue()))
-                    .append(" #")
-                    .append(id);
-                if (view == null) {
-                    line.append(" 没选中任何配方");
-                } else {
-                    line.append(" 选中=")
-                        .append(view.machine)
-                        .append(" [")
-                        .append(view.handler)
-                        .append("] 材料=");
-                    for (int s = 0; s < view.inputs.length; s++) {
-                        if (s > 0) line.append(" + ");
-                        WebRecipeIndex.Slot slot = view.inputs[s];
-                        line.append(slot.alts.length == 0 ? "?" : WebStore.nameOf(slot.alts[0]));
-                        if (slot.amount > 1) {
-                            line.append('x')
-                                .append(slot.amount);
-                        }
-                    }
-                }
-                plan.warnings.add(line.toString());
+                plan.warnings.add(describeChoice("[调试] ", expansion, id.intValue()));
+            }
+            // 被掐环掐成「自己准备」的：把它们各自选中的配方也写出来。
+            // 不加这一段的话，线上只能看到一个名字，根本看不出它是从哪条配方绕回自己的
+            // （「熔融焊锡为什么算原材料」就是这么查出来的：它选的是流体提取机 ← 焊锡粉）。
+            for (Integer id : forcedRaw) {
+                plan.warnings.add(describeChoice("[调试] 掐环 ", expansion, id.intValue()));
             }
         }
 
@@ -754,6 +747,33 @@ public final class WebPlanner {
             }
         }
         return fallback;
+    }
+
+    /**
+     * 把「真的在环上」的物品一次钉成要玩家自己准备的材料。
+     *
+     * <p>
+     * ★ 关键在于<b>只钉在环上的</b>。{@code cyclic} 里装的是「拓扑排序排不完的全部节点」，
+     * 其中绝大多数只是<b>排在环后面</b>（被环挡住的中间产物），它们自己根本不在环上。
+     * 早先这里是把 {@code cyclic} 整个钉掉，实测在一次真实的计划里钉了 185 样东西 ——
+     * 里面正好包含顶层目标工作站的全部 7 样直接材料，整份计划当场退化成「1 步 + 7 样自己准备」，
+     * 玩家看到的却是「熔融焊锡明明能提取，却报缺 9216」。
+     *
+     * @param includeChosen 连玩家明确选过配方的物品也一起钉（只在绕不开的后续轮次里为 true）
+     * @return 有没有真的钉掉东西（一个都没有就别再空转重算了）
+     */
+    private static boolean pinCycleMembers(Set<Integer> cyclic, Expansion expansion, Request request,
+        Set<Integer> forcedRaw, boolean includeChosen) {
+        boolean changed = false;
+        for (Integer ordinal : cyclic) {
+            if (!onCycle(ordinal, expansion.deps, expansion.crafts)) continue;
+            WebRecipeIndex.RecipeView view = WebRecipeIndex.view(ordinal);
+            if (view == null || view.resultId < 0 || isTarget(view.resultId, request)) continue;
+            if (!includeChosen && request.choices.containsKey(view.resultId)) continue;
+            if (forcedRaw.contains(view.resultId)) continue;
+            changed |= forcedRaw.add(view.resultId);
+        }
+        return changed;
     }
 
     /**
@@ -1079,6 +1099,7 @@ public final class WebPlanner {
         for (int i = 0; i < scoredCount; i++) {
             WebRecipeIndex.RecipeView view = WebRecipeIndex.view(scored[i]);
             if (view == null || isRecycling(view) || deadEndFor(view, itemId)) continue;
+            if (loopsBack(view, itemId)) continue;
             if (inputsHaveCleanSource(view)) return scored[i];
         }
         // 第二轮：这件东西只有回收来源（或者正规配方都绕回自己），那就用回收的
@@ -1095,6 +1116,39 @@ public final class WebPlanner {
         }
         // 全都被排掉了：还是按打分来，别因为「怕绕路」就凭空变成「没有配方」
         return scored[0];
+    }
+
+    /**
+     * 这条配方的材料，会不会反过来要用这件东西才做得出来（一步回到原点）。
+     *
+     * <p>
+     * 例子（实测，就是玩家报的「熔融焊锡报缺」那一次）：熔融焊锡 ← 焊锡粉 ← 焊锡锭，
+     * 而为焊锡锭挑中的是「烧制：2x焊锡导线 → 焊锡锭」—— 可 2x焊锡导线本身就是拿焊锡锭轧出来的。
+     * 这种配方材料只有一样、打分最高、索引顺序又靠前，于是默认总被挑中；
+     * 挑中之后这条链在拓扑排序里永远排不出去，最后一大批东西被当成「要你自己准备」。
+     *
+     * <p>
+     * 只看两层（材料的正规来源里有没有它），不做传递闭包：真正咬合的都是这一层，
+     * 而每多一层就要多翻一遍配方表 —— 这个判断会在挑配方时被调很多次。
+     */
+    private static boolean loopsBack(WebRecipeIndex.RecipeView view, int itemId) {
+        for (int s = 0; s < view.inputs.length; s++) {
+            int[] alts = view.inputs[s].alts;
+            int take = Math.min(alts.length, 4);
+            for (int a = 0; a < take; a++) {
+                int input = alts[a];
+                if (input < 0) continue;
+                if (input == itemId) return true;
+                int[] producers = WebRecipeIndex.recipesFor(input);
+                int limit = Math.min(producers.length, 12);
+                for (int p = 0; p < limit; p++) {
+                    WebRecipeIndex.RecipeView produced = WebRecipeIndex.view(producers[p]);
+                    if (produced == null || isRecycling(produced)) continue;
+                    if (consumesItem(produced, itemId)) return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -1208,6 +1262,37 @@ public final class WebPlanner {
             }
         }
         return false;
+    }
+
+    /**
+     * 调试用的一行：「某某 #id 选中=机器 [处理器] 材料=a + bx2」。
+     *
+     * <p>
+     * 只算给 {@code debug=1} 用的诊断输出，不进界面文案，所以直白就好。
+     */
+    private static String describeChoice(String prefix, Expansion expansion, int itemId) {
+        Integer ordinal = expansion.chosen.get(Integer.valueOf(itemId));
+        WebRecipeIndex.RecipeView view = ordinal == null ? null : WebRecipeIndex.view(ordinal.intValue());
+        StringBuilder line = new StringBuilder(prefix).append(WebStore.nameOf(itemId))
+            .append(" #")
+            .append(itemId);
+        if (view == null) return line.append(" 没选中任何配方")
+            .toString();
+        line.append(" 选中=")
+            .append(view.machine)
+            .append(" [")
+            .append(view.handler)
+            .append("] 材料=");
+        for (int s = 0; s < view.inputs.length; s++) {
+            if (s > 0) line.append(" + ");
+            WebRecipeIndex.Slot slot = view.inputs[s];
+            line.append(slot.alts.length == 0 ? "?" : WebStore.nameOf(slot.alts[0]));
+            if (slot.amount > 1) {
+                line.append('x')
+                    .append(slot.amount);
+            }
+        }
+        return line.toString();
     }
 
     /** 把一组物品 id 写成「名字、名字 等 N 种」（只列前几个，够玩家对上号就行）。 */
