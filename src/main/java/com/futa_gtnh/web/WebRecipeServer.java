@@ -718,7 +718,10 @@ public final class WebRecipeServer {
                 // 缓存回读出来的栈没有 NBT，这里现读的名字可能和上面那个不一样
                 .k("freshName")
                 .v(WebStore.freshNameOf(probe))
-                .k("fluidRegistry")
+                // 只给诊断：按 NBT / damage「猜」出来的流体身份 —— <b>不参与库存匹配</b>。
+                // 实测熔融不锈钢的显示物品 @619 猜出来是「稀硫酸」，而仓库里正好有 16000 稀硫酸；
+                // 早期版本就是拿这个猜法去查库存，于是页面说「熔融不锈钢有 16000」。
+                .k("fluidRegistryGuess")
                 .v(WebStore.fluidRegistryOfId(probe) == null ? "" : WebStore.fluidRegistryOfId(probe))
                 .k("fluid")
                 .v(WebStore.isFluidItem(probe))
