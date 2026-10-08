@@ -129,6 +129,34 @@ function shape(plan) {
         );
     }
 
+    // ── 不许「借」别的流体的库存 ───────────────────────────────────────────
+    //
+    // 玩家报过：用流体固化器做不锈钢转子，页面说「熔融不锈钢有库存 16000」，
+    // 而仓库里一点熔融不锈钢都没有 —— 那 16000 是**稀硫酸**的。
+    // 成因：流体的身份曾经用 damage 猜（熔融不锈钢的显示物品 @619 → 猜成稀硫酸），
+    // 或者拿缓存回读的栈现读显示名（同样猜错），再把那个名字/注册名拿去查库存。
+    //
+    // 不变式：仓库的流体表里没有这个名字，就不许报出库存。
+    const table = await api('/api/stock?limit=200');
+    const tableNames = new Set((table.fluids || []).map((f) => String(f.name)));
+    const candidates = ['熔融不锈钢', '熔融钛', '熔融钨', '熔融铱', '熔融锇'];
+    let checkedFluids = 0;
+    for (const name of candidates) {
+        const search = await api('/api/search?q=' + encodeURIComponent(name) + '&limit=200');
+        const hit = (search.items || []).find((it) => it.name === name);
+        if (!hit) continue;
+        const probe = await api('/api/stock?id=' + hit.id);
+        const p = probe.probe || {};
+        if (tableNames.has(String(p.name))) continue;   // 仓库里真有这种流体：这条不适用
+        checkedFluids++;
+        check(
+            name + ' 不在仓库里时库存必须是 0（不能借别的流体的数字）',
+            p.stock === 0,
+            'stock=' + p.stock + '（现读名=' + p.freshName + '，damage 猜出来=' + p.fluidRegistryGuess + '）'
+        );
+    }
+    check('这套「不许借库存」的检查确实跑了', checkedFluids > 0, '检查了 ' + checkedFluids + ' 种');
+
     console.log('\n' + pass + ' 通过 / ' + fail + ' 失败');
     process.exit(fail === 0 ? 0 : 1);
 })().catch((err) => {

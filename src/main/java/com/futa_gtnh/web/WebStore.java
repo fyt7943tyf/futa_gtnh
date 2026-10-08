@@ -515,13 +515,11 @@ public final class WebStore {
         // 判据三：名字能对上仓库里的某种流体（NEI 那套显示物品走的是这条）。
         // 两条都要有：只认 NBT 的话，NBT 结构不同的伪物品会被漏掉，
         // 而漏掉的后果就是「流体的量按个数显示」。
-        String name = normName(displayName(stack));
-        if (name.isEmpty()) return false;
-        if (fluidStockByDisplayName(name) > 0L) return true;
-
-        // 判据四：认得出流体身份（注册名）就算 —— 显示名对不上时靠这条兜住。
-        // 这里不能反过来要求「名字也能对上」：名字读不出来正是这条存在的理由。
-        return fluidRegistryOf(stack) != null && !fluidRegistryStock.isEmpty();
+        //
+        // ★ 这里**不认**「按 damage 猜出来的流体身份」：damage 不是流体身份
+        // （GT 拿它当材质序号），猜出来的往往是另一种流体 ——
+        // 拿它当判据，任何 damage 撞上某个流体 id 的物品都会被当成那种流体。
+        return fluidStockByDisplayName(normName(displayName(stack))) > 0L;
     }
 
     /**
@@ -651,16 +649,6 @@ public final class WebStore {
     /** 归一化：小写 + 去首尾空白（两边名字的写法差异只有这些）。 */
     private static final Map<String, Long> fluidStock = new HashMap<>();
 
-    /**
-     * 同一个流体表的第二把钥匙：<b>流体注册名</b>（如 {@code gregtech:sodiumpersulfate}）-> 数量。
-     *
-     * <p>
-     * 为什么需要它：显示名是本地化字符串，两边各有各的写法（GT 的显示物品名字来自 NBT，
-     * 而缓存回读出来的栈没有 NBT），名字对不上时连「是不是同一种流体」都判断不了。
-     * 注册名是稳定的，认得出流体就认得出库存。
-     */
-    private static final Map<String, Long> fluidRegistryStock = new HashMap<>();
-
     /** 目录里流体身份键的前缀（{@code fluid:显示名}）。 */
     private static final String FLUID_KEY_PREFIX = "fluid:";
 
@@ -702,13 +690,18 @@ public final class WebStore {
         // 而 GT 那套流体显示物品的名字恰恰来自 NBT —— 现读显示名读出来的是别的字符串，
         // 拿它去流体表里查必然查不到，于是「明明有」变成了「还缺」。
         // 建索引时读过一次真栈，名字就存在目录里（keyOfId 取的就是它），用它去查才对得上。
+        //
+        // ★★★ 名字对不上就**到此为止**，绝不能退回「现读显示名」那条路。
+        //
+        // 现读出来的名字可能落到<b>另一种流体</b>上：回读的栈没有 NBT，流体身份只能靠 damage 猜，
+        // 而 damage 不是流体身份（GT 拿它当材质序号）。实测玩家报的那一例：
+        // 熔融不锈钢的显示物品 @619 现读成「稀硫酸」，而仓库里正好有 16000 稀硫酸 ——
+        // 页面于是说「熔融不锈钢有库存 16000」，玩家明明一点都不剩。
+        // 宁可报 0（玩家看到「缺」），也不能报另一种流体的数字：那会让整份计划的用量算错。
         if (id < 0) return 0L;
         String key = keyOfId(id);
         if (key != null && key.startsWith(FLUID_KEY_PREFIX)) {
-            long byName = fluidStockByDisplayName(key.substring(FLUID_KEY_PREFIX.length()));
-            if (byName > 0L) return byName;
-            long byRegistry = fluidStockByRegistry(stackOf(id));
-            if (byRegistry > 0L) return byRegistry;
+            return fluidStockByDisplayName(key.substring(FLUID_KEY_PREFIX.length()));
         }
         return stockOf(stackOf(id));
     }
@@ -745,26 +738,15 @@ public final class WebStore {
     }
 
     /**
-     * 这个流体显示物品对应哪种流体（拿注册名去流体表里找库存）。
+     * <b>只给诊断用</b>：按 NBT 材质名 / damage 猜这个流体显示物品是哪种流体。
      *
      * <p>
-     * 两套显示物品的认法不一样：NEI 那套把流体写在 damage 上，GT 那套写在 NBT 的
-     * {@code mFluidMaterialName} 上。缓存回读出来的栈没有 NBT，所以 GT 那套常常只剩
-     * damage 可用 —— 名字这条路走不通时，这是最后一道保险。
+     * ★ 它的结果<b>不参与库存匹配</b>，只出现在 {@code /api/stock} 的探针里帮人看问题。
+     * 原因是 damage 根本不是流体身份：GT 拿它当材质序号，同一个 damage 在不同上下文里
+     * 指的是不同的东西。实测「熔融不锈钢」的显示物品 @619 用 damage 猜出来是「稀硫酸」，
+     * 而仓库里正好有 16000 稀硫酸 —— 早期版本就是拿这个猜法去查库存，
+     * 于是页面报「熔融不锈钢有 16000」，玩家一点都不剩。
      */
-    private static long fluidStockByRegistry(ItemStack stack) {
-        if (stack == null || stack.getItem() == null || fluidRegistryStock.isEmpty()) return 0L;
-        // 只有「流体显示物品」才准走这条路：普通物品的 damage 也可能撞上某个流体 id，
-        // 放行的话「铁板@5」会拿到 5 号流体的库存。
-        if (!isFluidDisplay(stack)) return 0L;
-
-        String registry = fluidRegistryOf(stack);
-        if (registry == null) return 0L;
-        Long amount = fluidRegistryStock.get(registry);
-        return amount == null ? 0L : amount.longValue();
-    }
-
-    /** 流体显示物品对应的流体注册名（小写）；认不出来返回 null。 */
     private static String fluidRegistryOf(ItemStack stack) {
         try {
             String material = fluidMaterialName(stack);
@@ -778,7 +760,7 @@ public final class WebStore {
                 if (registry != null) return registry;
             }
         } catch (Throwable t) {
-            // 认不出来就让调用方走名字那条路
+            // 猜不出来就算了
         }
         return null;
     }
@@ -798,22 +780,24 @@ public final class WebStore {
         return ((long) Item.getIdFromItem(stack.getItem()) << 32) | 32767L;
     }
 
-    /** 库存里有多少这个物品（按栈本身查，配方里的任意候选都能问）。 */
+    /**
+     * 库存里有多少这个物品（按栈本身查，配方里的任意候选都能问）。
+     *
+     * <p>
+     * 流体的匹配只按<b>名字</b>（先精确、再「名字 + 用量后缀」）：这是唯一一个两边共有、
+     * 又不会指错东西的身份。按 damage 猜出来的流体身份不用 —— 它不是流体身份，
+     * 会把别的流体的库存算到这件东西头上（见 {@link #fluidRegistryOf} 的说明）。
+     */
     public static long stockOf(ItemStack stack) {
         if (stack == null || stack.getItem() == null) return 0L;
 
         Long value = stock.get(stockKey(stack));
         if (value != null) return value.longValue();
 
-        // 流体：配方里的「熔融聚乙烯」这类伪物品在物品库存里永远查不到，
-        // 得按名字去流体库存里找（详见 fluidStock 的说明）。
-        if (!fluidStock.isEmpty() || !fluidRegistryStock.isEmpty()) {
+        if (!fluidStock.isEmpty()) {
             String name = normName(displayName(stack));
             long byName = fluidStockByDisplayName(name);
             if (byName > 0L) return byName;
-
-            long byRegistry = fluidStockByRegistry(stack);
-            if (byRegistry > 0L) return byRegistry;
 
             // 还是没对上：把这个名字记一次（限流），下一次就能照着实测的字符串改匹配规则，
             // 而不是继续猜
@@ -863,23 +847,16 @@ public final class WebStore {
         }
 
         // 流体单独一张表：它们和物品是两套身份，混在一张表里只会互相干扰。
-        // 同时按「注册名」再记一份：显示名对不上时靠它认（见 fluidRegistryStock）。
+        // 键只取<b>显示名</b>：这是两边唯一共有、又不会指错东西的身份
+        // （注册名那把钥匙试过，靠 damage 猜出来的流体身份会指到别的流体上，见 fluidRegistryOf）。
         Map<String, Long> fluids = new HashMap<>(1024);
-        Map<String, Long> fluidRegistries = new HashMap<>(1024);
         try {
             if (ClientStorageCache.isReady()) {
                 for (StorageViewEntry entry : ClientStorageCache.fluids()) {
                     String name = normName(entry.getDisplayName());
-                    if (!name.isEmpty()) {
-                        Long old = fluids.get(name);
-                        fluids.put(name, Long.valueOf((old == null ? 0L : old.longValue()) + entry.getAmount()));
-                    }
-                    String registry = normName(entry.getRegistryName());
-                    if (!registry.isEmpty()) {
-                        Long old = fluidRegistries.get(registry);
-                        fluidRegistries
-                            .put(registry, Long.valueOf((old == null ? 0L : old.longValue()) + entry.getAmount()));
-                    }
+                    if (name.isEmpty()) continue;
+                    Long old = fluids.get(name);
+                    fluids.put(name, Long.valueOf((old == null ? 0L : old.longValue()) + entry.getAmount()));
                 }
             }
         } catch (Throwable t) {
@@ -887,8 +864,6 @@ public final class WebStore {
         }
         fluidStock.clear();
         fluidStock.putAll(fluids);
-        fluidRegistryStock.clear();
-        fluidRegistryStock.putAll(fluidRegistries);
 
         stock = map;
 
