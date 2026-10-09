@@ -112,6 +112,53 @@ public final class TerminalIoConfig {
         }
     }
 
+    /**
+     * 统计的方向口径：只记输入 / 只记输出 / 两个都记。
+     *
+     * <p>
+     * 「输入」= 抽进共享存储（PULL），「输出」= 从共享存储搬出去（PUSH）。
+     * 服务器存档和网络包里存的是 ordinal，追加枚举值不影响已有数据。
+     */
+    public enum StatsMode {
+
+        IN("futa_gtnh.gui.terminal.stats.mode.in"),
+        OUT("futa_gtnh.gui.terminal.stats.mode.out"),
+        BOTH("futa_gtnh.gui.terminal.stats.mode.both");
+
+        /** 这个口径记不记「抽进共享存储」的量。 */
+        public boolean tracksIn() {
+            return this == IN || this == BOTH;
+        }
+
+        /** 这个口径记不记「从共享存储搬出」的量。 */
+        public boolean tracksOut() {
+            return this == OUT || this == BOTH;
+        }
+
+        private final String langKey;
+
+        StatsMode(String langKey) {
+            this.langKey = langKey;
+        }
+
+        public String getLangKey() {
+            return langKey;
+        }
+
+        /** 循环切换：输入 → 输出 → 输入输出。 */
+        public StatsMode next() {
+            StatsMode[] values = values();
+            return values[(ordinal() + 1) % values.length];
+        }
+    }
+
+    /** 节点名的长度上限。防伪造包里塞一整本书进来。 */
+    public static final int STATS_NAME_LIMIT = 32;
+
+    private boolean statsEnabled;
+    private String statsName = "";
+    private StatsMode statsMode = StatsMode.BOTH;
+
     /** 面的数量，等于 {@code ForgeDirection} 的取值个数。 */
     public static final int FACES = 6;
 
@@ -294,6 +341,62 @@ public final class TerminalIoConfig {
     }
 
     // ==================================================================
+    // 统计
+    // ==================================================================
+
+    /** @return 有没有开启流量统计。搬运引擎每次记账前先看这一眼。 */
+    public boolean isStatsEnabled() {
+        return statsEnabled;
+    }
+
+    public void setStatsEnabled(boolean enabled) {
+        this.statsEnabled = enabled;
+    }
+
+    /** @return 节点名；空串表示「没起名」，展示时用坐标代替 */
+    public String getStatsName() {
+        return statsName;
+    }
+
+    public void setStatsName(String name) {
+        this.statsName = sanitizeName(name);
+    }
+
+    public StatsMode getStatsMode() {
+        return statsMode;
+    }
+
+    public void setStatsMode(StatsMode mode) {
+        if (mode != null) this.statsMode = mode;
+    }
+
+    /**
+     * 节点名清洗：去控制字符和 § 格式码、压缩空白、截到 {@link #STATS_NAME_LIMIT} 个字符。
+     *
+     * <p>
+     * 存档和客户端上传的包都会过这一道 —— 客户端那份不能信，
+     * 和节奏档位的 {@code snapRates()} 是同一个道理的闸门。
+     */
+    private static String sanitizeName(String name) {
+        if (name == null) return "";
+        StringBuilder cleaned = new StringBuilder(name.length());
+        for (int i = 0; i < name.length() && cleaned.length() < STATS_NAME_LIMIT; i++) {
+            char c = name.charAt(i);
+            if (c == '\u00a7') {
+                i++; // 跳过格式码的标记字符
+            } else if (c < ' ' || c == '\u007f') {
+                continue; // 控制字符直接丢
+            } else if (Character.isWhitespace(c)) {
+                if (cleaned.length() == 0 || cleaned.charAt(cleaned.length() - 1) != ' ') cleaned.append(' ');
+            } else {
+                cleaned.append(c);
+            }
+        }
+        return cleaned.toString()
+            .trim();
+    }
+
+    // ==================================================================
     // 筛选
     // ==================================================================
 
@@ -361,6 +464,13 @@ public final class TerminalIoConfig {
         }
         tag.setTag("faceFilters", filters);
 
+        // 统计只在开启或起过名时落盘，和搬运配置「没用就不写」的口径一致
+        if (statsEnabled || !statsName.isEmpty() || statsMode != StatsMode.BOTH) {
+            tag.setBoolean("statsEnabled", statsEnabled);
+            tag.setString("statsName", statsName);
+            tag.setByte("statsMode", (byte) statsMode.ordinal());
+        }
+
         return tag;
     }
 
@@ -370,6 +480,9 @@ public final class TerminalIoConfig {
         intervalTicks = 5;
         itemsPerOperation = 16;
         fluidPerOperation = 1000;
+        statsEnabled = false;
+        statsName = "";
+        statsMode = StatsMode.BOTH;
         for (int i = 0; i < FACES; i++) {
             itemModes[i] = Mode.OFF;
             fluidModes[i] = Mode.OFF;
@@ -383,6 +496,15 @@ public final class TerminalIoConfig {
         if (tag.hasKey("itemsPerOperation")) itemsPerOperation = tag.getInteger("itemsPerOperation");
         if (tag.hasKey("fluidPerOperation")) fluidPerOperation = tag.getInteger("fluidPerOperation");
         snapRates();
+
+        // 统计：同样把存档 / 客户端上传一视同仁地清洗（长度、格式码、枚举越界）
+        if (tag.hasKey("statsEnabled")) statsEnabled = tag.getBoolean("statsEnabled");
+        if (tag.hasKey("statsName")) statsName = sanitizeName(tag.getString("statsName"));
+        if (tag.hasKey("statsMode")) {
+            byte mode = tag.getByte("statsMode");
+            StatsMode[] values = StatsMode.values();
+            if (mode >= 0 && mode < values.length) statsMode = values[mode];
+        }
 
         byte[] itemBytes = tag.getByteArray("itemModes");
         byte[] fluidBytes = tag.getByteArray("fluidModes");

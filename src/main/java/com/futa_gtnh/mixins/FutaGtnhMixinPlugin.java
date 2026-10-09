@@ -44,6 +44,14 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
     /** lootgames 目标的 mixin 全部收在这个子包里，按包前缀分流探测。 */
     private static final String LOOTGAMES_MIXIN_PACKAGE = "com.futa_gtnh.mixins.lootgames.";
 
+    /** GTSWN 无线覆盖版目标（自上而下电量统计）的 mixin 子包。 */
+    private static final String GTSWN_MIXIN_PACKAGE = "com.futa_gtnh.mixins.gtswn.";
+
+    /** GTSWN 的探测类：无线节点注册表（覆盖版流量统计的枚举源）。 */
+    private static final String GTSWN_PROBE = "com.miaokatze.gtswn.common.covers.WirelessNodeRegistry";
+
+    private static boolean gtswnPresent;
+
     /** NEI 自动合成库存统计的可选目标。 */
     private static final String NEI_MIXIN = "com.futa_gtnh.mixins.MixinAutoCraftingManager";
 
@@ -150,6 +158,32 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         return false;
     }
 
+    /** GTSWN 是可选联动（自上而下电量统计的注入目标）；缺席时整组跳过。 */
+    private static boolean gtswnPresent() {
+        if (gtswnPresent) return true;
+
+        try {
+            if (Loader.isModLoaded("gtswn")) {
+                gtswnPresent = true;
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // 启动早期走类查找兜底
+        }
+
+        try {
+            if (Launch.classLoader != null
+                && Launch.classLoader.getResource(GTSWN_PROBE.replace('.', '/') + ".class") != null) {
+                gtswnPresent = true;
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // 缺席时保持 false
+        }
+
+        return false;
+    }
+
     @Override
     public void onLoad(String mixinPackage) {}
 
@@ -163,6 +197,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         if (NEI_MIXIN.equals(mixinClassName)) return neiPresent();
         // lootgames 目标的 mixin：装了 lootgames 才应用，没装连碰都不碰
         if (mixinClassName.startsWith(LOOTGAMES_MIXIN_PACKAGE)) return lootgamesPresent();
+        // gtswn 目标的 mixin（无线覆盖版流量统计）：装了 gtswn 才应用
+        if (mixinClassName.startsWith(GTSWN_MIXIN_PACKAGE)) return gtswnPresent();
         // 原版目标的 mixin（俯瞰远程 GUI 的距离校验放宽等）无条件生效
         String simpleName = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
         if (VANILLA_TARGET_MIXINS.contains(simpleName)) return true;

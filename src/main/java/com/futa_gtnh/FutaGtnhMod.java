@@ -132,6 +132,10 @@ public class FutaGtnhMod {
         SharedStorageManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
         // 小游戏助手的共享列表：同一个存档目录、同一套加载时机（见 lootassist 包）
         com.futa_gtnh.lootassist.LootassistManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
+        // IO 流量统计：同样的目录与时机约定（见 stats 包）
+        com.futa_gtnh.stats.IoFlowStats.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
+        // 无线覆盖版流量统计：纯内存，重启即清
+        com.futa_gtnh.stats.CoverFlowTracker.onServerStarted();
     }
 
     /**
@@ -164,5 +168,6 @@ public class FutaGtnhMod {
     public void serverStopping(FMLServerStoppingEvent event) {
         SharedStorageManager.onServerStopping();
         com.futa_gtnh.lootassist.LootassistManager.onServerStopping();
+        com.futa_gtnh.stats.IoFlowStats.onServerStopping();
     }
 }

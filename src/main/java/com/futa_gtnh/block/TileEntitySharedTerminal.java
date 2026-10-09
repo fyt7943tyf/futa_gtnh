@@ -85,6 +85,13 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     @Override
     public void updateEntity() {
         if (worldObj == null || worldObj.isRemote) return;
+
+        // 统计心跳放在 hasAnyMode 之前：一个面都没配的终端也可能开着统计
+        // （被动路径照样有东西进出，只是主动搬运这边没有流量可记）
+        if (io.isStatsEnabled()) {
+            com.futa_gtnh.stats.IoFlowStats.touch(worldObj, xCoord, yCoord, zCoord, true, io);
+        }
+
         if (!io.hasAnyMode()) return;
 
         int interval = Math.max(1, io.getIntervalTicks());
@@ -92,7 +99,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         ioTimer = 0;
 
         try {
-            TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io);
+            TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, true, io);
         } catch (Throwable t) {
             // 相邻方块是别的模组写的，出什么怪事都不该把整个服务端 tick 带崩
             FutaGtnhMod.LOG.warn("共享终端：主动搬运时出错（{} {} {}），这个面这一轮跳过", xCoord, yCoord, zCoord, t);

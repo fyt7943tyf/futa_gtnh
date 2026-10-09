@@ -16,6 +16,8 @@ import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.stats.IoFlowRecorder;
+import com.futa_gtnh.stats.IoFlowStats;
 
 /**
  * 共享终端方块的<b>主动搬运</b>：按配置往相邻的容器抽东西 / 送东西。
@@ -69,8 +71,16 @@ final class TerminalIoEngine {
         return mask;
     }
 
-    /** 把六个面各走一遍。调用方保证这是服务端、而且配置里至少有一个面需要动。 */
-    static void tick(World world, int x, int y, int z, TerminalIoConfig config) {
+    /**
+     * 把六个面各走一遍。调用方保证这是服务端、而且配置里至少有一个面需要动。
+     *
+     * <p>
+     * {@code sharedTerminal} 只用来给流量统计区分节点类型（IO 节点 / 共享终端），
+     * 搬运逻辑本身两者完全一致。统计关闭时 {@link IoFlowStats#recorderFor} 返回
+     * {@code null}，下面的判空会让记账一行都不执行。
+     */
+    static void tick(World world, int x, int y, int z, boolean sharedTerminal, TerminalIoConfig config) {
+        IoFlowRecorder recorder = IoFlowStats.recorderFor(world, x, y, z, sharedTerminal, config);
         for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
             TerminalIoConfig.Mode itemMode = config.getMode(face, false);
             TerminalIoConfig.Mode fluidMode = config.getMode(face, true);
@@ -86,14 +96,14 @@ final class TerminalIoEngine {
 
             if (itemMode != TerminalIoConfig.Mode.OFF && neighbour instanceof IInventory) {
                 IInventory inventory = (IInventory) neighbour;
-                if (itemMode.pulls()) pullItems(inventory, side, config);
-                if (itemMode.pushes()) pushItems(inventory, side, config, face);
+                if (itemMode.pulls()) pullItems(inventory, side, config, recorder);
+                if (itemMode.pushes()) pushItems(inventory, side, config, face, recorder);
             }
 
             if (fluidMode != TerminalIoConfig.Mode.OFF && neighbour instanceof IFluidHandler) {
                 IFluidHandler handler = (IFluidHandler) neighbour;
-                if (fluidMode.pulls()) pullFluid(handler, side, config);
-                if (fluidMode.pushes()) pushFluid(handler, side, config, face);
+                if (fluidMode.pulls()) pullFluid(handler, side, config, recorder);
+                if (fluidMode.pushes()) pushFluid(handler, side, config, face, recorder);
             }
         }
     }
@@ -103,7 +113,8 @@ final class TerminalIoEngine {
     // ==================================================================
 
     /** 从相邻容器里把东西抽进共享存储。 */
-    private static void pullItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
+    private static void pullItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config,
+        IoFlowRecorder recorder) {
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
 
@@ -133,6 +144,8 @@ final class TerminalIoEngine {
                 continue;
             }
 
+            // 统计：只有「确认真的搬进来了」的量才记账（回滚掉的不算）
+            if (recorder != null) recorder.item(key, true, stored);
             SharedStorageManager.broadcastItemChange(key);
             budget -= (int) stored;
         }
@@ -155,7 +168,7 @@ final class TerminalIoEngine {
      * 循环的终止条件是目标收不下了或者额度用完，两件事都是当场问出来的。
      */
     private static void pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config,
-        ForgeDirection face) {
+        ForgeDirection face, IoFlowRecorder recorder) {
         if (config.getOutputFilter(face)
             .isEmpty(false)) return;
         int budget = Math.max(1, config.getItemsPerOperation());
@@ -195,6 +208,9 @@ final class TerminalIoEngine {
                 }
                 inventory.markDirty();
                 SharedStorageManager.broadcastItemChange(key);
+
+                // 统计：真正放进去的量（退回仓库的部分不算搬运）
+                if (recorder != null && accepted > 0) recorder.item(key, false, accepted);
 
                 budget -= accepted;
                 available -= taken;
@@ -316,7 +332,8 @@ final class TerminalIoEngine {
     // ==================================================================
 
     /** 从相邻容器里把流体抽进共享存储。 */
-    private static void pullFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config) {
+    private static void pullFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config,
+        IoFlowRecorder recorder) {
         int budget = Math.max(1, config.getFluidPerOperation());
 
         FluidStack preview = handler.drain(side, budget, false);
@@ -335,6 +352,8 @@ final class TerminalIoEngine {
         }
 
         FluidKey key = FluidKey.of(drained);
+        // 统计：实际存进共享存储的量
+        if (recorder != null && key != null) recorder.fluid(key, true, stored);
         if (key != null) SharedStorageManager.broadcastFluidChange(key);
     }
 
@@ -349,7 +368,7 @@ final class TerminalIoEngine {
      * 每轮循环至少推进 1 mB，所以额度用完一定停得下来。
      */
     private static void pushFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config,
-        ForgeDirection face) {
+        ForgeDirection face, IoFlowRecorder recorder) {
         if (config.getOutputFilter(face)
             .isEmpty(true)) return;
         int budget = Math.max(1, config.getFluidPerOperation());
@@ -382,6 +401,8 @@ final class TerminalIoEngine {
                     // 同样是回滚，不受上限约束
                     storage.insertFluidManual(key, taken - filled);
                 }
+                // 统计：真正灌进目标的量（退回仓库的部分不算）
+                if (recorder != null && filled > 0) recorder.fluid(key, false, filled);
                 if (filled > 0) SharedStorageManager.broadcastFluidChange(key);
 
                 budget -= filled;

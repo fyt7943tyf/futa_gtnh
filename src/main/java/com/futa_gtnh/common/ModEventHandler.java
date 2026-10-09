@@ -51,6 +51,10 @@ public class ModEventHandler {
         com.futa_gtnh.rts.server.RtsHistoryManager.onServerTick();
         // 小游戏助手的渐进搜索（没装 lootgames / 没有任务时一次布尔判断的开销）
         com.futa_gtnh.lootassist.LootassistManager.onServerTick();
+        // IO 流量统计的采样推进（没有任何节点记录时一次 isEmpty 的开销）
+        com.futa_gtnh.stats.IoFlowStats.onServerTick();
+        // 无线覆盖版流量采样（GTSWN 缺席时一次布尔判断的开销）
+        com.futa_gtnh.stats.CoverFlowTracker.onServerTick();
     }
 
     /** 玩家下线时清掉他那份操作频率计数，避免 UUID 表越积越大。 */

@@ -57,11 +57,14 @@ public class GuiIoNode extends FutaGuiContainer {
     private static final int BTN_SORT = 33;
     private static final int BTN_PRESET_BASE = 40; // 40..44
     private static final int BTN_RATE_BASE = 50; // 50..55：三行 × 减/加
+    private static final int BTN_STATS_TOGGLE = 60;
+    private static final int BTN_STATS_MODE = 61;
 
     private static final int TAB_MAIN = 0;
     private static final int TAB_FILTER = 1;
     private static final int TAB_RATE = 2;
-    private static final int TAB_COUNT = 3;
+    private static final int TAB_STATS = 3;
+    private static final int TAB_COUNT = 4;
 
     /** 筛选网格：10 列 × 4 行（和共享终端的筛选页一个规格）。 */
     private static final int COLS = 10;
@@ -80,6 +83,8 @@ public class GuiIoNode extends FutaGuiContainer {
 
     private GuiTextField searchField;
     private GuiTextField prefixField;
+    /** 统计页的节点名输入框。回车 / 切页签 / 关界面时才生效（和前缀输入一个习惯）。 */
+    private GuiTextField statsNameField;
 
     private boolean fluidTab;
     /** 筛选条目的排序方式，默认「数量倒序」（IO 节点的约定，不是终端那个按名称）。 */
@@ -165,6 +170,7 @@ public class GuiIoNode extends FutaGuiContainer {
         buttonList.clear();
         searchField = null;
         prefixField = null;
+        statsNameField = null;
 
         for (int i = 0; i < TAB_COUNT; i++) {
             buttonList.add(new FlatButton(BTN_TAB_BASE + i, guiLeft + 8 + i * 66, guiTop + 20, 64, 16, ""));
@@ -176,8 +182,10 @@ public class GuiIoNode extends FutaGuiContainer {
             buildMainTab();
         } else if (tab == TAB_FILTER) {
             buildFilterTab();
-        } else {
+        } else if (tab == TAB_RATE) {
             buildRateTab();
+        } else {
+            buildStatsTab();
         }
 
         buttonList.add(new FlatButton(BTN_DONE, guiLeft + GUI_WIDTH - 68, guiTop + 168, 60, 16, ""));
@@ -236,6 +244,21 @@ public class GuiIoNode extends FutaGuiContainer {
             buttonList
                 .add(new FlatButton(BTN_RATE_BASE + row * 2 + 1, guiLeft + 232, guiTop + 78 + row * 28, 18, 18, "+"));
         }
+    }
+
+    private void buildStatsTab() {
+        buttonList.add(new FlatButton(BTN_STATS_TOGGLE, guiLeft + 232, guiTop + 46, 60, 16, ""));
+        buttonList.add(new FlatButton(BTN_STATS_MODE, guiLeft + 12, guiTop + 100, 120, 16, ""));
+
+        statsNameField = new GuiTextField(fontRendererObj, guiLeft + 12, guiTop + 66, 180, 16);
+        statsNameField.setMaxStringLength(TerminalIoConfig.STATS_NAME_LIMIT);
+        statsNameField.setText(currentStatsName());
+    }
+
+    /** @return 统计页输入框应该显示的名字（同步没到 / 还没改过时就是配置里的名字） */
+    private String currentStatsName() {
+        return ClientIoNode.get()
+            .getStatsName();
     }
 
     private String joinPrefixes() {
@@ -336,6 +359,7 @@ public class GuiIoNode extends FutaGuiContainer {
         super.updateScreen();
         if (searchField != null) searchField.updateCursorCounter();
         if (prefixField != null) prefixField.updateCursorCounter();
+        if (statsNameField != null) statsNameField.updateCursorCounter();
         if (!configReady() && ++requestTimer >= 10) {
             requestTimer = 0;
             requestConfig();
@@ -348,7 +372,7 @@ public class GuiIoNode extends FutaGuiContainer {
         TerminalIoConfig config = ClientIoNode.get();
 
         String[] tabKeys = { "futa_gtnh.gui.ionode.tab.main", "futa_gtnh.gui.ionode.tab.filter",
-            "futa_gtnh.gui.terminal.io.tab.rate" };
+            "futa_gtnh.gui.terminal.io.tab.rate", "futa_gtnh.gui.terminal.io.tab.stats" };
         for (int i = 0; i < TAB_COUNT; i++) {
             GuiButton button = findButton(BTN_TAB_BASE + i);
             if (button == null) continue;
@@ -361,6 +385,7 @@ public class GuiIoNode extends FutaGuiContainer {
         boolean main = tab == TAB_MAIN && ready;
         boolean filter = tab == TAB_FILTER && ready;
         boolean rate = tab == TAB_RATE && ready;
+        boolean stats = tab == TAB_STATS && ready;
 
         // 面配置：两组方向按钮（注意只在面配置页签下才建得出来）
         setEnabled(BTN_PREV_FACE, main);
@@ -415,6 +440,27 @@ public class GuiIoNode extends FutaGuiContainer {
         // 节奏页
         for (int i = 0; i < 6; i++) {
             setEnabled(BTN_RATE_BASE + i, rate);
+        }
+
+        // 统计页
+        GuiButton statsToggle = findButton(BTN_STATS_TOGGLE);
+        if (statsToggle != null) {
+            statsToggle.enabled = stats;
+            statsToggle.displayString = tr(
+                config.isStatsEnabled() ? "futa_gtnh.gui.terminal.io.stats.on" : "futa_gtnh.gui.terminal.io.stats.off");
+            if (statsToggle instanceof FlatButton) ((FlatButton) statsToggle).setMarked(config.isStatsEnabled());
+        }
+        GuiButton statsMode = findButton(BTN_STATS_MODE);
+        if (statsMode != null) {
+            statsMode.enabled = stats;
+            statsMode.displayString = tr("futa_gtnh.gui.terminal.io.stats.mode") + ": "
+                + tr(
+                    config.getStatsMode()
+                        .getLangKey());
+        }
+        if (statsNameField != null) {
+            statsNameField.setVisible(tab == TAB_STATS);
+            statsNameField.setEnabled(stats);
         }
 
         GuiButton doneButton = findButton(BTN_DONE);
@@ -482,8 +528,11 @@ public class GuiIoNode extends FutaGuiContainer {
             case TAB_FILTER:
                 drawFilterTab(mouseX, mouseY);
                 break;
-            default:
+            case TAB_RATE:
                 drawRateTab();
+                break;
+            default:
+                drawStatsTab();
                 break;
         }
         drawTooltips(mouseX, mouseY);
@@ -654,6 +703,25 @@ public class GuiIoNode extends FutaGuiContainer {
         }
     }
 
+    // ---- 统计页 ----
+
+    private void drawStatsTab() {
+        fontRendererObj.drawStringWithShadow(tr("futa_gtnh.gui.terminal.io.stats"), guiLeft + 8, guiTop + 44, 0xFFFFFF);
+
+        if (statsNameField != null) {
+            statsNameField.drawTextBox();
+            if (statsNameField.getVisible() && statsNameField.getText()
+                .isEmpty()) {
+                fontRendererObj
+                    .drawString(tr("futa_gtnh.gui.terminal.io.stats.name.hint"), guiLeft + 15, guiTop + 70, 0x707070);
+            }
+        }
+
+        fontRendererObj.drawString(tr("futa_gtnh.gui.terminal.io.stats.hint"), guiLeft + 12, guiTop + 130, 0x909090);
+        fontRendererObj
+            .drawString(tr("futa_gtnh.gui.terminal.io.stats.web.hint"), guiLeft + 12, guiTop + 144, 0x707070);
+    }
+
     private void drawTooltips(int mouseX, int mouseY) {
         if (tab != TAB_FILTER) return;
 
@@ -688,6 +756,7 @@ public class GuiIoNode extends FutaGuiContainer {
 
         if (button.id >= BTN_TAB_BASE && button.id < BTN_TAB_BASE + TAB_COUNT) {
             applyPrefixes();
+            applyStatsName();
             tab = button.id - BTN_TAB_BASE;
             // 换页签要重建控件，不然几个页签的按钮会叠在一起
             initGui();
@@ -736,6 +805,24 @@ public class GuiIoNode extends FutaGuiContainer {
             return;
         }
 
+        if (button.id == BTN_STATS_TOGGLE) {
+            applyStatsName();
+            config.setStatsEnabled(!config.isStatsEnabled());
+            refreshLabels();
+            pushConfig();
+            return;
+        }
+
+        if (button.id == BTN_STATS_MODE) {
+            applyStatsName();
+            config.setStatsMode(
+                config.getStatsMode()
+                    .next());
+            refreshLabels();
+            pushConfig();
+            return;
+        }
+
         switch (button.id) {
             case BTN_KIND:
                 applyPrefixes();
@@ -764,6 +851,9 @@ public class GuiIoNode extends FutaGuiContainer {
         if (tab == TAB_FILTER) {
             if (searchField != null) searchField.mouseClicked(mouseX, mouseY, mouseButton);
             if (prefixField != null) prefixField.mouseClicked(mouseX, mouseY, mouseButton);
+        }
+        if (tab == TAB_STATS && statsNameField != null) {
+            statsNameField.mouseClicked(mouseX, mouseY, mouseButton);
         }
 
         if (tab != TAB_FILTER || mouseButton != 0 || !configReady()) return;
@@ -819,6 +909,19 @@ public class GuiIoNode extends FutaGuiContainer {
             return;
         }
 
+        if (tab == TAB_STATS && statsNameField != null && statsNameField.isFocused()) {
+            if (keyCode == Keyboard.KEY_ESCAPE) {
+                mc.displayGuiScreen(null);
+                return;
+            }
+            if (keyCode == Keyboard.KEY_RETURN) {
+                applyStatsName();
+                return;
+            }
+            statsNameField.textboxKeyTyped(typedChar, keyCode);
+            return;
+        }
+
         if (keyCode == Keyboard.KEY_ESCAPE) {
             mc.displayGuiScreen(null);
         }
@@ -834,9 +937,31 @@ public class GuiIoNode extends FutaGuiContainer {
         pushConfig();
     }
 
+    /** 节点名同样「回车才生效」：切页签 / 关界面 / 按统计页按钮时补一次。 */
+    private void applyStatsName() {
+        if (tab != TAB_STATS || statsNameField == null || !statsNameField.getVisible() || !configReady()) return;
+        if (statsNameField.getText()
+            .equals(
+                ClientIoNode.get()
+                    .getStatsName()))
+            return;
+        ClientIoNode.get()
+            .setStatsName(statsNameField.getText());
+        // 服务端会再做一次清洗（长度 / 格式码），回推的权威值会盖回输入框
+        pushConfig();
+        if (!ClientIoNode.get()
+            .getStatsName()
+            .equals(statsNameField.getText())) {
+            statsNameField.setText(
+                ClientIoNode.get()
+                    .getStatsName());
+        }
+    }
+
     @Override
     public void onGuiClosed() {
         applyPrefixes();
+        applyStatsName();
         super.onGuiClosed();
     }
 }

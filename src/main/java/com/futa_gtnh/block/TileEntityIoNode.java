@@ -212,6 +212,12 @@ public class TileEntityIoNode extends TileEntity {
             refreshConnections();
         }
 
+        // 统计心跳放在 hasAnyMode 之前：一个面都没配的节点也可能开着统计，
+        // 那种节点没有流量，但网页的节点列表里应该能看到它、知道它在线
+        if (io.isStatsEnabled()) {
+            com.futa_gtnh.stats.IoFlowStats.touch(worldObj, xCoord, yCoord, zCoord, false, io);
+        }
+
         if (!io.hasAnyMode()) return;
 
         int interval = Math.max(1, io.getIntervalTicks());
@@ -219,7 +225,7 @@ public class TileEntityIoNode extends TileEntity {
         ioTimer = 0;
 
         try {
-            TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io);
+            TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, false, io);
         } catch (Throwable t) {
             FutaGtnhMod.LOG.warn("IO 节点：主动搬运时出错（{} {} {}），这一轮跳过", xCoord, yCoord, zCoord, t);
         }

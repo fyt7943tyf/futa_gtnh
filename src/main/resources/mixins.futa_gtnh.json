@@ -18,8 +18,15 @@
 		"lootgames.MixinGameOfLight",
 		"lootgames.MixinGameSudoku",
 		"lootgames.InvokerGameMineSweeper",
-		"lootgames.InvokerGOLStage"
+		"lootgames.InvokerGOLStage",
+		"gtswn.MixinGTswnCoverWirelessBase",
+		"gtswn.MixinGTswnCoverEnergyWireless",
+		"gtswn.MixinGTswnCoverDynamoWireless"
 	],
-	"client": ["MixinEntityRenderer", "MixinEntityPlayerSP", "MixinAutoCraftingManager"],
+	"client": [
+		"MixinEntityRenderer",
+		"MixinEntityPlayerSP",
+		"MixinAutoCraftingManager"
+	],
 	"server": []
 }

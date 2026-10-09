@@ -109,6 +109,7 @@ futa_gtnh.gui.terminal.io.title=Terminal automation
 futa_gtnh.gui.terminal.io.tab.faces=Faces
 futa_gtnh.gui.terminal.io.tab.filter=Output filter
 futa_gtnh.gui.terminal.io.tab.rate=Pace
+futa_gtnh.gui.terminal.io.tab.stats=Stats
 futa_gtnh.gui.terminal.io.items=Items
 futa_gtnh.gui.terminal.io.fluids=Fluids
 futa_gtnh.gui.terminal.io.current=Selected:
@@ -156,6 +157,16 @@ futa_gtnh.gui.terminal.io.rate.items=Items
 futa_gtnh.gui.terminal.io.rate.fluid=Fluid
 futa_gtnh.gui.terminal.io.rate.per=/ round
 futa_gtnh.gui.terminal.io.rate.hint=Interval = one round per N ticks; rest = per-face cap
+futa_gtnh.gui.terminal.io.stats=Flow statistics
+futa_gtnh.gui.terminal.io.stats.on=Enabled
+futa_gtnh.gui.terminal.io.stats.off=Disabled
+futa_gtnh.gui.terminal.io.stats.mode=Direction
+futa_gtnh.gui.terminal.io.stats.mode.in=Input only
+futa_gtnh.gui.terminal.io.stats.mode.out=Output only
+futa_gtnh.gui.terminal.io.stats.mode.both=Input + output
+futa_gtnh.gui.terminal.io.stats.name.hint=Node name (optional, coordinates if empty)
+futa_gtnh.gui.terminal.io.stats.hint=Input = pulled into shared storage, output = pushed out; one sample per 10 s
+futa_gtnh.gui.terminal.io.stats.web.hint=Curves and details are shown on the AE2-Web node-flow page
 futa_gtnh.gui.terminal.io.preset.raw_ore.short=Raw
 futa_gtnh.gui.terminal.io.preset.crushed.short=Crushed
 futa_gtnh.gui.terminal.io.preset.purified.short=Purified
