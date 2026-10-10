@@ -391,3 +391,8 @@ futa_gtnh.disassembler.nei_page=Complete batch, page %s/%s
 gt.blockmachines.futa_gtnh.disassembler.lv.name=LV Disassembler
 
 futa_gtnh.disassembler.collecting=Collecting batch: %s/%s
+
+item.futa_gtnh.shared_cell_item.name=Shared Storage Cell
+item.futa_gtnh.shared_cell_item.tip=Put into an ME Drive or ME Chest: the whole ME network can access the server-wide shared backpack (items), autocrafting included
+item.futa_gtnh.shared_cell_fluid.name=Shared Fluid Storage Cell
+item.futa_gtnh.shared_cell_fluid.tip=Put into an ME Drive or ME Chest: the whole ME network can access the server-wide shared backpack (fluids), autocrafting included

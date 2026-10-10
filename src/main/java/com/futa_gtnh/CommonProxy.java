@@ -62,6 +62,16 @@ public class CommonProxy {
     public static ItemSolarDescaler solarDescaler;
 
     /**
+     * AE2 共享背包存储元件（物品通道）。没装 AE2 或配置关闭时为 null。
+     * 元件物品类不引用任何 AE 类型（实现隔离在 com.futa_gtnh.ae2 包的 handler 侧），
+     * 公共代码持有它没有类加载风险。
+     */
+    public static com.futa_gtnh.ae2.ItemSharedStorageCell aeSharedCellItem;
+
+    /** AE2 共享背包存储元件（流体通道）。同上。 */
+    public static com.futa_gtnh.ae2.ItemSharedStorageCell aeSharedCellFluid;
+
+    /**
      * 迅步照明用的隐形光源方块。
      *
      * <p>
@@ -86,6 +96,7 @@ public class CommonProxy {
         registerMinigameHelper();
         registerLootMachine();
         registerSolarDescaler();
+        registerAe2Cells();
         registerRecipes();
 
         // lootgames 联动的服务端行为覆写（重试上限等）。
@@ -257,6 +268,40 @@ public class CommonProxy {
     }
 
     /**
+     * 注册 AE2 共享背包存储元件（物品 / 流体两件套）。
+     *
+     * <p>
+     * <b>守卫顺序和迅步/Baubles 同一套</b>：配置开关 + {@code Loader.isModLoaded}
+     * 双保险。{@code Ae2Integration.install()} 里才会碰到 AE 的类型
+     * （cell registry 注册、变更监听器、tick 钩子），没装 AE2 时那行根本不会执行。
+     *
+     * <p>
+     * 为什么是两个物品：GTNH fork 的 AE2 里一个物理元件在驱动器里只能服务一个
+     * 通道（TileDrive.updateState 拿到第一个非 null 的 stack type 就 break），
+     * 所以物品/流体各一枚，和 AE2 自家的两件套对齐。详见
+     * {@link com.futa_gtnh.ae2.ItemSharedStorageCell} 的类注释。
+     */
+    private void registerAe2Cells() {
+        if (!Config.enableAe2Cell) return;
+
+        if (!com.futa_gtnh.ae2.Ae2Compat.isAvailable()) {
+            FutaGtnhMod.LOG.info("没有检测到 Applied Energistics 2，跳过共享背包存储元件的注册");
+            return;
+        }
+
+        aeSharedCellItem = new com.futa_gtnh.ae2.ItemSharedStorageCell(false);
+        GameRegistry.registerItem(aeSharedCellItem, com.futa_gtnh.ae2.ItemSharedStorageCell.NAME_ITEM);
+        FutaGtnhMod.aeSharedCellItem = aeSharedCellItem;
+
+        aeSharedCellFluid = new com.futa_gtnh.ae2.ItemSharedStorageCell(true);
+        GameRegistry.registerItem(aeSharedCellFluid, com.futa_gtnh.ae2.ItemSharedStorageCell.NAME_FLUID);
+        FutaGtnhMod.aeSharedCellFluid = aeSharedCellFluid;
+
+        com.futa_gtnh.ae2.Ae2Integration.install();
+        FutaGtnhMod.LOG.info("已注册 AE2 共享背包存储元件（物品 / 流体通道）");
+    }
+
+    /**
      * 共享终端的合成配方。
      *
      * <p>
@@ -340,6 +385,26 @@ public class CommonProxy {
                 new ShapedOreRecipe(
                     new ItemStack(solarDescaler, 1),
                     new Object[] { " B ", "BIB", " B ", 'B', new ItemStack(Items.dye, 1, 15), 'I', "ingotIron" }));
+        }
+
+        // AE2 共享背包存储元件两件套：玻璃 + 萤石紫水晶 + 中心（箱子=物品 / 桶=流体）。
+        // 骨架和共享终端配方同构（末影珍珠 → 萤石紫水晶）：ME 网络的通用材料
+        // 对应「接入 AE」，中心物品对应通道。整个配方只在 AE2 在场时注册
+        // （aeSharedCellItem 非 null 的前提），没装 AE2 时不会出现合不出材料的空配方。
+        // crystalFluix 是 GTNH fork 的 AE2 自己注册并使用的一致矿辞名
+        // （它自带的配方里就写着 oredictionary:crystalFluix），存在性有保证。
+        if (aeSharedCellItem != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(aeSharedCellItem, 1),
+                    new Object[] { "GFG", "FCF", "GFG", 'G', "blockGlass", 'F', "crystalFluix", 'C', "chestWood" }));
+        }
+        if (aeSharedCellFluid != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(aeSharedCellFluid, 1),
+                    new Object[] { "GFG", "FBF", "GFG", 'G', "blockGlass", 'F', "crystalFluix", 'B',
+                        new ItemStack(Items.bucket, 1) }));
         }
     }
 
