@@ -388,3 +388,4 @@ futa_gtnh.disassembler.nei_page=完整批次的第 %s/%s 页
 gt.blockmachines.futa_gtnh.disassembler.lv.name=低压拆解机
 
 futa_gtnh.disassembler.collecting=待补足批次：%s/%s
+futa_gtnh.msg.bookmark.too_large=书签物品的 NBT 数据过大，已取消这次取物请求。

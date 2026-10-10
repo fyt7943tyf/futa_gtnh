@@ -391,3 +391,4 @@ futa_gtnh.disassembler.nei_page=Complete batch, page %s/%s
 gt.blockmachines.futa_gtnh.disassembler.lv.name=LV Disassembler
 
 futa_gtnh.disassembler.collecting=Collecting batch: %s/%s
+futa_gtnh.msg.bookmark.too_large=Bookmark item NBT is too large. This withdrawal request was cancelled.
