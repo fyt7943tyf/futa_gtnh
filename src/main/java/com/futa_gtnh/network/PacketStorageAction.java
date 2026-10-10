@@ -172,6 +172,9 @@ public class PacketStorageAction implements IMessage {
      */
     public static final byte DUMP_CRAFT_GRID = 34;
 
+    /** NEI 书签清单批量取物；keyTag 为 items 列表，invSlot 为发起请求的窗口编号。 */
+    public static final byte WITHDRAW_BOOKMARK_ITEMS = 35;
+
     public static final byte KIND_ITEM = 0;
     public static final byte KIND_FLUID = 1;
 

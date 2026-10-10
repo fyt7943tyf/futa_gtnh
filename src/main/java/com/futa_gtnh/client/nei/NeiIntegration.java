@@ -18,7 +18,7 @@ import codechicken.nei.api.GuiInfo;
  * 守卫后才调用 {@link #register()}。NEI 是可选联动，缺席时这里的一切都不存在。
  *
  * <p>
- * 注册四样东西：
+ * 注册以下联动：
  * <ol>
  * <li>终端界面的配方转移 overlay（「材料直接从共享存储取」，见
  * {@link SharedTerminalOverlayHandler}）；</li>
@@ -29,6 +29,7 @@ import codechicken.nei.api.GuiInfo;
  * {@code Config#terminalNeiPanel}；</li>
  * <li>搜索推送桥的实现：把共享背包搜索框的输入实时推给 NEI 搜索条
  * （{@code Config#terminalSearchMode} 的 NEI_SYNC* 模式），见 {@link NeiSearchBridge}。</li>
+ * <li>书签清单取物：使用 NEI 已配置的取物快捷键，从整个共享物品仓库取到玩家背包。</li>
  * </ol>
  */
 public final class NeiIntegration {
@@ -37,6 +38,8 @@ public final class NeiIntegration {
 
     public static void register() {
         SharedTerminalOverlayHandler handler = new SharedTerminalOverlayHandler();
+        SharedTerminalBookmarkHandler bookmarks = new SharedTerminalBookmarkHandler();
+        API.registerBookmarkContainerHandler(GuiSharedTerminal.class, bookmarks);
 
         // "crafting"：3×3 配方（工作台那一类）的「填入合成栏」按钮 + 幽灵材料指引。
         // 终端合成栏就是 3×3，所以这一类配方现在也能直接填。
@@ -67,7 +70,8 @@ public final class NeiIntegration {
         // 这坑我们自己的注释早就警告过（MouseTweaksCompat 里写着「那边要把这个子类也登记一遍」），
         // 只是当初那句话落实在了 GuiInfo.customSlotGuis 上，overlay 和 handler 这两处漏了。
         Class<? extends GuiContainer> actualGui = MouseTweaksCompat.guiClass();
-        if (actualGui != GuiSharedTerminal.class) {
+        if (actualGui != null && actualGui != GuiSharedTerminal.class) {
+            API.registerBookmarkContainerHandler(actualGui, bookmarks);
             API.registerGuiOverlay(
                 actualGui,
                 "crafting",
