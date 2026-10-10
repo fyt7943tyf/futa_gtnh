@@ -133,6 +133,12 @@ public final class StorageActionHandler {
                     InventoryExchange.withdrawItem(player, key, amount, storage, recorder);
                     break;
                 }
+                case PacketStorageAction.WITHDRAW_BOOKMARK_ITEMS: {
+                    // 延迟到达的旧窗口请求不能在玩家新打开的终端里执行。
+                    if (packet.getInvSlot() != container.windowId) return;
+                    BookmarkWithdrawal.withdraw(player, packet.getLayoutTag(), storage, recorder);
+                    break;
+                }
                 case PacketStorageAction.WITHDRAW_ITEM_EMPTY: {
                     InventoryExchange.withdrawItemToEmptySlot(player, packet.getItemKey(), amount, storage, recorder);
                     break;

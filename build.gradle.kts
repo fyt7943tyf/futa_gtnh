@@ -49,6 +49,7 @@ tasks.named("check") {
     dependsOn(tasks.named("verifyDisassembler"))
     dependsOn(tasks.named("verifyDisassemblerUi"))
     dependsOn(tasks.named("verifyTerminalClicks"))
+    dependsOn(tasks.named("verifyBookmarkWithdrawal"))
     dependsOn(tasks.named("verifyTerminalSearch"))
     dependsOn(tasks.named("verifyTerminalNeiSearch"))
 }
@@ -81,6 +82,18 @@ tasks.register<JavaExec>("verifyTerminalClicks") {
     dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
     mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
     args("com.futa_gtnh.client.TerminalClickRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
+tasks.register<JavaExec>("verifyBookmarkWithdrawal") {
+    group = "verification"
+    description = "Checks real NEI bookmark quantities, full warehouse access, batching and inventory conservation"
+    dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.client.BookmarkWithdrawalRegression")
     classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
         files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
         files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
