@@ -1,14 +1,14 @@
 package com.futa_gtnh.disassembler;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidTank;
-
-import com.futa_gtnh.shared.ItemKey;
 
 /** Real inventory: input 0, escrow 1, outputs 2 onwards. Escrow drops only the original unfinished input. */
 public final class DisassemblyBuffer {
@@ -26,6 +26,22 @@ public final class DisassemblyBuffer {
         for (int i = 0; i < tanks.length; i++) tanks[i] = new FluidTank(tankCapacity);
     }
 
+    /** Grow existing/early-loaded machines to fit the final catalog without discarding saved contents. */
+    public boolean growTo(int itemSlots, int fluidSlots, int capacity) {
+        int itemCount = Math.max(inventory.length, itemSlots + 2);
+        int fluidCount = Math.max(tanks.length, fluidSlots);
+        int newCapacity = Math.max(tankCapacity, capacity);
+        if (itemCount == inventory.length && fluidCount == tanks.length && newCapacity == tankCapacity) return false;
+        inventory = Arrays.copyOf(inventory, itemCount);
+        tanks = Arrays.copyOf(tanks, fluidCount);
+        tankCapacity = newCapacity;
+        for (int i = 0; i < tanks.length; i++) {
+            if (tanks[i] == null) tanks[i] = new FluidTank(tankCapacity);
+            else tanks[i].setCapacity(tankCapacity);
+        }
+        return true;
+    }
+
     public boolean hasTask() {
         return pending != null;
     }
@@ -36,7 +52,7 @@ public final class DisassemblyBuffer {
             || input == null
             || recipe == null
             || input.stackSize < recipe.inputCount
-            || !recipe.input.equals(ItemKey.of(input))
+            || !recipe.matches(input, false, true)
             || simulate(recipe) == null) return false;
         inventory[1] = input.splitStack(recipe.inputCount);
         if (input.stackSize == 0) inventory[0] = null;
@@ -45,9 +61,61 @@ public final class DisassemblyBuffer {
         return true;
     }
 
+    /** Accumulate a batch larger than an input stack; no EU is charged until it is complete. */
+    public boolean collect(DisassemblyRecipe candidate) {
+        DisassemblyRecipe recipe = pending == null ? candidate : pending;
+        ItemStack input = inventory[0], escrow = inventory[1];
+        if (recipe == null || input == null
+            || !recipe.matches(input, false, false)
+            || (pending == null && (escrow != null || simulate(recipe) == null))
+            || (escrow != null && (!sameOutput(escrow, input) || escrow.stackSize >= recipe.inputCount))) return false;
+        int count = Math.min(input.stackSize, recipe.inputCount - (escrow == null ? 0 : escrow.stackSize));
+        if (count <= 0) return false;
+        ItemStack consumed = input.splitStack(count);
+        if (escrow == null) inventory[1] = consumed;
+        else escrow.stackSize += count;
+        if (input.stackSize == 0) inventory[0] = null;
+        pending = recipe;
+        return true;
+    }
+
+    public int collectedCount() {
+        return inventory[1] == null ? 0 : inventory[1].stackSize;
+    }
+
+    public int requiredCount() {
+        return pending == null ? 0 : pending.inputCount;
+    }
+
+    private boolean batchCollected() {
+        return pending != null && inventory[1] != null && inventory[1].stackSize == pending.inputCount;
+    }
+
+    /** GT drops inventory stacks as-is. Split any private bulk escrow before it reaches world/NBT packets. */
+    public void prepareDrops() {
+        List<ItemStack> drops = new ArrayList<>(Arrays.asList(inventory));
+        for (int slot = 0; slot <= 1; slot++) {
+            ItemStack stack = drops.get(slot);
+            if (stack == null) continue;
+            int limit = Math.max(1, Math.min(64, stack.getMaxStackSize()));
+            int remaining = stack.stackSize - limit;
+            if (remaining <= 0) continue;
+            stack.stackSize = limit;
+            while (remaining > 0) {
+                ItemStack split = stack.copy();
+                split.stackSize = Math.min(limit, remaining);
+                drops.add(split);
+                remaining -= split.stackSize;
+            }
+        }
+        inventory = drops.toArray(new ItemStack[0]);
+        pending = null;
+        progress = 0;
+    }
+
     /** The caller pays 32 EU for each successful processing tick, including the final one. */
     public boolean advance(boolean powered) {
-        if (pending == null || !powered) return false;
+        if (!batchCollected() || !powered) return false;
         Snapshot complete = simulate(pending);
         if (complete == null) return false;
         if (++progress >= DisassemblyRecipe.DURATION) {
@@ -61,7 +129,12 @@ public final class DisassemblyBuffer {
     }
 
     public boolean canAdvance() {
-        return pending != null && simulate(pending) != null;
+        return batchCollected() && simulate(pending) != null;
+    }
+
+    private static boolean sameOutput(ItemStack first, ItemStack second) {
+        return first.getItem() == second.getItem() && first.getItemDamage() == second.getItemDamage()
+            && ItemStack.areItemStackTagsEqual(first, second);
     }
 
     private Snapshot simulate(DisassemblyRecipe recipe) {
@@ -77,14 +150,14 @@ public final class DisassemblyBuffer {
             for (int pass = 0; pass < 2 && remaining > 0; pass++) {
                 for (int i = 2; i < items.length && remaining > 0; i++) {
                     ItemStack current = items[i];
-                    if (pass == 0 ? current == null || !ItemKey.of(current)
-                        .equals(ItemKey.of(output)) : current != null) continue;
+                    if (pass == 0 ? current == null || !sameOutput(current, output) : current != null) continue;
                     int room = Math.min(64, output.getMaxStackSize()) - (current == null ? 0 : current.stackSize);
                     int count = Math.min(remaining, Math.max(0, room));
                     if (count > 0) {
-                        if (current == null) items[i] = ItemKey.of(output)
-                            .prototype(count);
-                        else current.stackSize += count;
+                        if (current == null) {
+                            items[i] = output.copy();
+                            items[i].stackSize = count;
+                        } else current.stackSize += count;
                         remaining -= count;
                     }
                 }
@@ -134,6 +207,7 @@ public final class DisassemblyBuffer {
             if (inventory[i] == null) continue;
             NBTTagCompound stack = inventory[i].writeToNBT(new NBTTagCompound());
             stack.setInteger("slot", i);
+            stack.setInteger("fullCount", inventory[i].stackSize);
             list.appendTag(stack);
         }
         tag.setTag("inventory", list);
@@ -152,6 +226,8 @@ public final class DisassemblyBuffer {
             if (slot < 0) throw new IllegalArgumentException("Negative saved slot");
             if (slot >= inventory.length) inventory = Arrays.copyOf(inventory, slot + 1);
             inventory[slot] = ItemStack.loadItemStackFromNBT(stack);
+            if (inventory[slot] != null && stack.hasKey("fullCount"))
+                inventory[slot].stackSize = stack.getInteger("fullCount");
         }
         tankCapacity = Math.max(tankCapacity, tag.getInteger("tankCapacity"));
         int count = Math.max(tanks.length, tag.getInteger("tankCount"));
@@ -168,8 +244,9 @@ public final class DisassemblyBuffer {
             if (stack != null) tanks[fluid.getInteger("slot")].setFluid(stack);
         }
         pending = tag.hasKey("task") ? DisassemblyRecipe.readFromNbt(tag.getCompoundTag("task")) : null;
-        if (pending != null && (inventory[1] == null || inventory[1].stackSize != pending.inputCount
-            || !pending.input.equals(ItemKey.of(inventory[1]))))
+        if (pending != null && (inventory[1] == null || inventory[1].stackSize <= 0
+            || inventory[1].stackSize > pending.inputCount
+            || !pending.matches(inventory[1], false, false)))
             throw new IllegalArgumentException("Saved task does not match escrow");
         progress = pending == null ? 0
             : Math.max(0, Math.min(DisassemblyRecipe.DURATION - 1, tag.getInteger("progress")));

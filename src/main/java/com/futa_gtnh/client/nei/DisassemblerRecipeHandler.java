@@ -170,8 +170,7 @@ public final class DisassemblerRecipeHandler extends TemplateRecipeHandler {
             .equals(ItemKey.of(DisassemblerRegistration.stack()))) {
             for (DisassemblyRecipe recipe : DisassemblyCatalog.all()) add(recipe);
         } else {
-            DisassemblyRecipe recipe = DisassemblyCatalog.find(ingredient);
-            if (recipe != null) add(recipe);
+            for (DisassemblyRecipe recipe : DisassemblyCatalog.usages(ingredient)) add(recipe);
         }
     }
 
@@ -193,7 +192,7 @@ public final class DisassemblerRecipeHandler extends TemplateRecipeHandler {
         Page(DisassemblyRecipe recipe, List<ItemStack> items, List<ItemStack> fluids, int page, int pages) {
             this.page = page;
             this.pages = pages;
-            input = new PositionedStack(recipe.input.prototype(recipe.inputCount), 3, 24, false);
+            input = new PositionedStack(recipe.inputStack(), 3, 24, false);
             for (int offset = 0; offset < 28 && page * 28 + offset < items.size(); offset++) outputs.add(
                 new PositionedStack(items.get(page * 28 + offset), 31 + offset % 7 * 18, 6 + offset / 7 * 18, false));
             for (int offset = 0; offset < 7 && page * 7 + offset < fluids.size(); offset++)

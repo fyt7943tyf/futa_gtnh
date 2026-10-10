@@ -386,3 +386,5 @@ futa_gtnh.disassembler.fluids=流体输出
 futa_gtnh.disassembler.hint=单步拆解；背面抽取；空容器点击流体槽取液
 futa_gtnh.disassembler.nei_page=完整批次的第 %s/%s 页
 gt.blockmachines.futa_gtnh.disassembler.lv.name=低压拆解机
+
+futa_gtnh.disassembler.collecting=待补足批次：%s/%s

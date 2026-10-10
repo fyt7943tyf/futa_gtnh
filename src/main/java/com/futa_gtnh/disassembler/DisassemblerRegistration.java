@@ -6,6 +6,11 @@ import net.minecraft.item.ItemStack;
 
 import com.futa_gtnh.Config;
 
+import cpw.mods.fml.common.FMLCommonHandler;
+import cpw.mods.fml.common.Loader;
+import cpw.mods.fml.common.eventhandler.EventPriority;
+import cpw.mods.fml.common.eventhandler.SubscribeEvent;
+import cpw.mods.fml.common.gameevent.TickEvent;
 import gregtech.api.GregTechAPI;
 import gregtech.api.enums.ItemList;
 import gregtech.api.util.GTModHandler;
@@ -42,6 +47,36 @@ public final class DisassemblerRegistration {
     }
 
     public static void loadComplete() {
-        if (prototype != null) DisassemblyCatalog.build(report);
+        if (prototype == null) return;
+        if (Loader.isModLoaded("sciencenotleisure")) {
+            // GTNL loads Shimmer on its first tick, after all load-complete handlers.
+            FMLCommonHandler.instance()
+                .bus()
+                .register(new AfterShimmer());
+        } else DisassemblyCatalog.build(report);
+    }
+
+    public static final class AfterShimmer {
+
+        private boolean built;
+
+        @SubscribeEvent(priority = EventPriority.LOWEST)
+        public void client(TickEvent.ClientTickEvent event) {
+            if (event.phase == TickEvent.Phase.END) build();
+        }
+
+        @SubscribeEvent(priority = EventPriority.LOWEST)
+        public void server(TickEvent.ServerTickEvent event) {
+            if (event.phase == TickEvent.Phase.END) build();
+        }
+
+        private void build() {
+            if (built) return;
+            built = true;
+            FMLCommonHandler.instance()
+                .bus()
+                .unregister(this);
+            DisassemblyCatalog.build(report);
+        }
     }
 }

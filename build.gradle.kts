@@ -49,6 +49,7 @@ tasks.named("check") {
     dependsOn(tasks.named("verifyDisassembler"))
     dependsOn(tasks.named("verifyDisassemblerUi"))
     dependsOn(tasks.named("verifyTerminalClicks"))
+    dependsOn(tasks.named("verifyTerminalSearch"))
 }
 
 // Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.
@@ -97,12 +98,32 @@ tasks.register<JavaExec>("verifyDisassemblerUi") {
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 
+tasks.register<JavaExec>("verifyTerminalSearch") {
+    group = "verification"
+    description = "Checks focused search input before NEI shortcuts, consumed clicks and real NEI item drag completion"
+    dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.client.TerminalSearchRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
 tasks.register<JavaExec>("verifyDisassembler") {
     group = "verification"
-    description = "Checks reverse batches, conflict rejection, real output capacity and persisted atomic processing"
+    description = "Checks Shimmer route parity, reverse batches, real output capacity and persisted atomic processing"
     dependsOn(compileReadApiChecks)
     mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
     args("com.futa_gtnh.disassembler.DisassemblerRegression")
     classpath = files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
+// Retain the modified LGPL library sources with every executable distribution.
+tasks.named<Jar>("jar") {
+    from("src/main/java") {
+        include("com/futa_gtnh/disassembler/**", "com/futa_gtnh/mixins/MixinShimmerGT*Recipe.java")
+        into("META-INF/licenses/gtnl/source")
+    }
 }

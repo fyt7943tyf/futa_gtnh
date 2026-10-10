@@ -389,3 +389,5 @@ futa_gtnh.disassembler.fluids=Fluid outputs
 futa_gtnh.disassembler.hint=One step; extract at rear; click fluids with empty containers
 futa_gtnh.disassembler.nei_page=Complete batch, page %s/%s
 gt.blockmachines.futa_gtnh.disassembler.lv.name=LV Disassembler
+
+futa_gtnh.disassembler.collecting=Collecting batch: %s/%s

@@ -201,8 +201,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         searchField.setText(previousQuery, false);
         searchField.setChangeListener(this::onSearchTextChanged);
         // 联动模式为「自动聚焦」时直接进输入状态；其余模式点一下才聚焦。
-        // KeyHandler 里有 currentScreen != null 就 return 的守卫，B 键不会关掉界面；
-        // GuiContainer 只对「打开背包」那个键（默认 E）关界面，字母键不会。
+        // NEI 输入桥会在腰带等容器快捷键之前把按键交给聚焦的输入框。
         searchField.setFocused(effectiveSearchMode().autoFocus());
         // 按住退格能连删。1.7.10 的 GuiTextField 不会自己开重复事件，
         // 这里开、关界面时关（和原版 GuiEditSign 同一个套路）
@@ -1024,6 +1023,8 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) {
         // 上限对话框优先：开着的时候它吞掉所有点击，别让点击穿到下面的格子上去
         if (handleLimitDialogClick(mouseX, mouseY)) return;
+        // 先更新焦点，按钮、批量操作等提前返回的路径也必须能失焦。
+        if (handleSearchClick(mouseX, mouseY, mouseButton)) return;
         // 中键点共享格子 = 设存量上限（物品页签给物品设，流体页签给流体设）
         if (handleLimitOpenClick(mouseX, mouseY, mouseButton)) return;
 
@@ -1046,10 +1047,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         // 我们自己的服务端权威动作，普通点击仍交给 GuiContainer。
         if (handleShortcutClick(mouseX, mouseY, mouseButton)) return;
         if (handleShiftDoubleClick(mouseX, mouseY, mouseButton)) return;
-        if (handleSharedShiftClick(mouseX, mouseY, mouseButton)) {
-            updateSearchFocus(mouseX, mouseY, mouseButton);
-            return;
-        }
+        if (handleSharedShiftClick(mouseX, mouseY, mouseButton)) return;
 
         // 「Shift + 按住左键滑动存入」只从背包上按下才算数：这样
         // 「Shift 点共享格取出 → 顺手划过背包」不会把刚取出来的东西又存回去。
@@ -1062,17 +1060,35 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         }
 
         super.mouseClicked(mouseX, mouseY, mouseButton);
-        updateSearchFocus(mouseX, mouseY, mouseButton);
     }
 
-    private void updateSearchFocus(int mouseX, int mouseY, int mouseButton) {
-        if (searchField != null) {
-            // FutaSearchField 自己处理聚焦/失焦/右键清空；文本真的变了的话
-            // 变更回调已经置过 viewDirty，这里只补「焦点切换」的旧逻辑
-            boolean before = searchField.isFocused();
-            searchField.mouseClicked(mouseX, mouseY, mouseButton);
-            if (before != searchField.isFocused()) viewDirty = true;
-        }
+    /** NEI 的被动点击钩子也调用此处，面板消费的框外点击同样能失焦。 */
+    public boolean handleSearchClick(int mouseX, int mouseY, int mouseButton) {
+        if (limitTarget != null || searchField == null || (mouseButton != 0 && mouseButton != 1)) return false;
+        boolean inside = searchField.contains(mouseX, mouseY);
+        boolean before = searchField.isFocused();
+        searchField.mouseClicked(mouseX, mouseY, mouseButton);
+        if (before != searchField.isFocused()) viewDirty = true;
+        return inside;
+    }
+
+    /** 聚焦输入框优先于 NEI/模组快捷键；未聚焦时保留原来的快捷键行为。 */
+    public boolean handleSearchKey(char typedChar, int keyCode) {
+        if (handleLimitDialogKey(typedChar, keyCode)) return true;
+        if (searchField == null || !searchField.isFocused() || keyCode == Keyboard.KEY_ESCAPE) return false;
+        searchField.textboxKeyTyped(typedChar, keyCode);
+        // 即使字符因长度上限或输入规则未写入，也不能触发腰带、背包等快捷键。
+        return true;
+    }
+
+    /** NEI 拖放只写入显示名，使用与键入相同的过滤/同步回调。 */
+    public boolean acceptSearchDrop(int mouseX, int mouseY, ItemStack stack) {
+        if (limitTarget != null || searchField == null || stack == null || !searchField.contains(mouseX, mouseY))
+            return false;
+        searchField.setText(EnumChatFormatting.getTextWithoutFormattingCodes(stack.getDisplayName()));
+        searchField.setFocused(true);
+        viewDirty = true;
+        return true;
     }
 
     /**
@@ -1417,16 +1433,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
     @Override
     protected void keyTyped(char typedChar, int keyCode) {
-        // 上限对话框开着时，键盘归它（数字 / 回车确定 / ESC 取消）
-        if (handleLimitDialogKey(typedChar, keyCode)) return;
-
-        // 注意：1.7.10 的 GuiScreen#keyTyped 没有声明 throws，
-        // 覆写时加上 throws IOException 会直接编译不过
-        if (searchField != null && searchField.textboxKeyTyped(typedChar, keyCode)) {
-            // 文本变化时 FutaSearchField 的变更回调已经置过 viewDirty/pendingResort
-            // 并推送 NEI；光标移动这类不改文本的按键不需要刷新
-            return;
-        }
+        if (handleSearchKey(typedChar, keyCode)) return;
         if (keyCode == Keyboard.KEY_Q && (isSpaceDown() || isAltDown())) {
             int mouseX = Mouse.getX() * width / mc.displayWidth;
             int mouseY = height - Mouse.getY() * height / mc.displayHeight - 1;

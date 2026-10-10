@@ -89,17 +89,19 @@ public class FutaSearchField extends GuiTextField {
 
     @Override
     public void mouseClicked(int mouseX, int mouseY, int mouseButton) {
-        boolean hit = mouseX >= this.xPosition && mouseX < this.xPosition + this.width
-            && mouseY >= this.yPosition
-            && mouseY < this.yPosition + this.boxHeight;
-
-        if (hit && mouseButton == 1) {
+        if (contains(mouseX, mouseY) && mouseButton == 1) {
             // 右键清空：焦点留在框里，方便接着输入新词
             setFocused(true);
             if (!getText().isEmpty()) setText("");
             return;
         }
         super.mouseClicked(mouseX, mouseY, mouseButton);
+    }
+
+    public boolean contains(int mouseX, int mouseY) {
+        return mouseX >= this.xPosition && mouseX < this.xPosition + this.width
+            && mouseY >= this.yPosition
+            && mouseY < this.yPosition + this.boxHeight;
     }
 
     private void fireChange() {

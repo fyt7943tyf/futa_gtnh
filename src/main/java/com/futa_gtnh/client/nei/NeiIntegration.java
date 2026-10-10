@@ -96,6 +96,7 @@ public final class NeiIntegration {
         // （可见性 + 面板格遮罩）。默认显示 NEI 面板，收不收由用户配置决定。
         // 它取代了原来只管共享终端的 TerminalGuiHandler（PR #4）。
         API.registerNEIGuiHandler(FutaNeiGuiHandler.INSTANCE);
+        TerminalSearchInput.register();
 
         // 共享背包搜索框 → NEI 搜索条的推送实现。本体代码只认桥（NeiSearchBridge），
         // 不认 codechicken 类；这里装上实现之后，界面的 NEI_SYNC 模式才真正有东西可推。
