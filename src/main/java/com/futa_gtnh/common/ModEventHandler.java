@@ -51,6 +51,8 @@ public class ModEventHandler {
         com.futa_gtnh.rts.server.RtsHistoryManager.onServerTick();
         // 小游戏助手的渐进搜索（没装 lootgames / 没有任务时一次布尔判断的开销）
         com.futa_gtnh.lootassist.LootassistManager.onServerTick();
+        // AE2 共享背包元件的增量推送（没装 AE2 时钩子为 null，一次判空的开销）
+        com.futa_gtnh.ae2.Ae2Compat.onServerTickEnd();
     }
 
     /** 玩家下线时清掉他那份操作频率计数，避免 UUID 表越积越大。 */

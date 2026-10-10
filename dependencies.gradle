@@ -130,6 +130,21 @@ dependencies {
     compileOnly("com.github.GTNewHorizons:LootGames:${lootGamesVersion}:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:LootGames:${lootGamesVersion}:dev")
 
+    // ---- Applied Energistics 2（可选联动：共享背包存储元件）----
+    //
+    // com.futa_gtnh.ae2 包把全服共享背包包装成 AE 存储元件（ICellHandler +
+    // IMEInventoryHandler），放进 ME 驱动器 / ME 箱子后整个 ME 网络可以直接
+    // 存取共享背包并参与自动合成。所有 AE 类型都隔离在那个包里，
+    // 没装 AE2 时门卫类（Ae2Compat，不引用任何 AE 类型）直接短路，整个功能缺席。
+    //
+    // 版本取 GTNH Maven 上当前最新 release（rv3-beta-1082-GTNH），与本地
+    // Applied-Energistics-2-Unofficial 源码仓库核对过 API（ICellRegistry /
+    // ICellHandler.getCellInventory(is, host, IAEStackType) 这套是 GTNH fork
+    // 重构后的新 API，老 RV2 的写法在这里不存在）。升级整合包里的 AE2 版本时
+    // 需同步核对 getCellInventory 的通道分发逻辑仍然成立。
+    compileOnly("com.github.GTNewHorizons:Applied-Energistics-2-Unofficial:rv3-beta-1082-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Applied-Energistics-2-Unofficial:rv3-beta-1082-GTNH:dev")
+
     // ---- Enhanced LootBags（可选联动：自选抽奖机）----
     //
     // 抽奖机的开袋模拟完全复刻 ELB 的算法（getMergedGroupFromID / 权重抽取 /
