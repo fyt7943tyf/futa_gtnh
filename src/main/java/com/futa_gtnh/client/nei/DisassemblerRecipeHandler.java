@@ -9,6 +9,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.StatCollector;
+import net.minecraftforge.common.MinecraftForge;
 
 import com.futa_gtnh.disassembler.DisassemblerRegistration;
 import com.futa_gtnh.disassembler.DisassemblyCatalog;
@@ -16,9 +17,12 @@ import com.futa_gtnh.disassembler.DisassemblyRecipe;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 
+import codechicken.nei.NEIClientConfig;
 import codechicken.nei.PositionedStack;
 import codechicken.nei.api.API;
+import codechicken.nei.event.NEIConfigsLoadedEvent;
 import codechicken.nei.recipe.TemplateRecipeHandler;
+import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import gregtech.api.util.GTUtility;
 
 /** Each NEI entry is one numbered page of the same complete batch, never a separate machine operation. */
@@ -31,6 +35,26 @@ public final class DisassemblerRecipeHandler extends TemplateRecipeHandler {
         API.registerRecipeHandler(handler);
         API.registerUsageHandler(handler);
         API.addRecipeCatalyst(DisassemblerRegistration.stack(), handler);
+        MinecraftForge.EVENT_BUS.register(handler);
+    }
+
+    /** NEI assigns unknown handlers zero, placing them ahead of GT's explicitly ordered machines. */
+    public static void applyDefaultOrder() {
+        String key = DisassemblerRecipeHandler.class.getName();
+        Integer overlayOrder = NEIClientConfig.handlerOrdering.get(ID);
+        Integer handlerOrder = NEIClientConfig.handlerOrdering.get(key);
+        if ((overlayOrder == null || overlayOrder == 0) && handlerOrder != null && handlerOrder != 0) {
+            NEIClientConfig.handlerOrdering.remove(ID);
+            return;
+        }
+        if ((overlayOrder == null || overlayOrder == 0) && (handlerOrder == null || handlerOrder == 0))
+            NEIClientConfig.handlerOrdering.put(ID, 10000);
+    }
+
+    @SubscribeEvent
+    public void onNeiConfigsLoaded(NEIConfigsLoadedEvent event) {
+        // NEI reads handlerordering.csv after mod registration. Apply the default once it has loaded.
+        applyDefaultOrder();
     }
 
     @Override

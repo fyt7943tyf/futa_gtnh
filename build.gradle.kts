@@ -47,6 +47,7 @@ tasks.register<JavaExec>("verifySharedStorageReadApi") {
 tasks.named("check") {
     dependsOn(tasks.named("verifySharedStorageReadApi"))
     dependsOn(tasks.named("verifyDisassembler"))
+    dependsOn(tasks.named("verifyDisassemblerUi"))
     dependsOn(tasks.named("verifyTerminalClicks"))
 }
 
@@ -78,6 +79,18 @@ tasks.register<JavaExec>("verifyTerminalClicks") {
     dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
     mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
     args("com.futa_gtnh.client.TerminalClickRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
+tasks.register<JavaExec>("verifyDisassemblerUi") {
+    group = "verification"
+    description = "Checks machine page request permissions, client/server page selection and real NEI foreground texture"
+    dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.disassembler.DisassemblerUiRegression")
     classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
         files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
         files(compileReadApiChecks.flatMap { it.destinationDirectory }) +

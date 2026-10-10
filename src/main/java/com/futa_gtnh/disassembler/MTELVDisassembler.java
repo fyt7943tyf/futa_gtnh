@@ -55,6 +55,7 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
             1,
             0,
             new String[] { "One production step per batch; 32 EU/t, 1 A, 2 seconds",
+                "Ore ingredients refund standard GT materials and tier circuits",
                 "Crafting, assembler and assembly line; conflicting routes are skipped",
                 "Paged item outputs and independent output tanks; rear extraction" });
         rebuildHandler();
@@ -459,7 +460,7 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
             page -> {
                 if (page >= 0 && page < pages.getPages()
                     .size()) pages.setPage(page);
-            });
+            }).allowC2S();
         sync.syncValue(key, pageValue);
         panel.child(
             new ButtonWidget<>().size(16)
