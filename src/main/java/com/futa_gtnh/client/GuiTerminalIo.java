@@ -130,6 +130,7 @@ public class GuiTerminalIo extends GuiScreen {
     private final List<GuiButton> faceModeButtons = new ArrayList<>();
 
     private String lastQuery = "\u0000";
+    private Object lastSearchConfiguration;
     private boolean fluidTabCache;
     private int revision = -1;
     private boolean built;
@@ -335,7 +336,12 @@ public class GuiTerminalIo extends GuiScreen {
     private void refreshFilter() {
         String query = searchField == null ? "" : searchField.getText();
         int now = ClientStorageCache.getRevision();
-        if (built && now == revision && query.equals(lastQuery) && fluidTab == fluidTabCache) return;
+        Object searchConfiguration = NeiSearchBridge.configurationToken();
+        if (built && now == revision
+            && query.equals(lastQuery)
+            && fluidTab == fluidTabCache
+            && searchConfiguration == lastSearchConfiguration) return;
+        lastSearchConfiguration = searchConfiguration;
 
         revision = now;
         lastQuery = query;

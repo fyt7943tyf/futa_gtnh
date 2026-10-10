@@ -2,10 +2,10 @@ package com.futa_gtnh.client;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Predicate;
 
 /**
- * 搜索框的过滤逻辑。语法刻意做成 NEI 那一套 —— GTNH 玩家已经很熟了，
- * 不用再学一遍：
+ * 安装 NEI 时复用其解析器、搜索提供器及玩家配置。以下语法仅用于未安装 NEI 的回退：
  *
  * <table>
  * <tr>
@@ -109,12 +109,14 @@ public final class StorageSearch {
         }
     }
 
-    /** 把查询串编译成「与」组的数组；空查询返回 null 表示「全都要」。 */
-    public static Group[] compile(String query) {
-        if (query == null) return null;
+    /** 编译成 NEI 或本地回退的匹配器；空查询返回 null 表示「全都要」。 */
+    public static Predicate<StorageViewEntry> compile(String query) {
+        if (query == null || query.isEmpty()) return null;
+        Predicate<StorageViewEntry> nei = NeiSearchBridge.compileFilter(query);
+        if (nei != null) return nei;
+
         String trimmed = query.trim();
         if (trimmed.isEmpty()) return null;
-
         String[] words = trimmed.split("\\s+");
         Group[] groups = new Group[words.length];
         for (int i = 0; i < words.length; i++) {
@@ -125,7 +127,12 @@ public final class StorageSearch {
             }
             groups[i] = new Group(terms);
         }
-        return groups;
+        return entry -> {
+            for (Group group : groups) {
+                if (!group.matches(entry)) return false;
+            }
+            return true;
+        };
     }
 
     private static Term parseTerm(String raw) {
@@ -143,31 +150,28 @@ public final class StorageSearch {
         return new Term(prefix, text.toLowerCase(Locale.ROOT));
     }
 
-    /** @return 是否命中（{@code groups == null} 表示空查询，一律命中） */
-    public static boolean matches(Group[] groups, StorageViewEntry entry) {
-        if (groups == null) return true;
-        for (Group group : groups) {
-            if (!group.matches(entry)) return false;
-        }
-        return true;
+    /** @return 是否命中（{@code filter == null} 表示空查询，一律命中） */
+    public static boolean matches(Predicate<StorageViewEntry> filter, StorageViewEntry entry) {
+        return filter == null || filter.test(entry);
     }
 
     /**
      * 过滤。
      *
      * @param source 待过滤的全部条目
-     * @param groups {@link #compile} 的结果
+     * @param filter {@link #compile} 的结果
      * @param out    输出列表（会被清空）
      */
-    public static void filter(List<StorageViewEntry> source, Group[] groups, List<StorageViewEntry> out) {
+    public static void filter(List<StorageViewEntry> source, Predicate<StorageViewEntry> filter,
+        List<StorageViewEntry> out) {
         out.clear();
-        if (groups == null) {
+        if (filter == null) {
             out.addAll(source);
             return;
         }
         for (int i = 0; i < source.size(); i++) {
             StorageViewEntry entry = source.get(i);
-            if (matches(groups, entry)) {
+            if (matches(filter, entry)) {
                 out.add(entry);
             }
         }
