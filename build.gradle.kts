@@ -50,6 +50,7 @@ tasks.named("check") {
     dependsOn(tasks.named("verifyDisassemblerUi"))
     dependsOn(tasks.named("verifyTerminalClicks"))
     dependsOn(tasks.named("verifyTerminalSearch"))
+    dependsOn(tasks.named("verifyTerminalNeiSearch"))
 }
 
 // Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.
@@ -104,6 +105,18 @@ tasks.register<JavaExec>("verifyTerminalSearch") {
     dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
     mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
     args("com.futa_gtnh.client.TerminalSearchRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
+tasks.register<JavaExec>("verifyTerminalNeiSearch") {
+    group = "verification"
+    description = "Checks shared storage against actual NEI search providers, modes, English names and GT fluid displays"
+    dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.client.TerminalNeiSearchRegression")
     classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
         files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
         files(compileReadApiChecks.flatMap { it.destinationDirectory }) +

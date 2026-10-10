@@ -133,6 +133,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
     private int lastRevision = -1;
     private boolean viewDirty = true;
+    private Object lastSearchConfiguration;
     /**
      * 下一次重建视图时是否<b>重新排序</b>。
      *
@@ -519,6 +520,11 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         }
 
         int revision = ClientStorageCache.getRevision();
+        Object searchConfiguration = NeiSearchBridge.configurationToken();
+        if (searchConfiguration != lastSearchConfiguration) {
+            lastSearchConfiguration = searchConfiguration;
+            viewDirty = true;
+        }
         if (revision != lastRevision) {
             lastRevision = revision;
             // 增量只刷新数字、不重排（见 pendingResort 的注释）
@@ -1081,11 +1087,11 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         return true;
     }
 
-    /** NEI 拖放只写入显示名，使用与键入相同的过滤/同步回调。 */
+    /** NEI 拖放写入按搜索模式转义的名称，使用与键入相同的过滤/同步回调。 */
     public boolean acceptSearchDrop(int mouseX, int mouseY, ItemStack stack) {
         if (limitTarget != null || searchField == null || stack == null || !searchField.contains(mouseX, mouseY))
             return false;
-        searchField.setText(EnumChatFormatting.getTextWithoutFormattingCodes(stack.getDisplayName()));
+        searchField.setText(NeiSearchBridge.escapedSearchText(stack));
         searchField.setFocused(true);
         viewDirty = true;
         return true;

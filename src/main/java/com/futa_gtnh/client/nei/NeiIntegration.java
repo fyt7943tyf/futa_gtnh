@@ -6,8 +6,6 @@ import com.futa_gtnh.client.GuiSharedTerminal;
 import com.futa_gtnh.client.MouseTweaksCompat;
 import com.futa_gtnh.client.NeiSearchBridge;
 
-import codechicken.nei.LayoutManager;
-import codechicken.nei.SearchField;
 import codechicken.nei.api.API;
 import codechicken.nei.api.GuiInfo;
 
@@ -100,24 +98,7 @@ public final class NeiIntegration {
 
         // 共享背包搜索框 → NEI 搜索条的推送实现。本体代码只认桥（NeiSearchBridge），
         // 不认 codechicken 类；这里装上实现之后，界面的 NEI_SYNC 模式才真正有东西可推。
-        NeiSearchBridge.install(new NeiSearchBridge.Impl() {
-
-            @Override
-            public boolean searchFieldExists() {
-                return LayoutManager.searchField != null;
-            }
-
-            @Override
-            public void pushSearchText(String text) {
-                SearchField field = LayoutManager.searchField;
-                // 相等判断防回环/防重复：setText 会触发 NEI 自己的过滤重启，
-                // 对同一个词没必要跑两遍
-                if (field != null && !field.text()
-                    .equals(text)) {
-                    field.setText(text);
-                }
-            }
-        });
+        NeiSearchBridge.install(new NeiStorageSearch());
 
         // 共享存储面板的点击 / 滚轮 / 键盘：1.7.10 只有 NEI 这条能「消费事件」的路，
         // 所以面板在没装 NEI 时不启用

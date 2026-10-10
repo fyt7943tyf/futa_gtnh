@@ -70,6 +70,7 @@ public final class StoragePanel {
     private int page;
     private int revision = -1;
     private String lastQuery = "\u0000";
+    private Object lastSearchConfiguration;
 
     /** 搜索栏是不是被玩家切出来了（默认关：存储区是主力，它只负责搜索）。 */
     private boolean toggled;
@@ -201,7 +202,9 @@ public final class StoragePanel {
     private void rebuildIfNeeded() {
         String query = search == null ? "" : search.getText();
         int now = ClientStorageCache.getRevision();
-        if (now == revision && query.equals(lastQuery)) return;
+        Object searchConfiguration = NeiSearchBridge.configurationToken();
+        if (now == revision && query.equals(lastQuery) && searchConfiguration == lastSearchConfiguration) return;
+        lastSearchConfiguration = searchConfiguration;
         revision = now;
         lastQuery = query;
 
