@@ -54,6 +54,26 @@ public class Config {
      */
     public static boolean displayItemBecomesFluid = true;
 
+    /**
+     * 是否注册 AE2 共享背包存储元件（需要装了 Applied Energistics 2）。
+     *
+     * <p>
+     * 元件放进 ME 驱动器 / ME 箱子后，整个 ME 网络就能直接存取全服共享背包，
+     * 自动合成也照常（材料从共享背包出、产物回注共享背包）。
+     * 没装 AE2 时这项无论如何都不会生效，模组其余功能不受影响。
+     */
+    public static boolean enableAe2Cell = true;
+
+    /**
+     * AE 网络往共享背包元件写入时，是否遵守共享背包的「存量上限」。
+     *
+     * <p>
+     * 默认 true：AE 和 GT 管道 / 漏斗 / 终端主动搬运同一待遇，设了上限的条目
+     * 到顶就拒收（AE 会把东西送到网络里其它元件或退回来源）。
+     * 设为 false 时 AE 视同玩家手动操作，是唯一能绕过上限的自动化通道。
+     */
+    public static boolean ae2CellObeyLimits = true;
+
     // ------------------------------------------------------------------
     // 迅步（Baubles 饰品）
     // ------------------------------------------------------------------
@@ -577,6 +597,18 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             displayItemBecomesFluid,
             "把 GT 的流体显示物品存进共享存储时，自动把它转成流体。");
+
+        enableAe2Cell = configuration.getBoolean(
+            "enableAe2Cell",
+            Configuration.CATEGORY_GENERAL,
+            enableAe2Cell,
+            "是否注册 AE2 共享背包存储元件（需装 Applied Energistics 2）。放进 ME 驱动器/ME 箱子后整个 ME 网络可直接存取共享背包并参与自动合成。没装 AE2 时此项无效。");
+
+        ae2CellObeyLimits = configuration.getBoolean(
+            "ae2CellObeyLimits",
+            Configuration.CATEGORY_GENERAL,
+            ae2CellObeyLimits,
+            "AE 网络通过共享背包元件写入时是否遵守共享背包的「存量上限」。默认 true（与 GT 管道/漏斗等自动化一致）；false 时 AE 视同玩家手动写入。");
 
         // NEI 面板可见性：新键 terminalNeiPanel；老键 hideNeiPanelInTerminalGui
         // 只用于一次性的「升级迁移」（true → HIDE），读完就从配置文件里摘掉。

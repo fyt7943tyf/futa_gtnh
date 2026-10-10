@@ -52,7 +52,10 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // after:enhancedlootbags / after:vendingmachine 同理：自选抽奖机要复用
     // ELB 已加载完的战利品组配置；VendingMachine 的团队钱包数据也是初始化好
     // 之后再读更稳妥。都是软依赖，缺席时只是不注册/不可用。
-    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure")
+    // after:appliedenergistics2 也是软依赖排序：共享背包存储元件要往 AE2 的
+    // cell registry 里注册 ICellHandler（见 com.futa_gtnh.ae2 包），排在 AE2
+    // 之后能保证它的注册表已经就绪；缺席时那条功能整体不启用。
+    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure;after:appliedenergistics2")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";
@@ -88,6 +91,15 @@ public class FutaGtnhMod {
 
     /** 太阳能除钙剂。 */
     public static com.futa_gtnh.item.ItemSolarDescaler solarDescaler;
+
+    /**
+     * AE2 共享背包存储元件（物品通道）。没装 AE2 或配置关闭时为 null。
+     * 物品类本身不引用任何 AE 类型，可以安全地在公共代码里持有。
+     */
+    public static com.futa_gtnh.ae2.ItemSharedStorageCell aeSharedCellItem;
+
+    /** AE2 共享背包存储元件（流体通道）。同上。 */
+    public static com.futa_gtnh.ae2.ItemSharedStorageCell aeSharedCellFluid;
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
@@ -164,5 +176,7 @@ public class FutaGtnhMod {
     public void serverStopping(FMLServerStoppingEvent event) {
         SharedStorageManager.onServerStopping();
         com.futa_gtnh.lootassist.LootassistManager.onServerStopping();
+        // AE2 共享背包元件的运行时状态（网络注册表/镜像缓存）清空；没装 AE2 时是空操作
+        com.futa_gtnh.ae2.Ae2Compat.onServerStopping();
     }
 }
