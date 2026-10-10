@@ -52,7 +52,7 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // after:enhancedlootbags / after:vendingmachine 同理：自选抽奖机要复用
     // ELB 已加载完的战利品组配置；VendingMachine 的团队钱包数据也是初始化好
     // 之后再读更稳妥。都是软依赖，缺席时只是不注册/不可用。
-    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine")
+    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";

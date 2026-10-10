@@ -3,8 +3,10 @@ package com.futa_gtnh.client.nei;
 import java.util.List;
 
 import net.minecraft.client.gui.inventory.GuiContainer;
+import net.minecraft.item.ItemStack;
 
 import com.futa_gtnh.client.Accessors;
+import com.futa_gtnh.client.GuiSharedTerminal;
 import com.futa_gtnh.client.NeiAwareGui;
 
 import codechicken.nei.VisiblityData;
@@ -29,6 +31,15 @@ public final class FutaNeiGuiHandler extends INEIGuiAdapter {
     public static final FutaNeiGuiHandler INSTANCE = new FutaNeiGuiHandler();
 
     private FutaNeiGuiHandler() {}
+
+    @Override
+    public boolean handleDragNDrop(GuiContainer gui, int mouseX, int mouseY, ItemStack stack, int button) {
+        if (!(gui instanceof GuiSharedTerminal) || !((GuiSharedTerminal) gui).acceptSearchDrop(mouseX, mouseY, stack))
+            return false;
+        // NEI 的虚拟拖拽栈归零才会结束拖拽；不是玩家背包里的真实物品。
+        stack.stackSize = 0;
+        return true;
+    }
 
     @Override
     public VisiblityData modifyVisiblity(GuiContainer gui, VisiblityData currentVisibility) {

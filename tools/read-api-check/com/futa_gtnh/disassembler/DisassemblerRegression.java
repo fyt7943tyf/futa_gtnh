@@ -51,17 +51,29 @@ import gregtech.api.util.GTOreDictUnificator;
 public final class DisassemblerRegression {
     private static int assertions;
     public static void main(String[] args) throws Exception {
+        File minecraftHome = new File("build/shimmer-regression"); minecraftHome.mkdirs();
+        java.lang.reflect.Field home = cpw.mods.fml.relauncher.FMLInjectionData.class.getDeclaredField("minecraftHome");
+        home.setAccessible(true); home.set(null, minecraftHome);
         Loader.injectData(new Object[] { "7", "99", "40", "1614", "1.7.10", "9.05", new File("."), Collections.emptyList() });
+        java.lang.reflect.Field namedMods = Loader.class.getDeclaredField("namedMods"); namedMods.setAccessible(true);
+        namedMods.set(Loader.instance(), new java.util.HashMap<>());
         Bootstrap.func_151354_b();
         net.minecraft.launchwrapper.Launch.blackboard.put("fml.deobfuscatedEnvironment", true);
         java.lang.reflect.Field logSide = cpw.mods.fml.relauncher.FMLRelaunchLog.class.getDeclaredField("side");
         logSide.setAccessible(true);
         logSide.set(null, cpw.mods.fml.relauncher.Side.SERVER);
+        // GTRecipe only needs the proxy's owner-capture flags here. Forge normally injects the
+        // proxy; allocate that minimal fixture without starting GT's world/event subsystems.
+        Class<?> unsafeType = Class.forName("sun.misc.Unsafe");
+        java.lang.reflect.Field unsafeField = unsafeType.getDeclaredField("theUnsafe"); unsafeField.setAccessible(true);
+        Object unsafe = unsafeField.get(null);
+        java.lang.reflect.Field proxyField = gregtech.GTMod.class.getField("proxy");
+        proxyField.set(null, unsafeType.getMethod("allocateInstance", Class.class).invoke(unsafe, proxyField.getType()));
         batchesAndIdentity();
         capacityAndAtomicProcessing();
-        conflicts();
-        oreRefunds();
-        craftingGrids();
+        shimmerRoutes();
+        shimmerMaterials();
+        shimmerCrafting();
         machineInterfaces();
         mainInventoryTransfer();
         System.out.println("Disassembler/terminal regression: " + assertions + " assertions passed");
@@ -81,11 +93,41 @@ public final class DisassemblerRegression {
         buffer.inventory[0] = new ItemStack(Items.diamond, 4); buffer.inventory[0].setTagCompound(content);
         check(!buffer.start(batch), "extra state NBT rejected");
         DisassemblyRecipe divisible = recipe(new ItemStack(Items.diamond, 4), Arrays.asList(new ItemStack(Items.iron_ingot, 8)), Arrays.asList(new FluidStack(FluidRegistry.WATER, 144)));
-        check(divisible.inputCount == 1 && divisible.itemOutputs().get(0).stackSize == 2 && divisible.fluidOutputs().get(0).amount == 36, "exact gcd normalization");
+        check(divisible.inputCount == 4 && divisible.itemOutputs().get(0).stackSize == 8 && divisible.fluidOutputs().get(0).amount == 144, "original Shimmer batch retained even when all amounts divide");
         DisassemblyRecipe catalyst = recipe(new ItemStack(Items.diamond), Arrays.asList(new ItemStack(Items.iron_ingot, 2), new ItemStack(Items.redstone, 0)), Collections.<FluidStack>emptyList());
         check(catalyst.itemOutputs().size() == 1, "nonconsumable omitted");
-        expectRejected(() -> recipe(new ItemStack(Items.diamond), Arrays.asList(new ItemStack(Items.water_bucket)), Collections.<FluidStack>emptyList()), "container remainder rejected");
-        expectRejected(() -> recipe(new ItemStack(Items.diamond), Arrays.asList(new ItemStack(Items.iron_ingot, 1, 32767)), Collections.<FluidStack>emptyList()), "wildcard rejected");
+        check(recipe(new ItemStack(Items.diamond), Arrays.asList(new ItemStack(Items.water_bucket)), Collections.<FluidStack>emptyList()).itemOutputs().get(0).getItem() == Items.water_bucket, "raw assembly line refunds retain containers like Shimmer");
+        DisassemblyRecipe wildcard = recipe(new ItemStack(Blocks.wool, 1, OreDictionary.WILDCARD_VALUE), Arrays.asList(new ItemStack(Items.wooden_sword, 1, 32767)), Collections.<FluidStack>emptyList());
+        check(wildcard.matches(new ItemStack(Blocks.wool, 1, 14), false, true), "wildcard input accepts concrete metadata like Shimmer");
+        check(wildcard.itemOutputs().get(0).getItemDamage() == 32767, "raw durable wildcard is preserved");
+        ItemStack emptyTagged = new ItemStack(Items.diamond); emptyTagged.setTagCompound(new NBTTagCompound());
+        DisassemblyRecipe emptyPattern = recipe(emptyTagged, Arrays.asList(new ItemStack(Items.iron_ingot)), Collections.<FluidStack>emptyList());
+        check(emptyPattern.matches(emptyTagged, false, true) && !emptyPattern.matches(new ItemStack(Items.diamond), false, true), "empty NBT pattern remains distinct from null as in GTUtility");
+        check(DisassemblyRecipe.readFromNbt(emptyPattern.writeToNbt()).matches(emptyTagged, false, true), "empty NBT pattern persists");
+        DisassemblyRecipe big = recipe(new ItemStack(Items.diamond, 256), Arrays.asList(new ItemStack(Items.iron_ingot, 512)), Collections.<FluidStack>emptyList());
+        check(big.inputCount == 256 && big.itemOutputs().size() == 8, "large original batch is supported without reducing materials");
+        buffer.inventory[0] = new ItemStack(Items.diamond, 320);
+        check(buffer.start(big) && buffer.inventory[0].stackSize == 64 && buffer.inventory[1].stackSize == 256, "one original batch removed and remainder left in input");
+        DisassemblyBuffer restored = new DisassemblyBuffer(36, 8, 64000); restored.readFromNbt(buffer.writeToNbt());
+        check(restored.inventory[1].stackSize == 256 && restored.inventory[0].stackSize == 64, "large escrow counts persist beyond NBT byte limit");
+        for (int tick = 0; tick < 40; tick++) restored.advance(true);
+        check(!restored.hasTask() && restored.inventory[0].stackSize == 64, "large original batch finishes once after 40 ticks");
+        DisassemblyBuffer collecting = new DisassemblyBuffer(36, 8, 64000);
+        collecting.inventory[0] = new ItemStack(Items.diamond, 64);
+        check(collecting.collect(big) && !collecting.canAdvance() && !collecting.advance(true), "partial large batch waits without paid processing ticks");
+        NBTTagCompound partial = collecting.writeToNbt(); collecting.readFromNbt(partial);
+        check(collecting.hasTask() && collecting.inventory[1].stackSize == 64, "partial batch resumes after world save");
+        collecting.inventory[0] = new ItemStack(Items.emerald, 64);
+        check(!collecting.collect(null) && collecting.inventory[0].stackSize == 64, "different item cannot enter collected batch");
+        for (int i = 0; i < 3; i++) { collecting.inventory[0] = new ItemStack(Items.diamond, 64); check(collecting.collect(null), "legal input stacks accumulate without GUI overflow"); }
+        check(collecting.canAdvance() && collecting.inventory[1].stackSize == 256, "entire original batch required before processing");
+        DisassemblyBuffer dismantled = new DisassemblyBuffer(36, 8, 64000); dismantled.readFromNbt(collecting.writeToNbt()); dismantled.prepareDrops();
+        int dropped = 0;
+        for (ItemStack stack : dismantled.inventory) if (stack != null) { check(stack.stackSize <= stack.getMaxStackSize(), "escrow drops split into legal world stacks"); dropped += stack.stackSize; }
+        check(dropped == 256 && !dismantled.hasTask(), "dismantling returns original escrow exactly once, no materials");
+        for (int i = 0; i < 40; i++) collecting.advance(true);
+        check(!collecting.hasTask() && collecting.inventory[1] == null, "collected original batch completes in exactly two seconds");
+
     }
 
     private static void capacityAndAtomicProcessing() {
@@ -131,128 +173,139 @@ public final class DisassemblerRegression {
         }
         check(iron == 130 && pearls == 33 && swords == 4, "all large and unstackable outputs conserved");
         check(restored.tanks[0].getFluidAmount() == 80000 && restored.tanks[1].getFluidAmount() == 144 && restored.tanks[2].getFluidAmount() == 90000, "all fluids conserved including distinct NBT");
+        DisassemblyBuffer grown = new DisassemblyBuffer(36, 8, 64000); grown.readFromNbt(saved);
+        check(grown.growTo(70, 12, 256000), "early/old machine storage grows to final catalog capacity");
+        check(grown.inventory.length == 72 && grown.tanks.length == 12 && grown.tanks[0].getCapacity() == 256000, "every new output slot/tank is available");
+        check(grown.hasTask() && grown.progress == 17 && grown.inventory[1].getItem() == Items.diamond, "storage growth preserves pending task and escrow");
+        check(!grown.growTo(36, 8, 64000), "storage never shrinks after recipe/catalog changes");
         DisassemblyBuffer fluidsOnly = new DisassemblyBuffer(36, 8, 64000);
         NBTTagCompound machineItem = new NBTTagCompound(); restored.writeFluids(machineItem);
         fluidsOnly.readFromNbt(machineItem);
         check(fluidsOnly.inventory[1] == null && !fluidsOnly.hasTask() && fluidsOnly.tanks[2].getFluidAmount() == 90000, "machine item carries fluids only, no escrow duplication");
     }
 
-    private static void conflicts() {
-        DisassemblyRecipe a = recipe(new ItemStack(Items.diamond), Arrays.asList(new ItemStack(Items.iron_ingot, 1)), Collections.<FluidStack>emptyList());
-        DisassemblyRecipe b = recipe(new ItemStack(Items.diamond), Arrays.asList(new ItemStack(Items.gold_ingot, 2)), Collections.<FluidStack>emptyList());
+    private static void shimmerRoutes() {
         DisassemblyCatalog.Builder builder = new DisassemblyCatalog.Builder();
-        builder.add(a); builder.add(a);
-        check(builder.finish().size() == 1, "identical routes merge");
-        builder.add(b); check(builder.finish().isEmpty(), "conflicting routes skipped");
-        builder = new DisassemblyCatalog.Builder(); builder.add(a); builder.block(new ItemStack(Items.diamond), "custom", "unknown route");
-        check(builder.finish().isEmpty(), "unsupported known output blocks unsafe refund");
-        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(new ItemStack(Items.iron_ingot), new ItemStack(Items.gold_ingot))), "unrelated alternatives skipped");
+        DisassemblyRecipe four = recipe(new ItemStack(Items.diamond, 4), Arrays.asList(new ItemStack(Items.iron_ingot, 8)), Collections.<FluidStack>emptyList());
+        builder.add(four);
+        check(builder.contains(new ItemStack(Items.diamond, 4)), "existing conversion masks later route with sufficient input");
+        check(!builder.contains(new ItemStack(Items.diamond)), "smaller production batch may add a second conversion");
+        DisassemblyRecipe one = recipe(new ItemStack(Items.diamond), Arrays.asList(new ItemStack(Items.gold_ingot)), Collections.<FluidStack>emptyList());
+        builder.add(one);
+        builder.skip(new ItemStack(Items.diamond), "GT crafting", "invalid raw recipe");
+        check(builder.finish().size() == 2, "failed/conflicting routes never veto accepted conversions");
+        DisassemblyCatalog.publish(builder.finish());
+        check(DisassemblyCatalog.find(new ItemStack(Items.diamond, 4)) == four, "first registered matching route wins");
+        check(DisassemblyCatalog.find(new ItemStack(Items.diamond)) == one, "smaller stack selects later smaller batch");
+        check(DisassemblyCatalog.usages(new ItemStack(Items.diamond)).size() == 2, "NEI use queries show larger batches from a one-item query");
+        ItemStack stateful = new ItemStack(Items.diamond, 4); NBTTagCompound tag = new NBTTagCompound(); tag.setInteger("energy", 200); stateful.setTagCompound(tag);
+        check(builder.contains(stateful), "route registration ignores NBT like isInConversions");
+        check(DisassemblyCatalog.find(stateful) == null, "execution checks exact NBT like getConversionResult");
+        gregtech.api.util.GTRecipe chance = forward(new ItemStack(Items.emerald), new ItemStack(Items.iron_ingot, 3));
+        chance.mEnabled = false; chance.mFakeRecipe = true; chance.mOutputChances = new int[] {5000}; chance.mInputChances = new int[] {2000};
+        chance.mFluidInputs = new FluidStack[] {new FluidStack(FluidRegistry.WATER, 144)};
+        chance.mFluidOutputs = new FluidStack[] {new FluidStack(FluidRegistry.LAVA, 250)};
+        chance.mAltFluidInputs = new FluidStack[][] {{new FluidStack(FluidRegistry.LAVA, 144)}};
+        builder = new DisassemblyCatalog.Builder();
+        DisassemblyCatalog.loadAssemblers(builder, Arrays.asList(chance, forward(new ItemStack(Items.emerald), new ItemStack(Items.gold_ingot, 99))));
+        check(builder.finish().size() == 1 && builder.finish().get(0).itemOutputs().get(0).stackSize == 3, "assembler uses first route without old chance/disabled/fake/global-conflict exclusions");
+        check(builder.finish().get(0).fluidOutputs().get(0).getFluid() == FluidRegistry.WATER && builder.finish().get(0).fluidOutputs().get(0).amount == 144, "assembler returns consumed first-route fluid only");
+        chance.mOutputs = new ItemStack[] {new ItemStack(Items.emerald), new ItemStack(Items.gold_ingot)};
+        builder = new DisassemblyCatalog.Builder(); DisassemblyCatalog.loadAssemblers(builder, Arrays.asList(chance));
+        check(builder.finish().isEmpty(), "assembler still requires one product like Shimmer");
+        DisassemblyCatalog.loadRawRecipes(builder, Arrays.asList(chance), "assembly line visual");
+        check(builder.finish().size() == 1, "visual assembly line selects first product and retains raw ingredients");
+        check(builder.finish().get(0).itemOutputs().get(0).stackSize == 3, "raw assembly line material count retained");
+        ShimmerDisassemblyRules.inputBlacklist.add(new gregtech.api.objects.GTItemStack(new ItemStack(Items.emerald)));
+        check(!ShimmerDisassemblyRules.shouldDisassembleItemStack(new ItemStack(Items.emerald)), "Shimmer explicit input blacklist honored");
+        builder = new DisassemblyCatalog.Builder(); DisassemblyCatalog.loadAssemblers(builder, Arrays.asList(forward(new ItemStack(Items.emerald), new ItemStack(Items.iron_ingot))));
+        check(builder.finish().isEmpty(), "automatic assembler honors blacklist");
+        DisassemblyCatalog.loadRawRecipes(builder, Arrays.asList(forward(new ItemStack(Items.emerald), new ItemStack(Items.water_bucket))), "space assembler");
+        check(builder.finish().get(0).itemOutputs().get(0).getItem() == Items.water_bucket, "raw space assembler bypasses automatic blacklist/container transformation like Shimmer");
+        ShimmerDisassemblyRules.inputBlacklist.clear();
+        DisassemblyCatalog.publish(Collections.emptyList());
     }
 
-    private static void oreRefunds() {
-        Item standard = new Item();
-        Item alternate = new Item();
-        Item outside = new Item();
-        Item.itemRegistry.addObject(31000, "futa_test:plate_standard", standard);
-        Item.itemRegistry.addObject(31001, "futa_test:plate_alternate", alternate);
-        Item.itemRegistry.addObject(31002, "futa_test:outside", outside);
-        ItemStack preferred = new ItemStack(standard, 3);
-        ItemStack other = new ItemStack(alternate, 3);
-        GTOreDictUnificator.set(OrePrefixes.plate, Materials.Iron, preferred, true, false);
-        GTOreDictUnificator.registerOre(OrePrefixes.plate, Materials.Iron, other);
-        GTOreDictUnificator.addAssociation(OrePrefixes.plate, Materials.Iron, other);
-        ItemStack resolved = DisassemblyIngredients.resolve(Arrays.asList(other, preferred));
-        check(resolved.getItem() == standard && resolved.stackSize == 3, "GT material representative and count");
-        check(ItemKey.of(resolved).equals(ItemKey.of(DisassemblyIngredients.resolve(Arrays.asList(preferred, other)))), "ore refund independent of alternative order");
-        check(preferred.stackSize == 3 && other.stackSize == 3 && resolved != preferred, "recipe alternatives never mutated");
-        check(DisassemblyIngredients.resolve(other).getItem() == standard, "fixed material matches ore route");
-        net.minecraftforge.oredict.ShapedOreRecipe fixedAlternate = new net.minecraftforge.oredict.ShapedOreRecipe(new ItemStack(Items.diamond), "xxx", "xxx", "xxx", 'x', other);
-        DisassemblyRecipe fixedReverse = DisassemblyCrafting.reverse(fixedAlternate);
-        check(fixedReverse.itemOutputs().get(0).getItem() == standard && fixedReverse.itemOutputs().get(0).stackSize == 9,
-            "fixed alternative matches original 3x3 while refund uses standard material");
-        check(DisassemblyIngredients.resolve(new ItemStack(alternate, 0)).stackSize == 0, "nonconsumable quantity preserved");
-        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, new ItemStack(alternate, 2))), "alternative quantities cannot be rounded");
-        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, new ItemStack(outside, 3))), "no arbitrary ore fallback");
-        NBTTagCompound nbt = new NBTTagCompound(); nbt.setString("contents", "valuable");
-        ItemStack stateful = other.copy(); stateful.setTagCompound(nbt);
-        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, stateful)), "stateful alternatives not erased");
-        check(ItemKey.of(DisassemblyIngredients.resolve(stateful)).equals(ItemKey.of(stateful)), "fixed NBT untouched");
-        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, new ItemStack(alternate, 3, OreDictionary.WILDCARD_VALUE))), "wildcard alternatives not guessed");
-        GTOreDictUnificator.getName2StackMap().put("plateIron", new ItemStack(outside));
-        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, other)), "standard outside allowed alternatives rejected");
-        GTOreDictUnificator.getName2StackMap().put("plateIron", preferred.copy());
-        ItemStack basic = new ItemStack(Items.comparator);
-        ItemStack advanced = new ItemStack(Items.repeater);
-        String circuitOre = OrePrefixes.circuit.get(Materials.LV).toString();
-        OreDictionary.registerOre(circuitOre, basic);
-        OreDictionary.registerOre(circuitOre, advanced);
-        ItemList.Circuit_Basic.set(basic);
-        // Even a different GT unification preference must not turn a basic circuit refund into a costly alternative.
-        GTOreDictUnificator.getName2StackMap().put(circuitOre, advanced);
-        check(DisassemblyIngredients.resolve(Arrays.asList(advanced, basic)).getItem() == Items.comparator, "LV circuits refund the declared basic circuit");
-        check(DisassemblyIngredients.resolve(Arrays.asList(basic, advanced)).getItem() == Items.comparator, "circuit refund order independent");
-        DisassemblyRecipe a = recipe(new ItemStack(Items.diamond), Arrays.asList(DisassemblyIngredients.resolve(other)), Collections.<FluidStack>emptyList());
-        DisassemblyRecipe b = recipe(new ItemStack(Items.diamond), Arrays.asList(DisassemblyIngredients.resolve(Arrays.asList(other, preferred))), Collections.<FluidStack>emptyList());
-        DisassemblyCatalog.Builder builder = new DisassemblyCatalog.Builder(); builder.add(a); builder.add(b);
-        check(builder.finish().size() == 1, "normalized crafting and assembler routes agree");
-        builder.add(recipe(new ItemStack(Items.diamond), Arrays.asList(new ItemStack(outside, 3)), Collections.<FluidStack>emptyList()));
-        check(builder.finish().isEmpty(), "real material conflicts still rejected");
-        DisassemblyBuffer buffer = new DisassemblyBuffer(36, 8, 64000);
-        buffer.inventory[0] = new ItemStack(Items.diamond);
-        check(buffer.start(a), "normalized recipe starts");
-        for (int i = 0; i < 40; i++) buffer.advance(true);
-        check(buffer.inventory[2].getItem() == standard && buffer.inventory[2].stackSize == 3 && !buffer.hasTask(), "normalized refund settles once after two seconds");
-        OreDictionary.registerOre("plateGold", preferred);
-        OreDictionary.registerOre("plateGold", other);
-        GTOreDictUnificator.getName2StackMap().put("plateGold", other.copy());
-        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, other)), "conflicting shared ore standards rejected");
-        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(other, preferred)), "ambiguous standards rejected in either order");
+    private static gregtech.api.util.GTRecipe forward(ItemStack output, ItemStack... inputs) {
+        return new gregtech.api.util.GTRecipe(false, inputs, new ItemStack[] {output}, null, null, null, null, null, null, null, 300, 30, 0);
     }
 
-    private static void craftingGrids() {
-        net.minecraft.item.crafting.ShapedRecipes vanilla = new net.minecraft.item.crafting.ShapedRecipes(3, 3,
-            new ItemStack[] { new ItemStack(Items.iron_ingot), new ItemStack(Items.iron_ingot), new ItemStack(Items.iron_ingot),
-                new ItemStack(Items.iron_ingot), new ItemStack(Items.iron_ingot), new ItemStack(Items.iron_ingot),
-                new ItemStack(Items.iron_ingot), new ItemStack(Items.iron_ingot), new ItemStack(Items.iron_ingot) }, new ItemStack(Items.diamond));
-        DisassemblyRecipe reverse = DisassemblyCrafting.reverse(vanilla);
-        check(reverse.itemOutputs().get(0).stackSize == 9, "full vanilla 3x3 refunds all nine slots");
-        net.minecraftforge.oredict.ShapedOreRecipe two = new net.minecraftforge.oredict.ShapedOreRecipe(new ItemStack(Items.diamond), "xx", "xx", 'x', Items.iron_ingot);
-        check(DisassemblyCrafting.reverse(two).itemOutputs().get(0).stackSize == 4, "2x2 placed using actual row width");
-        net.minecraft.item.crafting.ShapedRecipes vanillaTwo = new net.minecraft.item.crafting.ShapedRecipes(2, 2,
-            new ItemStack[] { new ItemStack(Items.iron_ingot), new ItemStack(Items.iron_ingot), new ItemStack(Items.iron_ingot), new ItemStack(Items.iron_ingot) }, new ItemStack(Items.diamond));
-        check(DisassemblyCrafting.reverse(vanillaTwo).itemOutputs().get(0).stackSize == 4, "vanilla 2x2 retains shape");
-        Item tool = new Item() {
-            @Override public boolean hasContainerItem(ItemStack stack) { return true; }
-            @Override public ItemStack getContainerItem(ItemStack stack) { return stack.copy(); }
-        };
-        Item secondTool = new Item() {
-            @Override public boolean hasContainerItem(ItemStack stack) { return true; }
-            @Override public ItemStack getContainerItem(ItemStack stack) { return stack.copy(); }
-        };
-        Item.itemRegistry.addObject(31003, "futa_test:wrench", tool);
-        Item.itemRegistry.addObject(31004, "futa_test:other_wrench", secondTool);
-        OreDictionary.registerOre("craftingToolWrench", new ItemStack(tool));
-        OreDictionary.registerOre("craftingToolWrench", new ItemStack(secondTool));
-        gregtech.api.util.GTShapedRecipe gt = new gregtech.api.util.GTShapedRecipe(new ItemStack(Items.diamond), false, false, null, null,
-            "wxw", "xxx", "xxx", 'w', "craftingToolWrench", 'x', Items.iron_ingot);
-        reverse = DisassemblyCrafting.reverse(gt);
-        check(reverse.itemOutputs().size() == 1 && reverse.itemOutputs().get(0).getItem() == Items.iron_ingot && reverse.itemOutputs().get(0).stackSize == 7,
-            "GT full 3x3 counts repeated materials and never refunds either reusable tool");
-        check(((List<?>)gt.getInput()[0]).size() == 2, "tool alternatives remain intact");
-        net.minecraftforge.oredict.ShapedOreRecipe direct = new net.minecraftforge.oredict.ShapedOreRecipe(new ItemStack(Items.diamond), "wx", 'w', new ItemStack(tool), 'x', Items.iron_ingot);
-        check(DisassemblyCrafting.reverse(direct).itemOutputs().size() == 1, "direct reusable crafting tool excluded");
-        expectRejected(() -> DisassemblyCrafting.reverse(new net.minecraftforge.oredict.ShapedOreRecipe(new ItemStack(Items.diamond), "bx", 'b', Items.water_bucket, 'x', Items.iron_ingot)), "container input remains unsafe");
-        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(new ItemStack(tool), new ItemStack(Items.iron_ingot))), "mixed tool/material alternatives never treated as catalyst");
-        Object[] universalInputs = { "xxx", "xxx", "xxx", 'x', Items.iron_ingot };
-        reverse = DisassemblyCrafting.reverse(new com.dreammaster.recipes.ShapedUniversalRecipe(new ItemStack(Items.diamond), universalInputs));
-        check(reverse.itemOutputs().get(0).getItem() == Items.iron_ingot && reverse.itemOutputs().get(0).stackSize == 9, "NHCore full 3x3 reads override, not parent placeholder");
-        reverse = DisassemblyCrafting.reverse(new com.dreammaster.recipes.ShapelessUniversalRecipe(new ItemStack(Items.diamond), Items.iron_ingot, Items.iron_ingot));
-        check(reverse.itemOutputs().get(0).stackSize == 2, "NHCore shapeless reads real ingredient override");
-        expectRejected(() -> DisassemblyCrafting.reverse(new net.minecraftforge.oredict.ShapedOreRecipe(new ItemStack(Items.diamond), "x", 'x', Items.iron_ingot) {}), "unaudited custom subclasses remain excluded");
-        expectRejected(() -> DisassemblyCrafting.reverse(new gregtech.api.util.GTShapedRecipe(new ItemStack(Items.diamond), false, true, null, null, "x", 'x', Items.iron_ingot)), "dynamic GT NBT still excluded");
-        DisassemblyCatalog.Builder builder = new DisassemblyCatalog.Builder();
-        builder.add(DisassemblyCrafting.reverse(gt));
-        check(builder.finish().size() == 1, "tool-bearing 3x3 reaches catalog");
+    private static ItemStack material(int id, OrePrefixes prefix, Materials material) {
+        Item item = new Item(); Item.itemRegistry.addObject(id, "futa_test:material_" + id, item);
+        ItemStack stack = new ItemStack(item, 3);
+        GTOreDictUnificator.set(prefix, material, stack, true, false);
+        GTOreDictUnificator.addAssociation(prefix, material, stack);
+        return stack;
+    }
+
+    private static void shimmerMaterials() {
+        ItemStack iron = material(31000, OrePrefixes.plate, Materials.Iron);
+        ItemStack aluminium = material(31001, OrePrefixes.plate, Materials.Aluminium);
+        ItemStack steel = material(31002, OrePrefixes.plate, Materials.Steel);
+        ItemStack copper = material(31003, OrePrefixes.plate, Materials.Copper);
+        ItemStack annealed = material(31004, OrePrefixes.plate, Materials.AnnealedCopper);
+        ItemStack magnetic = material(31005, OrePrefixes.plate, Materials.IronMagnetic);
+        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<ItemStack[]> alternatives = new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>();
+        alternatives.add(new ItemStack[] {iron});
+        List<ItemStack> outputs = ShimmerDisassemblyRules.handleRecipeTransformation(new ItemStack[] {aluminium}, alternatives);
+        check(outputs.get(0).getItem() == iron.getItem() && outputs.get(0).stackSize == 3, "aluminium route downgrades to iron by corresponding-slot material");
+        outputs = ShimmerDisassemblyRules.handleRecipeTransformation(new ItemStack[] {steel}, alternatives);
+        check(outputs.get(0).getItem() == iron.getItem(), "steel route downgrades to iron");
+        outputs = ShimmerDisassemblyRules.handleRecipeTransformation(new ItemStack[] {copper}, alternatives);
+        check(outputs.get(0).getItem() == copper.getItem(), "unrelated routes retain first material instead of rejecting product");
+        outputs = ShimmerDisassemblyRules.handleRecipeTransformation(new ItemStack[] {annealed, magnetic}, null);
+        check(outputs.get(0).getItem() == copper.getItem() && outputs.get(1).getItem() == iron.getItem(), "annealed and magnetic materials refund their unprocessed forms");
+        check(aluminium.stackSize == 3 && aluminium.getItemDamage() == 0, "forward recipe ingredients are not modified");
+        ItemStack wildGlass = new ItemStack(Blocks.glass, 2, OreDictionary.WILDCARD_VALUE);
+        ItemStack wildTool = new ItemStack(Items.wooden_sword, 1, OreDictionary.WILDCARD_VALUE);
+        ItemStack nbt = new ItemStack(Items.blaze_rod, 2); NBTTagCompound content = new NBTTagCompound(); content.setString("grade", "special"); nbt.setTagCompound(content);
+        outputs = ShimmerDisassemblyRules.handleRecipeTransformation(new ItemStack[] {wildGlass, wildTool, nbt, new ItemStack(Items.water_bucket), new ItemStack(Items.iron_ingot, 0)}, null);
+        check(outputs.size() == 4 && outputs.get(0).getItemDamage() == 0 && outputs.get(0).stackSize == 2, "wildcards canonicalize to zero; containers alone are filtered");
+        check(outputs.get(1).getItemDamage() == OreDictionary.WILDCARD_VALUE, "damageable wildcard remains a raw Shimmer output");
+        check(outputs.get(2).getTagCompound().getString("grade").equals("special"), "unassociated material NBT retained");
+        check(wildGlass.getItemDamage() == OreDictionary.WILDCARD_VALUE, "wildcard source not mutated");
+        outputs = ShimmerDisassemblyRules.handleRecipeTransformation(new ItemStack[] {new ItemStack(Blocks.trapped_chest, 3)}, null);
+        check(outputs.get(0).getItem() == Item.getItemFromBlock(Blocks.chest) && outputs.get(0).stackSize == 1, "trapped chest follows upstream replacement including its one-chest count");
+        ItemStack exoticPlanks = new ItemStack(Blocks.wool, 5, 14); OreDictionary.registerOre("plankWood", exoticPlanks);
+        outputs = ShimmerDisassemblyRules.handleRecipeTransformation(new ItemStack[] {exoticPlanks}, null);
+        check(outputs.get(0).getItem() == Item.getItemFromBlock(Blocks.planks) && outputs.get(0).stackSize == 5 && outputs.get(0).getItemDamage() == 0, "wood ore aliases become vanilla defaults with quantity retained");
+        check(ShimmerDisassemblyRules.getCheapestCircuitOrNull(Materials.LV).stackSize == 1, "actual NHCore get(int) bridge resolves a cheapest circuit");
+        check(ShimmerDisassemblyRules.getCheapestCircuitOrNull(Materials.LuV).getItemDamage() == 6, "LuV circuit field spelling matches NHCore");
+        check(ShimmerDisassemblyRules.getCheapestCircuitOrNull(Materials.MAX).getItemDamage() == 14, "MAX circuit field resolves through optional bridge");
+        ItemStack circuit = material(31006, OrePrefixes.circuit, Materials.LV);
+        ItemStack ore = material(31007, OrePrefixes.crushedPurified, Materials.Iron);
+        check(!ShimmerDisassemblyRules.shouldDisassembleItemStack(circuit), "automatic circuit product exclusion");
+        check(!ShimmerDisassemblyRules.shouldDisassembleItemStack(ore), "automatic crushed ore product exclusion");
+        check(ShimmerDisassemblyRules.replaceCheaperOrNull(Materials.Diamond, Materials.Glass) == Materials.Glass, "diamond downgrade mapping");
+        check(ShimmerDisassemblyRules.replaceCheaperOrNull(Materials.Polytetrafluoroethylene, Materials.Polyethylene) == Materials.Polyethylene, "polymer downgrade mapping");
+        check(ShimmerDisassemblyRules.replaceCheaperOrNull(Materials.Polyethylene, Materials.Wood) == Materials.Wood, "polymer to wood mapping");
+        check(ShimmerDisassemblyRules.replaceCheaperOrNull(Materials.CertusQuartz, Materials.Quartzite) == Materials.Quartzite, "quartz downgrade mapping");
+        check(ShimmerDisassemblyRules.getUnprocessedMaterials(Materials.NeodymiumMagnetic) == Materials.Neodymium, "remaining magnetic fallback mapping");
+    }
+
+    private static void shimmerCrafting() {
+        Object[] grid = new Object[] {"xxx", "xxx", "xxx", 'x', new ItemStack(Blocks.glass, 1, OreDictionary.WILDCARD_VALUE)};
+        ShimmerCraftingRegistry.Entry entry = new ShimmerCraftingRegistry.Entry(new ItemStack(Items.diamond), grid, true);
+        gregtech.api.util.GTRecipe reversed = entry.reverse().get();
+        List<ItemStack> outputs = ShimmerDisassemblyRules.handleRecipeTransformation(reversed.mOutputs, null);
+        check(outputs.get(0).stackSize == 9 && outputs.get(0).getItemDamage() == 0, "real GT reversal counts all nine slots and resolves wildcard glass");
+        ItemStack taggedOutput = new ItemStack(Items.diamond); NBTTagCompound outputTag = new NBTTagCompound(); outputTag.setInteger("mode", 4); taggedOutput.setTagCompound(outputTag);
+        entry = new ShimmerCraftingRegistry.Entry(taggedOutput, new Object[] {"xx", "xx", 'x', Items.iron_ingot}, true);
+        check(entry.reverse().get().mOutputs[0].stackSize == 4, "real GT 2x2 reversal retains shape count");
+        check(entry.reverse().get().mInputs[0].getTagCompound().getInteger("mode") == 4, "captured output NBT retained without virtual crafting-result veto");
+        entry = new ShimmerCraftingRegistry.Entry(new ItemStack(Items.diamond), new Object[] {"hx", 'h', "craftingToolHardHammer", 'x', Items.iron_ingot}, true);
+        check(entry.reverse().get().mOutputs.length == 1 && entry.reverse().get().mOutputs[0].stackSize == 1, "GT crafting-tool ore omitted from raw capture");
+        OreDictionary.registerOre("futaFallbackPipe", new ItemStack(Items.redstone, 7));
+        entry = new ShimmerCraftingRegistry.Entry(new ItemStack(Items.diamond), new Object[] {"xx", 'x', "futaFallbackPipe"}, true);
+        check(entry.reverse().get().mOutputs[0].getItem() == Items.redstone && entry.reverse().get().mOutputs[0].stackSize == 2, "ore with no GT representative falls back to dictionary candidate");
+        entry = new ShimmerCraftingRegistry.Entry(new ItemStack(Items.diamond), new Object[] {"xy", 'x', Items.iron_ingot, 'y', "futaMissingOre"}, true);
+        check(entry.reverse().get().mOutputs.length == 1, "missing ore ingredient omitted without rejecting valid materials");
+        entry = new ShimmerCraftingRegistry.Entry(new ItemStack(Items.diamond), new Object[] {Items.iron_ingot, Items.water_bucket, "craftingToolHardHammer"}, false);
+        outputs = ShimmerDisassemblyRules.handleRecipeTransformation(entry.reverse().get().mOutputs, null);
+        check(outputs.size() == 1 && outputs.get(0).getItem() == Items.iron_ingot, "shapeless tool and container omitted individually");
+        int before = ShimmerCraftingRegistry.snapshot().size();
+        ShimmerCraftingRegistry.capture(new ItemStack(Items.diamond), grid, true);
+        check(ShimmerCraftingRegistry.snapshot().size() == before, "actual capture rejects non-GT-machine products like GTNL mixin");
     }
 
     private static void machineInterfaces() throws Exception {

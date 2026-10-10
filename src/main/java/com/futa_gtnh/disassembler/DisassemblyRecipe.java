@@ -1,10 +1,7 @@
 package com.futa_gtnh.disassembler;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
@@ -14,7 +11,9 @@ import net.minecraftforge.fluids.FluidStack;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 
-/** One exact, non-recursive reverse production batch. Quantities are never rounded up. */
+import gregtech.api.util.GTUtility;
+
+/** One original Shimmer production batch; no recursive refunds or quantity reduction. */
 public final class DisassemblyRecipe {
 
     public static final int EU_PER_TICK = 32;
@@ -22,101 +21,71 @@ public final class DisassemblyRecipe {
     public final ItemKey input;
     public final int inputCount;
     public final String source;
-    private final Map<ItemKey, Long> items;
-    private final Map<FluidKey, Long> fluids;
+    private final ItemStack pattern;
+    private final List<ItemStack> items = new ArrayList<>();
+    private final List<FluidStack> fluids = new ArrayList<>();
 
     public DisassemblyRecipe(ItemStack output, List<ItemStack> ingredients, List<FluidStack> liquids, String source) {
-        if (output == null || output.stackSize <= 0 || ItemKey.of(output) == null || output.getItemDamage() == 32767)
+        if (!GTUtility.isStackValid(output) || output.stackSize <= 0)
             throw new IllegalArgumentException("Invalid output");
-        Map<ItemKey, Long> itemCounts = new LinkedHashMap<>();
-        Map<FluidKey, Long> fluidCounts = new LinkedHashMap<>();
+        pattern = output.copy();
+        input = ItemKey.of(output);
+        inputCount = output.stackSize;
+        this.source = source;
         for (ItemStack stack : ingredients) {
-            if (stack == null || stack.stackSize <= 0) continue;
-            if (stack.getItem() == null || stack.getItemDamage() == 32767
-                || stack.getItem()
-                    .hasContainerItem(stack))
-                throw new IllegalArgumentException("Wildcard or container ingredient");
-            itemCounts.merge(ItemKey.of(stack), (long) stack.stackSize, Math::addExact);
+            if (GTUtility.isStackValid(stack) && stack.stackSize > 0) items.add(stack.copy());
         }
         for (FluidStack fluid : liquids) {
-            if (fluid != null && fluid.amount > 0 && FluidKey.of(fluid) == null)
-                throw new IllegalArgumentException("Invalid fluid");
-            if (fluid != null && fluid.amount > 0)
-                fluidCounts.merge(FluidKey.of(fluid), (long) fluid.amount, Math::addExact);
+            if (fluid != null && fluid.amount > 0) {
+                if (FluidKey.of(fluid) == null) throw new IllegalArgumentException("Invalid fluid");
+                fluids.add(fluid.copy());
+            }
         }
-        if (itemCounts.isEmpty() && fluidCounts.isEmpty()) throw new IllegalArgumentException("No consumed materials");
-        long divisor = output.stackSize;
-        for (long amount : itemCounts.values()) divisor = gcd(divisor, amount);
-        for (long amount : fluidCounts.values()) divisor = gcd(divisor, amount);
-        final long scale = divisor;
-        itemCounts.replaceAll((key, amount) -> amount / scale);
-        fluidCounts.replaceAll((key, amount) -> amount / scale);
-        input = ItemKey.of(output);
-        inputCount = (int) (output.stackSize / divisor);
-        if (inputCount > Math.min(64, output.getMaxStackSize()))
-            throw new IllegalArgumentException("Batch exceeds input slot");
-        for (long amount : fluidCounts.values())
-            if (amount > Integer.MAX_VALUE) throw new IllegalArgumentException("Fluid batch exceeds int capacity");
-        items = Collections.unmodifiableMap(itemCounts);
-        fluids = Collections.unmodifiableMap(fluidCounts);
-        this.source = source;
+        if (items.isEmpty() && fluids.isEmpty()) throw new IllegalArgumentException("No consumed materials");
     }
 
-    private static long gcd(long a, long b) {
-        while (b != 0) {
-            long remainder = a % b;
-            a = b;
-            b = remainder;
-        }
-        return a;
+    public ItemStack inputStack() {
+        return pattern.copy();
     }
 
-    public boolean sameMaterials(DisassemblyRecipe other) {
-        return inputCount == other.inputCount && items.equals(other.items) && fluids.equals(other.fluids);
+    public boolean matches(ItemStack stack, boolean ignoreNBT, boolean checkQuantity) {
+        return stack != null && (!checkQuantity || stack.stackSize >= inputCount)
+            && GTUtility.areStacksEqual(stack, pattern, ignoreNBT);
     }
 
     public List<ItemStack> itemOutputs() {
         List<ItemStack> result = new ArrayList<>();
-        items.forEach((key, count) -> {
-            int limit = Math.max(
-                1,
-                Math.min(
-                    64,
-                    key.prototype()
-                        .getMaxStackSize()));
-            for (long remaining = count; remaining > 0; remaining -= limit)
-                result.add(key.prototype(Math.min(limit, remaining)));
-        });
+        for (ItemStack stack : items) {
+            int limit = Math.max(1, Math.min(64, stack.getMaxStackSize()));
+            for (long remaining = stack.stackSize; remaining > 0; remaining -= limit) {
+                ItemStack copy = stack.copy();
+                copy.stackSize = (int) Math.min(limit, remaining);
+                result.add(copy);
+            }
+        }
         return result;
     }
 
     public List<FluidStack> fluidOutputs() {
         List<FluidStack> result = new ArrayList<>();
-        fluids.forEach((key, count) -> result.add(key.prototype(count.intValue())));
+        for (FluidStack fluid : fluids) result.add(fluid.copy());
         return result;
     }
 
     public int requiredItemSlots() {
         long slots = 0;
-        for (Map.Entry<ItemKey, Long> entry : items.entrySet()) {
-            int limit = Math.max(
-                1,
-                Math.min(
-                    64,
-                    entry.getKey()
-                        .prototype()
-                        .getMaxStackSize()));
-            slots = Math.addExact(slots, (entry.getValue() + limit - 1) / limit);
+        for (ItemStack stack : items) {
+            int limit = Math.max(1, Math.min(64, stack.getMaxStackSize()));
+            slots = Math.addExact(slots, ((long) stack.stackSize + limit - 1) / limit);
         }
         return Math.toIntExact(slots);
     }
 
     public NBTTagCompound writeToNbt() {
         NBTTagCompound tag = new NBTTagCompound();
-        tag.setTag(
-            "input",
-            input.prototype(inputCount)
-                .writeToNBT(new NBTTagCompound()));
+        NBTTagCompound inputTag = inputStack().writeToNBT(new NBTTagCompound());
+        inputTag.setInteger("batchCount", inputCount);
+        tag.setTag("input", inputTag);
         NBTTagList itemList = new NBTTagList();
         for (ItemStack stack : itemOutputs()) itemList.appendTag(stack.writeToNBT(new NBTTagCompound()));
         tag.setTag("items", itemList);
@@ -141,10 +110,9 @@ public final class DisassemblyRecipe {
             if (stack == null) throw new IllegalArgumentException("Missing saved fluid");
             fluids.add(stack);
         }
-        return new DisassemblyRecipe(
-            ItemStack.loadItemStackFromNBT(tag.getCompoundTag("input")),
-            items,
-            fluids,
-            "saved task");
+        NBTTagCompound inputTag = tag.getCompoundTag("input");
+        ItemStack input = ItemStack.loadItemStackFromNBT(inputTag);
+        if (input != null && inputTag.hasKey("batchCount")) input.stackSize = inputTag.getInteger("batchCount");
+        return new DisassemblyRecipe(input, items, fluids, "saved task");
     }
 }

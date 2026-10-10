@@ -160,6 +160,7 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.startsWith("com.futa_gtnh.mixins.MixinShimmerGT")) return true;
         if (NEI_MIXIN.equals(mixinClassName)) return neiPresent();
         // lootgames 目标的 mixin：装了 lootgames 才应用，没装连碰都不碰
         if (mixinClassName.startsWith(LOOTGAMES_MIXIN_PACKAGE)) return lootgamesPresent();

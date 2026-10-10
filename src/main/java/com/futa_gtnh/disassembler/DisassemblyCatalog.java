@@ -1,3 +1,9 @@
+/*
+ * Shimmer route ordering/generation adapted from GT-Not-Leisure, LGPL-3.0.
+ * Upstream: ABKQPO/GT-Not-Leisure @ c9614667efbbcbc5b9eed89c76807caeea4b1e5e.
+ * Changes: machine batches, native fluid outputs, optional mod bridges and reporting.
+ * See META-INF/licenses/gtnl/NOTICE.txt.
+ */
 package com.futa_gtnh.disassembler;
 
 import java.io.File;
@@ -7,150 +13,140 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.stream.Collectors;
 
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.crafting.CraftingManager;
-import net.minecraft.item.crafting.IRecipe;
 import net.minecraftforge.fluids.FluidStack;
 
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.shared.ItemKey;
 
+import gregtech.api.objects.GTItemStack;
+import gregtech.api.recipe.RecipeMap;
 import gregtech.api.recipe.RecipeMaps;
 import gregtech.api.util.GTRecipe;
+import gregtech.api.util.GTUtility;
+import it.unimi.dsi.fastutil.objects.Object2ObjectArrayMap;
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 
-/** Snapshot of final crafting, assembler and real assembly-line recipes. Unsafe routes block a product. */
+/** Shimmer conversions, executed one original production batch at a time by the LV machine. */
 public final class DisassemblyCatalog {
 
-    private static Map<ItemKey, DisassemblyRecipe> recipes = Collections.emptyMap();
+    private static Map<Item, List<DisassemblyRecipe>> recipes = Collections.emptyMap();
+    private static volatile boolean ready;
+
+    public static boolean isReady() {
+        return ready;
+    }
+
     public static int itemSlots = 36;
     public static int fluidSlots = 8;
     public static int tankCapacity = 64000;
+    public static int maxBatchSize = 64;
 
     private DisassemblyCatalog() {}
 
     public static DisassemblyRecipe find(ItemStack input) {
-        return recipes.get(ItemKey.of(input));
+        if (input == null) return null;
+        for (DisassemblyRecipe recipe : recipes.getOrDefault(input.getItem(), Collections.emptyList())) {
+            if (recipe.matches(input, false, true)) return recipe;
+        }
+        return null;
+    }
+
+    /** Oversized batches collect legal input stacks privately instead of overflowing GUI packets. */
+    public static DisassemblyRecipe collectable(ItemStack input) {
+        if (input == null) return null;
+        for (DisassemblyRecipe recipe : recipes.getOrDefault(input.getItem(), Collections.emptyList()))
+            if (recipe.inputCount > Math.min(64, input.getMaxStackSize()) && recipe.matches(input, false, false))
+                return recipe;
+        return null;
+    }
+
+    /** NEI queries usually carry one item; show every applicable batch regardless of query quantity. */
+    public static List<DisassemblyRecipe> usages(ItemStack input) {
+        if (input == null) return Collections.emptyList();
+        return recipes.getOrDefault(input.getItem(), Collections.emptyList())
+            .stream()
+            .filter(recipe -> recipe.matches(input, false, false))
+            .collect(Collectors.toList());
     }
 
     public static List<DisassemblyRecipe> all() {
-        return new ArrayList<>(recipes.values());
+        return recipes.values()
+            .stream()
+            .flatMap(List::stream)
+            .collect(Collectors.toList());
     }
 
     public static void build(File reportFile) {
+        ShimmerDisassemblyRules.initializeBlacklist();
         Builder builder = new Builder();
-        for (Object object : CraftingManager.getInstance()
-            .getRecipeList()) {
-            if (!(object instanceof IRecipe)) continue;
-            IRecipe recipe = (IRecipe) object;
-            ItemStack output = recipe.getRecipeOutput();
-            if (output == null) continue;
-            String source = "crafting:" + recipe.getClass()
-                .getName();
-            try {
-                builder.add(DisassemblyCrafting.reverse(recipe));
-            } catch (IllegalArgumentException | ArithmeticException exception) {
-                builder.block(output, source, exception.getMessage());
-            }
-        }
-        for (GTRecipe recipe : RecipeMaps.assemblerRecipes.getAllRecipes()) {
-            if (!recipe.mEnabled || recipe.mFakeRecipe) continue;
-            if (recipe.mOutputs.length != 1) {
-                for (ItemStack output : recipe.mOutputs)
-                    if (output != null) builder.block(output, "assembler", "Multiple production outputs");
+        ShimmerOptionalRecipes.loadOverrides(builder);
+        loadAssemblers(builder, RecipeMaps.assemblerRecipes.getAllRecipes());
+        loadRawRecipes(builder, RecipeMaps.assemblylineVisualRecipes.getAllRecipes(), "assembly line visual");
+        RecipeMap<?> space = ShimmerOptionalRecipes.spaceAssembler();
+        if (space != null) loadRawRecipes(builder, space.getAllRecipes(), "space assembler");
+        for (ShimmerCraftingRegistry.Entry entry : ShimmerCraftingRegistry.snapshot()) {
+            if (!ShimmerDisassemblyRules.shouldDisassembleItemStack(entry.output) || builder.contains(entry.output))
                 continue;
-            }
-            if (recipe.mOutputs[0] == null) continue;
-            ItemStack output = recipe.mOutputs[0];
             try {
-                if (recipe.getClass() != GTRecipe.class || recipe.mFluidOutputs.length > 0
-                    || recipe.getOutputChance(0) != 10000)
-                    throw new IllegalArgumentException("Custom, secondary or chance output");
-                for (int i = 0; i < recipe.mInputs.length; i++)
-                    if (recipe.getInputChance(i) != 10000) throw new IllegalArgumentException("Chance input");
-                for (int i = 0; i < recipe.mFluidInputs.length; i++) {
-                    if (recipe.getFluidInputChance(i) != 10000)
-                        throw new IllegalArgumentException("Chance fluid input");
-                    if (recipe.mAltFluidInputs != null && i < recipe.mAltFluidInputs.length
-                        && recipe.mAltFluidInputs[i] != null) {
-                        for (FluidStack alternative : recipe.mAltFluidInputs[i])
-                            if (alternative != null && !alternative.isFluidEqual(recipe.mFluidInputs[i]))
-                                throw new IllegalArgumentException("Alternative fluids");
-                    }
-                }
-                builder.add(
-                    new DisassemblyRecipe(
-                        output,
-                        normalized(recipe.mInputs),
-                        Arrays.asList(recipe.mFluidInputs),
-                        "assembler"));
-            } catch (IllegalArgumentException | ArithmeticException exception) {
-                builder.block(output, "assembler", exception.getMessage());
+                entry.reverse()
+                    .ifPresent(
+                        reverse -> builder.register(
+                            entry.output,
+                            ShimmerDisassemblyRules.handleRecipeTransformation(reverse.mOutputs, null),
+                            Collections.emptyList(),
+                            "GT crafting"));
+            } catch (RuntimeException exception) {
+                builder.skip(entry.output, "GT crafting", exception.toString());
             }
         }
-        for (GTRecipe.RecipeAssemblyLine recipe : GTRecipe.RecipeAssemblyLine.sAssemblylineRecipes) {
-            if (recipe.mOutput == null) continue;
-            try {
-                List<ItemStack> items = new ArrayList<>();
-                for (int i = 0; i < recipe.mInputs.length; i++) {
-                    ItemStack input = recipe.mInputs[i];
-                    if (recipe.mOreDictAlt != null && i < recipe.mOreDictAlt.length
-                        && recipe.mOreDictAlt[i] != null
-                        && recipe.mOreDictAlt[i].length > 0) {
-                        input = DisassemblyIngredients.resolve(Arrays.asList(recipe.mOreDictAlt[i]));
-                    }
-                    items.add(DisassemblyIngredients.normalize(input));
-                }
-                builder.add(
-                    new DisassemblyRecipe(recipe.mOutput, items, Arrays.asList(recipe.mFluidInputs), "assembly line"));
-            } catch (IllegalArgumentException | ArithmeticException exception) {
-                builder.block(recipe.mOutput, "assembly line", exception.getMessage());
-            }
-        }
-        recipes = Collections.unmodifiableMap(builder.finish());
-        itemSlots = 36;
-        fluidSlots = 8;
-        tankCapacity = 64000;
-        for (DisassemblyRecipe recipe : recipes.values()) {
-            itemSlots = Math.max(itemSlots, recipe.requiredItemSlots());
-            List<FluidStack> fluids = recipe.fluidOutputs();
-            fluidSlots = Math.max(fluidSlots, fluids.size());
-            for (FluidStack fluid : fluids) tankCapacity = Math.max(tankCapacity, fluid.amount);
-        }
-        String summary = "LV disassembler: candidates=" + builder.candidates
-            + ", accepted="
-            + recipes.size()
-            + ", blocked products="
-            + builder.blocked.size()
+        publish(builder.finish());
+        String summary = "LV disassembler (Shimmer): accepted=" + all().size()
+            + ", captured GT crafting="
+            + ShimmerCraftingRegistry.snapshot()
+                .size()
             + ", output slots="
             + itemSlots
             + ", tanks="
             + fluidSlots
             + ", capacity="
             + tankCapacity
-            + " mB; 32 EU/t, 40 ticks, one step";
+            + " mB, largest batch="
+            + maxBatchSize
+            + "; 32 EU/t, 40 ticks, one step";
         FutaGtnhMod.LOG.info(summary);
         builder.report.add(0, summary);
-        Map<String, Integer> acceptedSources = new LinkedHashMap<>();
-        for (DisassemblyRecipe recipe : recipes.values()) acceptedSources.merge(recipe.source, 1, Integer::sum);
-        builder.report.add(1, "Parsed candidates by source: " + builder.candidateSources);
-        builder.report.add(2, "Accepted representative routes by source: " + acceptedSources);
-        builder.report.add(3, "Skipped routes by source: " + builder.skippedSources);
-        for (DisassemblyRecipe recipe : recipes.values()) builder.report.add(
-            "ACCEPT " + recipe.input
-                + " x"
-                + recipe.inputCount
-                + " <- "
-                + recipe.source
-                + "; items="
-                + recipe.itemOutputs()
-                    .stream()
-                    .map(stack -> ItemKey.of(stack) + " x" + stack.stackSize)
-                    .collect(java.util.stream.Collectors.joining(", ")));
+        Map<String, Integer> sources = new LinkedHashMap<>();
+        for (DisassemblyRecipe recipe : all()) {
+            sources.merge(recipe.source, 1, Integer::sum);
+            builder.report.add(
+                "ACCEPT " + recipe.input
+                    + " x"
+                    + recipe.inputCount
+                    + " <- "
+                    + recipe.source
+                    + "; items="
+                    + recipe.itemOutputs()
+                        .stream()
+                        .map(stack -> ItemKey.of(stack) + " x" + stack.stackSize)
+                        .collect(Collectors.joining(", "))
+                    + "; fluids="
+                    + recipe.fluidOutputs()
+                        .stream()
+                        .map(
+                            fluid -> fluid.getFluid()
+                                .getName() + " x"
+                                + fluid.amount)
+                        .collect(Collectors.joining(", ")));
+        }
+        builder.report.add(1, "Accepted routes by source: " + sources);
+        builder.report.add(2, "Failed routes=" + builder.failures + "; failures do not invalidate other conversions");
         try {
             Files.write(reportFile.toPath(), builder.report, StandardCharsets.UTF_8);
         } catch (Exception exception) {
@@ -158,42 +154,106 @@ public final class DisassemblyCatalog {
         }
     }
 
-    private static List<ItemStack> normalized(ItemStack[] inputs) {
-        List<ItemStack> result = new ArrayList<>();
-        for (ItemStack input : inputs) result.add(DisassemblyIngredients.normalize(input));
-        return result;
+    static void publish(List<DisassemblyRecipe> entries) {
+        Map<Item, List<DisassemblyRecipe>> byItem = new LinkedHashMap<>();
+        itemSlots = 36;
+        fluidSlots = 8;
+        tankCapacity = 64000;
+        maxBatchSize = 64;
+        for (DisassemblyRecipe recipe : entries) {
+            byItem.computeIfAbsent(recipe.input.getItem(), item -> new ArrayList<>())
+                .add(recipe);
+            itemSlots = Math.max(itemSlots, recipe.requiredItemSlots());
+            fluidSlots = Math.max(
+                fluidSlots,
+                recipe.fluidOutputs()
+                    .size());
+            for (FluidStack fluid : recipe.fluidOutputs()) tankCapacity = Math.max(tankCapacity, fluid.amount);
+            maxBatchSize = Math.max(maxBatchSize, recipe.inputCount);
+        }
+        byItem.replaceAll((item, routes) -> Collections.unmodifiableList(routes));
+        recipes = Collections.unmodifiableMap(byItem);
+        ready = true;
+    }
+
+    static void loadAssemblers(Builder builder, Iterable<GTRecipe> originals) {
+        Object2ObjectArrayMap<GTItemStack, ObjectArrayList<GTRecipe>> groups = new Object2ObjectArrayMap<>();
+        for (GTRecipe recipe : originals) {
+            if (recipe.mOutputs == null || recipe.mInputs == null
+                || !ShimmerDisassemblyRules.shouldDisassemble(recipe.mOutputs)) continue;
+            if (builder.contains(recipe.mOutputs[0])) continue;
+            groups.computeIfAbsent(new GTItemStack(recipe.mOutputs[0]), key -> new ObjectArrayList<>())
+                .add(recipe);
+        }
+        for (ObjectArrayList<GTRecipe> routes : groups.values()) {
+            GTRecipe first = routes.get(0);
+            try {
+                ObjectOpenHashSet<ItemStack[]> alternatives = new ObjectOpenHashSet<>();
+                for (GTRecipe route : routes) alternatives.add(route.mInputs);
+                builder.register(
+                    first.mOutputs[0],
+                    ShimmerDisassemblyRules.handleRecipeTransformation(first.mInputs, alternatives),
+                    fluids(first.mFluidInputs),
+                    "assembler");
+            } catch (RuntimeException exception) {
+                builder.skip(first.mOutputs[0], "assembler", exception.toString());
+            }
+        }
+    }
+
+    static void loadRawRecipes(Builder builder, Iterable<GTRecipe> originals, String source) {
+        for (GTRecipe recipe : originals) {
+            if (recipe == null || recipe.mOutputs == null
+                || recipe.mOutputs.length == 0
+                || builder.contains(recipe.mOutputs[0])) continue;
+            builder.register(
+                recipe.mOutputs[0],
+                recipe.mInputs == null ? Collections.emptyList() : Arrays.asList(recipe.mInputs),
+                fluids(recipe.mFluidInputs),
+                source);
+        }
+    }
+
+    static List<FluidStack> fluids(FluidStack[] fluids) {
+        return fluids == null ? Collections.emptyList() : Arrays.asList(fluids);
     }
 
     public static final class Builder {
 
-        private final Map<ItemKey, DisassemblyRecipe> candidatesByItem = new LinkedHashMap<>();
-        private final Set<ItemKey> blocked = new LinkedHashSet<>();
+        private final List<DisassemblyRecipe> entries = new ArrayList<>();
+        private final Map<Item, List<DisassemblyRecipe>> byItem = new LinkedHashMap<>();
         private final List<String> report = new ArrayList<>();
-        private final Map<String, Integer> candidateSources = new LinkedHashMap<>();
-        private final Map<String, Integer> skippedSources = new LinkedHashMap<>();
-        private int candidates;
+        private int failures;
 
         public void add(DisassemblyRecipe recipe) {
-            candidates++;
-            candidateSources.merge(recipe.source, 1, Integer::sum);
-            DisassemblyRecipe previous = candidatesByItem.putIfAbsent(recipe.input, recipe);
-            if (previous != null && !previous.sameMaterials(recipe))
-                block(recipe.input.prototype(), recipe.source, "Conflicting production routes");
+            entries.add(recipe);
+            byItem.computeIfAbsent(recipe.input.getItem(), item -> new ArrayList<>())
+                .add(recipe);
         }
 
-        public void block(ItemStack output, String source, String reason) {
-            ItemKey key = ItemKey.of(output);
-            if (key != null) {
-                skippedSources.merge(source, 1, Integer::sum);
-                blocked.add(key);
-                report.add("SKIP " + key + " <- " + source + ": " + reason);
+        public boolean contains(ItemStack input) {
+            if (input == null) return false;
+            for (DisassemblyRecipe entry : byItem.getOrDefault(input.getItem(), Collections.emptyList()))
+                if (entry.matches(input, true, true)) return true;
+            return false;
+        }
+
+        public void register(ItemStack input, List<ItemStack> items, List<FluidStack> fluids, String source) {
+            if (!GTUtility.isStackValid(input) || input.stackSize <= 0) return;
+            try {
+                add(new DisassemblyRecipe(input, items, fluids, source));
+            } catch (IllegalArgumentException | ArithmeticException exception) {
+                skip(input, source, exception.toString());
             }
         }
 
-        public Map<ItemKey, DisassemblyRecipe> finish() {
-            Map<ItemKey, DisassemblyRecipe> result = new LinkedHashMap<>(candidatesByItem);
-            for (ItemKey key : blocked) result.remove(key);
-            return result;
+        public void skip(ItemStack input, String source, String reason) {
+            failures++;
+            report.add("SKIP " + ItemKey.of(input) + " <- " + source + ": " + reason);
+        }
+
+        public List<DisassemblyRecipe> finish() {
+            return new ArrayList<>(entries);
         }
     }
 }

@@ -64,7 +64,7 @@ public final class WebRecipeIndex {
     // 6：流体的「一次用多少」改成从流体 NBT 里读（原来一律读 stackSize，
     // 于是「每次 144 L」被当成 1）。用量是写进缓存的数据，所以必须让旧缓存作废 ——
     // 否则改完代码看着毫无变化，因为读的还是那份旧索引。
-    private static final int FILE_VERSION = 14;
+    private static final int FILE_VERSION = 15;
 
     private static final int MAGIC = 0x46574542; // "FWEB"
 
@@ -241,6 +241,9 @@ public final class WebRecipeIndex {
      */
     public static synchronized void start(File cacheDir) {
         if (building || ready || buildThread != null) return;
+        // GTNL finishes its Shimmer map on the first tick. The service retries start later;
+        // avoid permanently caching an empty disassembler handler before that catalog is ready.
+        if (Config.enableDisassembler && !com.futa_gtnh.disassembler.DisassemblyCatalog.isReady()) return;
 
         if (cacheDir != null) {
             cacheFile = new File(cacheDir, "web_recipes.dat");

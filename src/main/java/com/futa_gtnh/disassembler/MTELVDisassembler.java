@@ -7,6 +7,7 @@ import java.util.stream.IntStream;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.util.StatCollector;
 import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.Fluid;
 import net.minecraftforge.fluids.FluidStack;
@@ -55,8 +56,8 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
             1,
             0,
             new String[] { "One production step per batch; 32 EU/t, 1 A, 2 seconds",
-                "Ore ingredients refund standard GT materials and tier circuits",
-                "Crafting, assembler and assembly line; conflicting routes are skipped",
+                "Shimmer material refunds, alternatives and tier circuits",
+                "GT machine crafting, assembler, assembly line and space assembler",
                 "Paged item outputs and independent output tanks; rear extraction" });
         rebuildHandler();
     }
@@ -230,10 +231,17 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
     @Override
     public void onPostTick(IGregTechTileEntity tile, long tick) {
         if (!tile.isServerSide()) return;
+        if (buffer
+            .growTo(DisassemblyCatalog.itemSlots, DisassemblyCatalog.fluidSlots, DisassemblyCatalog.tankCapacity)) {
+            rebuildHandler();
+            tile.issueTileUpdate();
+        }
         boolean active = false;
         if (tile.isAllowedToWork()) {
-            if (!buffer.hasTask() && tick % 5 == 0 && tile.getStoredEU() >= 32)
-                buffer.start(DisassemblyCatalog.find(buffer.inventory[0]));
+            if (!buffer.hasTask() && tick % 5 == 0 && tile.getStoredEU() >= 32) {
+                if (!buffer.start(DisassemblyCatalog.find(buffer.inventory[0])))
+                    buffer.collect(DisassemblyCatalog.collectable(buffer.inventory[0]));
+            } else if (buffer.hasTask()) buffer.collect(null);
             if (buffer.canAdvance() && tile.getStoredEU() >= 32 && tile.decreaseStoredEnergyUnits(32, false))
                 active = buffer.advance(true);
         }
@@ -349,6 +357,13 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
     }
 
     @Override
+    public void onBlockDestroyed() {
+        super.onBlockDestroyed();
+        buffer.prepareDrops();
+        rebuildHandler();
+    }
+
+    @Override
     public void saveNBTData(NBTTagCompound tag) {
         tag.setTag("futaDisassembly", buffer.writeToNbt());
         tag.setInteger("drainCursor", drainCursor);
@@ -416,8 +431,16 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
                 .pos(8, 24));
         IntSyncValue progress = new IntSyncValue(() -> buffer.progress);
         sync.syncValue("progress", progress);
+        IntSyncValue collected = new IntSyncValue(buffer::collectedCount);
+        IntSyncValue required = new IntSyncValue(buffer::requiredCount);
+        sync.syncValue("collected", collected);
+        sync.syncValue("required", required);
         panel.child(
-            IKey.dynamic(() -> "32 EU/t · 1A · " + progress.getIntValue() + "/40 t")
+            IKey.dynamic(
+                () -> required.getIntValue() > collected.getIntValue() ? StatCollector.translateToLocalFormatted(
+                    "futa_gtnh.disassembler.collecting",
+                    collected.getIntValue(),
+                    required.getIntValue()) : "32 EU/t · 1A · " + progress.getIntValue() + "/40 t")
                 .asWidget()
                 .pos(32, 29));
         PagedWidget<?> items = new PagedWidget<>().pos(16, 58)

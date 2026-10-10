@@ -1,0 +1,18 @@
+This mod includes a modified implementation of GT-Not-Leisure's Shimmer disassembly library.
+Upstream authors: GT-Not-Leisure contributors (ABKQPO/GT-Not-Leisure).
+Upstream source: https://github.com/ABKQPO/GT-Not-Leisure
+Snapshot: c9614667efbbcbc5b9eed89c76807caeea4b1e5e (dev-290).
+Original files: DisassemblerHelper.java, ReversedRecipeRegistry.java,
+ShimmerRecipes.java, MixinGTShapedRecipe.java, MixinGTShapelessRecipe.java.
+
+The adapted ShimmerDisassemblyRules, ShimmerCraftingRegistry, DisassemblyCatalog
+and MixinShimmerGT*Recipe are provided under LGPL version 3, with the accompanying
+LGPL-3.0.txt and GPL-3.0.txt license texts. Modified 2026-10-10 for futa_gtnh:
+native fluid tanks, machine batches, optional dependencies, copied forward ingredients,
+compact recipe capture without debug stack traces, and diagnostics.
+
+The modified source is included in this jar under META-INF/licenses/gtnl/source/.
+The complete source/build files are in the accompanying sources archive and the futa_gtnh
+repository: https://github.com/fyt7943tyf/futa_gtnh . Rebuild with Gradle build using
+the repository's pinned dependencies; replacement of these sources and debugging
+of modifications to this library is permitted under the accompanying license.
