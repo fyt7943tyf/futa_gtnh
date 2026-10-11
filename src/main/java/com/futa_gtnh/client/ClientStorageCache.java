@@ -73,6 +73,20 @@ public final class ClientStorageCache {
     }
 
     /**
+     * @return 共享存储里这一种物品的视图条目；缓存里还没有（快照没到 / 已被取空）
+     *         返回 null。给 IO 节点 / 终端面配置的「已选（白名单）」视图用 ——
+     *         白名单里的东西就算现在存量是 0 也该显示出来。
+     */
+    public static synchronized StorageViewEntry itemEntry(ItemKey key) {
+        return key == null ? null : ITEM_INDEX.get(key);
+    }
+
+    /** @return 同 {@link #itemEntry}，流体版。 */
+    public static synchronized StorageViewEntry fluidEntry(FluidKey key) {
+        return key == null ? null : FLUID_INDEX.get(key);
+    }
+
+    /**
      * 共享存储里这种物品有多少（客户端视角）。
      *
      * <p>

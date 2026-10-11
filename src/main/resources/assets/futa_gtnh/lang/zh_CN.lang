@@ -145,6 +145,10 @@ futa_gtnh.gui.terminal.io.done=完成
 futa_gtnh.gui.terminal.io.selected=已选
 futa_gtnh.gui.terminal.io.no_filter=（空 = 禁止输出）
 futa_gtnh.gui.terminal.io.filter.hint=只筛选输出；输入不筛选
+futa_gtnh.gui.terminal.io.view.all=全部
+futa_gtnh.gui.terminal.io.view.selected=已选
+futa_gtnh.gui.terminal.io.view.empty=白名单是空的（切回「全部」点选条目）
+futa_gtnh.gui.terminal.io.view.hint=已选视图：点击条目可将其移出白名单
 futa_gtnh.gui.terminal.io.empty=没有匹配的条目
 futa_gtnh.gui.terminal.io.syncing=同步中…（正在向服务端要这个终端的配置）
 futa_gtnh.gui.terminal.io.rate=节奏（这一台自己的设置）

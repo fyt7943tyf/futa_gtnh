@@ -148,6 +148,10 @@ futa_gtnh.gui.terminal.io.done=Done
 futa_gtnh.gui.terminal.io.selected=Selected
 futa_gtnh.gui.terminal.io.no_filter= (empty = no output)
 futa_gtnh.gui.terminal.io.filter.hint=Filters outputs only; inputs are unfiltered
+futa_gtnh.gui.terminal.io.view.all=All
+futa_gtnh.gui.terminal.io.view.selected=Selected
+futa_gtnh.gui.terminal.io.view.empty=Whitelist is empty (pick entries in the All view)
+futa_gtnh.gui.terminal.io.view.hint=Selected view: click an entry to remove it from the whitelist
 futa_gtnh.gui.terminal.io.empty=Nothing matches
 futa_gtnh.gui.terminal.io.syncing=Syncing... (asking the server for this terminal's config)
 futa_gtnh.gui.terminal.io.rate=Pace (this terminal's own setting)
