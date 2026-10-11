@@ -41,6 +41,9 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     name = FutaGtnhMod.NAME,
     version = Tags.VERSION,
     acceptedMinecraftVersions = "[1.7.10]",
+    // guiFactory：Mods 列表（主菜单 → Mods → FutaGTNH → Config）的入口，
+    // 指向客户端功能设置界面。FML 只在客户端实例化它，服务端不碰这个类名字符串。
+    guiFactory = "com.futa_gtnh.client.ClientGuiFactory",
     // 存储层的键、流体显示物品、流体灌装都直接用 GT 的 API（GTUtility），
     // 所以 GT 是硬依赖；NEI 只是可选联动。
     // lwjgl3ify 也是硬依赖：本模组的目标运行时是「GTNH（LWJGL3 + 新 Java）」，

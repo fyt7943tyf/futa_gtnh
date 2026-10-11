@@ -396,3 +396,27 @@ gt.blockmachines.futa_gtnh.disassembler.lv.name=LV Disassembler
 
 futa_gtnh.disassembler.collecting=Collecting batch: %s/%s
 futa_gtnh.msg.bookmark.too_large=Bookmark item NBT is too large. This withdrawal request was cancelled.
+
+# Client feature settings GUI (inventory gear button / Mods list Config button)
+futa_gtnh.clientconfig.title=[FutaGTNH] Client Settings
+futa_gtnh.clientconfig.hint=ESC closes (unsaved changes are discarded)
+futa_gtnh.clientconfig.section.keys=Keys & Entrances
+futa_gtnh.clientconfig.section.ui=UI & Rendering
+futa_gtnh.clientconfig.apply=Apply
+futa_gtnh.clientconfig.defaults=Defaults
+futa_gtnh.clientconfig.save_exit=Save & Exit
+futa_gtnh.clientconfig.inventory_button=Client feature settings
+futa_gtnh.clientconfig.shared_bag_key.name=Shared backpack (B key)
+futa_gtnh.clientconfig.shared_bag_key.desc=Disables the B-key remote access. The shared terminal block is not affected.
+futa_gtnh.clientconfig.rts.name=Overhead building (G key)
+futa_gtnh.clientconfig.rts.desc=Disables the client entry and rendering of the overhead building mode. The server side is untouched.
+futa_gtnh.clientconfig.web_guide.name=Web crafting guide (P key)
+futa_gtnh.clientconfig.web_guide.desc=Disables the mobile web crafting guide: P key and /futaweb do nothing, the embedded HTTP server is stopped.
+futa_gtnh.clientconfig.dungeon_map.name=Dungeon map (M / N)
+futa_gtnh.clientconfig.dungeon_map.desc=Disables the dungeon fullscreen map and minimap; open ones are closed immediately.
+futa_gtnh.clientconfig.locator.name=Locator wand
+futa_gtnh.clientconfig.locator.desc=Disables the locator wand GUI and tracking beam (no scan requests, zero server cost).
+futa_gtnh.clientconfig.swift_step.name=Swift step (client side)
+futa_gtnh.clientconfig.swift_step.desc=Disables the swift step adjust GUI, light emitter and client-side speed feel. Server-side attributes/auras still follow the server config; in single player this disables everything.
+futa_gtnh.clientconfig.minigame.name=Minigame helper
+futa_gtnh.clientconfig.minigame.desc=Disables the minigame helper list GUI (no snapshot requests to the server).

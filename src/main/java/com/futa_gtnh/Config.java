@@ -55,6 +55,31 @@ public class Config {
     public static boolean displayItemBecomesFluid = true;
 
     // ------------------------------------------------------------------
+    // 客户端功能开关（设置界面）
+    // ------------------------------------------------------------------
+
+    /**
+     * 以下七个键由「客户端功能设置界面」读写（见 {@code GuiClientConfig}）。
+     * 全部是<b>客户端行为，各端读各自的配置</b>：只拦客户端的按键入口、界面、
+     * 渲染和内嵌服务，服务端逻辑（以及别人的服务端）完全不受影响。
+     */
+
+    /** 共享背包远程打开的 B 键。客户端停用，共享终端方块不受影响。 */
+    public static boolean clientEnableSharedBagKey = true;
+    /** 俯瞰建筑：G 键入口与整套客户端渲染/操作。 */
+    public static boolean clientEnableRts = true;
+    /** 合成向导网页：P 键、/futaweb 与内嵌 HTTP 服务。 */
+    public static boolean clientEnableWebGuide = true;
+    /** 地牢地图：M 全屏 / N 悬浮小地图。 */
+    public static boolean clientEnableDungeonMap = true;
+    /** 寻物魔杖的选择界面与追踪光束。 */
+    public static boolean clientEnableLocatorUi = true;
+    /** 迅步的客户端部分：调整界面、照明假光、客户端速度手感。 */
+    public static boolean clientEnableSwiftStepClient = true;
+    /** 小游戏助手的清单界面。 */
+    public static boolean clientEnableMinigameHelper = true;
+
+    // ------------------------------------------------------------------
     // 迅步（Baubles 饰品）
     // ------------------------------------------------------------------
 
@@ -578,6 +603,43 @@ public class Config {
             displayItemBecomesFluid,
             "把 GT 的流体显示物品存进共享存储时，自动把它转成流体。");
 
+        // 客户端功能开关（见字段区的说明），设置界面读写
+        clientEnableSharedBagKey = configuration.getBoolean(
+            "clientEnableSharedBagKey",
+            Configuration.CATEGORY_GENERAL,
+            clientEnableSharedBagKey,
+            "客户端开关：B 键随时随地打开共享背包。关掉后按键无效（共享终端方块不受影响）。");
+        clientEnableRts = configuration.getBoolean(
+            "clientEnableRts",
+            Configuration.CATEGORY_GENERAL,
+            clientEnableRts,
+            "客户端开关：俯瞰建筑（G 键入口与整套客户端渲染/操作）。");
+        clientEnableWebGuide = configuration.getBoolean(
+            "clientEnableWebGuide",
+            Configuration.CATEGORY_GENERAL,
+            clientEnableWebGuide,
+            "客户端开关：合成向导网页（P 键、/futaweb 与内嵌 HTTP 服务），关掉会停掉已启动的服务。");
+        clientEnableDungeonMap = configuration.getBoolean(
+            "clientEnableDungeonMap",
+            Configuration.CATEGORY_GENERAL,
+            clientEnableDungeonMap,
+            "客户端开关：地牢地图（M 全屏 / N 悬浮小地图）。");
+        clientEnableLocatorUi = configuration.getBoolean(
+            "clientEnableLocatorUi",
+            Configuration.CATEGORY_GENERAL,
+            clientEnableLocatorUi,
+            "客户端开关：寻物魔杖的选择界面与追踪光束。");
+        clientEnableSwiftStepClient = configuration.getBoolean(
+            "clientEnableSwiftStepClient",
+            Configuration.CATEGORY_GENERAL,
+            clientEnableSwiftStepClient,
+            "客户端开关：迅步的客户端部分（调整界面、照明假光、客户端速度手感）。服务端的属性/光环等仍按服务端配置运行。");
+        clientEnableMinigameHelper = configuration.getBoolean(
+            "clientEnableMinigameHelper",
+            Configuration.CATEGORY_GENERAL,
+            clientEnableMinigameHelper,
+            "客户端开关：小游戏助手的清单界面。");
+
         // NEI 面板可见性：新键 terminalNeiPanel；老键 hideNeiPanelInTerminalGui
         // 只用于一次性的「升级迁移」（true → HIDE），读完就从配置文件里摘掉。
         // 只在老键存在、且玩家还没写过新键时才尊重老键 —— 否则玩家改过的新值会被覆盖。
@@ -1051,6 +1113,34 @@ public class Config {
             configuration.save();
         } catch (Throwable t) {
             FutaGtnhMod.LOG.warn("保存共享终端搜索联动模式失败（不影响本次使用）", t);
+        }
+    }
+
+    /**
+     * 运行时回写全部客户端功能开关（设置界面「应用 / 保存并完成」时调用）。
+     *
+     * <p>
+     * 与 {@link #saveClientGuiSort} 同一套路：重读配置、只动这七个键、存盘。
+     * 七个键一次写完 —— 界面上每切一个开关就写一次盘没有必要。
+     */
+    public static void saveClientFeatureToggles() {
+        if (configFileRef == null) return;
+        try {
+            Configuration configuration = new Configuration(configFileRef);
+            String[][] toggles = { { "clientEnableSharedBagKey", Boolean.toString(clientEnableSharedBagKey) },
+                { "clientEnableRts", Boolean.toString(clientEnableRts) },
+                { "clientEnableWebGuide", Boolean.toString(clientEnableWebGuide) },
+                { "clientEnableDungeonMap", Boolean.toString(clientEnableDungeonMap) },
+                { "clientEnableLocatorUi", Boolean.toString(clientEnableLocatorUi) },
+                { "clientEnableSwiftStepClient", Boolean.toString(clientEnableSwiftStepClient) },
+                { "clientEnableMinigameHelper", Boolean.toString(clientEnableMinigameHelper) } };
+            for (String[] toggle : toggles) {
+                configuration.get(Configuration.CATEGORY_GENERAL, toggle[0], true)
+                    .set(toggle[1]);
+            }
+            configuration.save();
+        } catch (Throwable t) {
+            FutaGtnhMod.LOG.warn("保存客户端功能开关失败（不影响本次使用）", t);
         }
     }
 

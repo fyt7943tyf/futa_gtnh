@@ -95,12 +95,16 @@ public class ModEventHandler {
             SwiftStepRecovery.tick(event.player);
             SwiftStepItemMagnet.tick(event.player);
         }
-        ItemSwiftStep.applyWalkSpeedModifier(event.player);
-        // 空中前进速度也要跟着放大，否则「走着 5 倍、一跳起来掉回原版」。
-        //
-        // 这里必须是 END 阶段：EntityPlayer.onLivingUpdate 先在第 612 行做移动、
-        // 第 620 行才把 jumpMovementFactor 从 speedInAir 重置回来，而 END 事件在那之后。
-        // 放到 START 反而会被第 620 行盖掉。
-        ItemSwiftStep.applyAirSpeedModifier(event.player);
+        // 客户端功能开关：客户端侧可停用迅步的速度手感（服务端属性修饰符不受影响；
+        // 单人模式下两端读同一份配置，等效整体停用）。
+        if (event.side == Side.SERVER || com.futa_gtnh.Config.clientEnableSwiftStepClient) {
+            ItemSwiftStep.applyWalkSpeedModifier(event.player);
+            // 空中前进速度也要跟着放大，否则「走着 5 倍、一跳起来就掉回原版」。
+            //
+            // 这里必须是 END 阶段：EntityPlayer.onLivingUpdate 先在第 612 行做移动、
+            // 第 620 行才把 jumpMovementFactor 从 speedInAir 重置回来，而 END 事件在那之后。
+            // 放到 START 反而会被第 620 行盖掉。
+            ItemSwiftStep.applyAirSpeedModifier(event.player);
+        }
     }
 }

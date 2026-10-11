@@ -93,17 +93,26 @@ public final class KeyHandler {
             // 又在发包处再判一次，第二次恒为 false，B 键的包永远发不出去
             // （共享背包只能靠终端方块打开）。恢复为单次消费。
             if (openTerminal != null && openTerminal.isPressed()) {
-                NetworkHandler.INSTANCE.sendToServer(new PacketOpenGui());
+                // 客户端功能开关（设置界面）：关掉时按键静默无效（终端方块路径不受影响）
+                if (com.futa_gtnh.Config.clientEnableSharedBagKey) {
+                    NetworkHandler.INSTANCE.sendToServer(new PacketOpenGui());
+                }
             }
 
             // 俯瞰 HUD 开着时 G 键由 HUD 自己处理（keyTyped），这里只管「没开界面」的进入
             if (rtsToggle != null && rtsToggle.isPressed()) {
-                com.futa_gtnh.rts.client.RtsClientState.enter();
+                // 客户端功能开关：不进 enter() 则整套俯瞰 tick/渲染/HUD 都不会启动
+                if (com.futa_gtnh.Config.clientEnableRts) {
+                    com.futa_gtnh.rts.client.RtsClientState.enter();
+                }
             }
 
             // 手机网页版合成向导：把访问地址贴出来（服务在启动时就已经开着了）
             if (webRecipe != null && webRecipe.isPressed()) {
-                com.futa_gtnh.web.WebRecipeService.announce();
+                // 客户端功能开关：announce() 内部也会再拦一道（/futaweb 命令走同一条路）
+                if (com.futa_gtnh.Config.clientEnableWebGuide) {
+                    com.futa_gtnh.web.WebRecipeService.announce();
+                }
             }
         }
     }

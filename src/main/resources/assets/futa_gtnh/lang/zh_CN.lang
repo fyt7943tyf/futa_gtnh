@@ -393,3 +393,27 @@ gt.blockmachines.futa_gtnh.disassembler.lv.name=低压拆解机
 
 futa_gtnh.disassembler.collecting=待补足批次：%s/%s
 futa_gtnh.msg.bookmark.too_large=书签物品的 NBT 数据过大，已取消这次取物请求。
+
+# 客户端功能设置界面（背包齿轮按钮 / Mods 列表 Config 按钮）
+futa_gtnh.clientconfig.title=[FutaGTNH] 客户端设置
+futa_gtnh.clientconfig.hint=ESC 关闭（未应用的改动将被丢弃）
+futa_gtnh.clientconfig.section.keys=按键与入口
+futa_gtnh.clientconfig.section.ui=界面与渲染
+futa_gtnh.clientconfig.apply=应用
+futa_gtnh.clientconfig.defaults=恢复默认
+futa_gtnh.clientconfig.save_exit=保存并完成
+futa_gtnh.clientconfig.inventory_button=客户端功能设置
+futa_gtnh.clientconfig.shared_bag_key.name=共享背包（B 键打开）
+futa_gtnh.clientconfig.shared_bag_key.desc=停用 B 键远程打开共享背包。共享终端方块不受影响。
+futa_gtnh.clientconfig.rts.name=俯瞰建筑（G 键）
+futa_gtnh.clientconfig.rts.desc=停用俯瞰建筑模式的客户端入口与整套渲染（服务端不做任何改动）。
+futa_gtnh.clientconfig.web_guide.name=合成向导网页（P 键）
+futa_gtnh.clientconfig.web_guide.desc=停用手机网页版合成向导：P 键与 /futaweb 无效，内嵌 HTTP 服务会被停止。
+futa_gtnh.clientconfig.dungeon_map.name=地牢地图（M / N）
+futa_gtnh.clientconfig.dungeon_map.desc=停用地牢全屏地图与悬浮小地图，已开启的会立即收起。
+futa_gtnh.clientconfig.locator.name=寻物魔杖
+futa_gtnh.clientconfig.locator.desc=停用寻物魔杖的选择界面与追踪光束（不请求扫描，服务端零开销）。
+futa_gtnh.clientconfig.swift_step.name=迅步（客户端部分）
+futa_gtnh.clientconfig.swift_step.desc=停用迅步的调整界面、照明假光与客户端速度手感。服务端的属性/光环仍按服务端配置运行；单人模式等效整体停用。
+futa_gtnh.clientconfig.minigame.name=小游戏助手
+futa_gtnh.clientconfig.minigame.desc=停用小游戏助手的清单界面（不向服务端请求快照）。
