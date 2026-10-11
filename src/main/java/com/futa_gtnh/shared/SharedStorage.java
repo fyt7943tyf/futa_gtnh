@@ -75,6 +75,15 @@ public class SharedStorage {
 
     private boolean dirty;
 
+    /**
+     * 内容变更监听器（AE2 桥用，见 {@link SharedStorageListener}）。
+     *
+     * <p>
+     * 普通情况下一辈子都是空的，写入路径上只多一次 {@code isEmpty()} 判断；
+     * 改动只发生在 {@link #addListener}/{@link #removeListener} 里。
+     */
+    private final List<SharedStorageListener> listeners = new ArrayList<>();
+
     // ==================================================================
     // 物品
     // ==================================================================
@@ -151,6 +160,7 @@ public class SharedStorage {
         // 之后每一次取出还会让这个负数继续漂移
         itemTotal = saturatingAdd(itemTotal, accepted);
         markChanged();
+        if (accepted > 0L) notifyItemChanged(key);
         return accepted;
     }
 
@@ -174,6 +184,7 @@ public class SharedStorage {
         }
         itemTotal = Math.max(0L, itemTotal - taken);
         markChanged();
+        if (taken > 0L) notifyItemChanged(key);
         return taken;
     }
 
@@ -239,6 +250,7 @@ public class SharedStorage {
         fluids.put(key, have + accepted);
         fluidTotal = saturatingAdd(fluidTotal, accepted);
         markChanged();
+        if (accepted > 0L) notifyFluidChanged(key);
         return accepted;
     }
 
@@ -257,6 +269,7 @@ public class SharedStorage {
         }
         fluidTotal = Math.max(0L, fluidTotal - taken);
         markChanged();
+        if (taken > 0L) notifyFluidChanged(key);
         return taken;
     }
 
@@ -347,6 +360,8 @@ public class SharedStorage {
         itemTotal = 0L;
         fluidTotal = 0L;
         markChanged();
+        // 清空是结构性变化，通知监听器走全量重同步
+        notifyStorageReplaced();
     }
 
     // ==================================================================
@@ -368,6 +383,57 @@ public class SharedStorage {
     private void markChanged() {
         revision++;
         dirty = true;
+    }
+
+    // ==================================================================
+    // 内容变更监听（AE2 桥用）
+    // ==================================================================
+
+    public synchronized void addListener(SharedStorageListener listener) {
+        if (listener != null && !listeners.contains(listener)) listeners.add(listener);
+    }
+
+    public synchronized void removeListener(SharedStorageListener listener) {
+        listeners.remove(listener);
+    }
+
+    /**
+     * 换存档 / reload 时把监听器过继到这个新实例，并通知一次结构性替换。
+     *
+     * <p>
+     * {@code SharedStorageManager} 在 {@code onServerStarted} 和
+     * {@code reloadFromDisk} 里都是<b>整个替换</b> storage 实例，监听器要是
+     * 留在旧实例上就从此失联了。由 Manager 在替换完成后调用这一个方法即可。
+     */
+    synchronized void adoptListenersFrom(SharedStorage previous) {
+        listeners.addAll(previous.listeners);
+        previous.listeners.clear();
+        notifyStorageReplaced();
+    }
+
+    /** 只在确有生效变更时调用；回调在锁内，见接口注释的约束。 */
+    private void notifyItemChanged(ItemKey key) {
+        if (listeners.isEmpty()) return;
+        for (int i = 0; i < listeners.size(); i++) {
+            listeners.get(i)
+                .onItemChanged(key);
+        }
+    }
+
+    private void notifyFluidChanged(FluidKey key) {
+        if (listeners.isEmpty()) return;
+        for (int i = 0; i < listeners.size(); i++) {
+            listeners.get(i)
+                .onFluidChanged(key);
+        }
+    }
+
+    private void notifyStorageReplaced() {
+        if (listeners.isEmpty()) return;
+        for (int i = 0; i < listeners.size(); i++) {
+            listeners.get(i)
+                .onStorageReplaced();
+        }
     }
 
     // ==================================================================

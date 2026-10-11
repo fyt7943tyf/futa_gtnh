@@ -109,7 +109,9 @@ public final class SharedStorageManager {
         File dir = resolveWorldDirectory(server);
         if (dir == null) {
             FutaGtnhMod.LOG.error("共享存储：拿不到主世界存档目录，本次以内存模式运行（不会写盘）");
-            storage = new SharedStorage();
+            SharedStorage mem = new SharedStorage();
+            mem.adoptListenersFrom(storage);
+            storage = mem;
             worldDirectory = null;
             loaded = true;
             invalidateSnapshot();
@@ -117,7 +119,9 @@ public final class SharedStorageManager {
         }
 
         worldDirectory = dir;
-        storage = SharedStorageFile.load(dir);
+        SharedStorage fresh = SharedStorageFile.load(dir);
+        fresh.adoptListenersFrom(storage);
+        storage = fresh;
         loaded = true;
         autosaveTicker = 0;
         invalidateSnapshot();
@@ -322,6 +326,7 @@ public final class SharedStorageManager {
         if (!loaded || worldDirectory == null) return -1;
 
         SharedStorage fresh = SharedStorageFile.load(worldDirectory);
+        fresh.adoptListenersFrom(storage);
         storage = fresh;
         readApiGeneration = UUID.randomUUID()
             .toString();
