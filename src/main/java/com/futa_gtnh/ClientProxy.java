@@ -33,6 +33,10 @@ public class ClientProxy extends CommonProxy {
         KeyHandler.register();
         SwiftStepClientHandler.register();
 
+        // 客户端功能设置界面的背包按钮（镜像 EZMiner 的做法：Forge 事件往原版
+        // 背包/创造模式界面的 buttonList 里注入一枚图标按钮，无 mixin 无第三方依赖）
+        com.futa_gtnh.client.ClientFeatureButtonOverlay.register();
+
         // IO 节点方块的 ISBRH（小中心核 + 连接臂 + 按模式着色的端帽）。
         // renderId 是个静态字段：方块注册在两端都跑，但只有客户端赋得上渲染器；
         // 服务端永远不渲染这个方块，字段保持 0 无所谓。
@@ -109,6 +113,8 @@ public class ClientProxy extends CommonProxy {
      */
     @Override
     public void openSwiftStepGui(ItemStack charm) {
+        // 客户端功能开关：迅步的客户端部分（界面/照明/速度手感）被停用时，界面也不再打开
+        if (!Config.clientEnableSwiftStepClient) return;
         Minecraft.getMinecraft()
             .displayGuiScreen(new GuiSwiftStep(charm));
     }
@@ -123,6 +129,8 @@ public class ClientProxy extends CommonProxy {
      */
     @Override
     public void openLocatorGui() {
+        // 客户端功能开关：界面不开，扫描/传送也就永远不会被请求（服务端零开销）
+        if (!Config.clientEnableLocatorUi) return;
         Minecraft.getMinecraft()
             .displayGuiScreen(new GuiLocatorWand());
     }
@@ -137,6 +145,8 @@ public class ClientProxy extends CommonProxy {
      */
     @Override
     public void openMinigameHelperGui() {
+        // 客户端功能开关：界面不开就不会向服务端要快照（服务端零开销）
+        if (!Config.clientEnableMinigameHelper) return;
         Minecraft.getMinecraft()
             .displayGuiScreen(new GuiMinigameHelper());
     }

@@ -120,6 +120,9 @@ public class SwiftStepClientHandler {
         @SubscribeEvent
         public void onPlayerTick(TickEvent.PlayerTickEvent event) {
             if (event.side != Side.CLIENT) return;
+            // 客户端功能开关（设置界面）：关掉 = 本处理器整体停手
+            // （客户端飞行速度手感 + 照明假光）。服务端的属性修饰符/光环不受影响。
+            if (!com.futa_gtnh.Config.clientEnableSwiftStepClient) return;
 
             EntityPlayer player = event.player;
             if (!(player instanceof EntityPlayerSP)) return;

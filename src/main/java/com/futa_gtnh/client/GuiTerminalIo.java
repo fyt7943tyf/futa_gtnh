@@ -23,10 +23,12 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL14;
 
 import com.futa_gtnh.CommonProxy;
+import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.block.BlockSharedTerminal;
 import com.futa_gtnh.block.TerminalIoConfig;
 import com.futa_gtnh.block.TerminalOutputFilter;
+import com.futa_gtnh.client.widget.FutaSearchField;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageAction;
@@ -74,6 +76,8 @@ public class GuiTerminalIo extends GuiScreen {
     private static final int BTN_CLEAR = 31;
     private static final int BTN_DONE = 32;
     private static final int BTN_FILTER_FACE = 33;
+    private static final int BTN_SORT = 34;
+    private static final int BTN_VIEW = 35; // 切换「全部 / 已选（白名单）」视图
     private static final int BTN_PRESET_BASE = 40; // 40..44
     private static final int BTN_RATE_BASE = 50; // 50..55：三行 × 减/加
 
@@ -110,11 +114,23 @@ public class GuiTerminalIo extends GuiScreen {
 
     private int tab = TAB_FACES;
 
-    private GuiTextField searchField;
+    private FutaSearchField searchField;
     private GuiTextField prefixField;
 
     private boolean fluidTab;
     private int selectedFace = ForgeDirection.SOUTH.ordinal();
+
+    /**
+     * 筛选条目的排序方式。<b>与共享终端 / IO 节点共用同一个持久化配置</b>
+     * （{@link Config#guiSortMode}）—— 白名单编辑界面的排序行为保持一致。
+     * 以前这里写死按名称，是三种排序行为里的一种，现统一。
+     */
+    private int sortMode = StorageSort.fromIndex(Config.guiSortMode);
+    /** {@link #refreshFilter} 失效条件用的水位：排序方式变了也要重建。 */
+    private int sortModeCache = sortMode;
+    /** true = 网格只显示当前面、当前类型的<b>白名单条目</b>（「已选」视图）。 */
+    private boolean viewSelected;
+    private boolean viewSelectedCache;
 
     /** 那个可以转的方块。数学在 {@link CubeView} 里，可以离线验证。 */
     private final CubeView cube = new CubeView();
@@ -242,7 +258,9 @@ public class GuiTerminalIo extends GuiScreen {
 
         buttonList.add(new FlatButton(BTN_DONE, guiLeft + GUI_WIDTH - 68, guiTop + 168, 60, 16, ""));
 
-        refreshFilter();
+        // 只在筛选页刷新：别的页签 searchField 是 null，进来会把 lastQuery 覆写成空串 ——
+        // 那是「切个页签回来搜索词就丢了」的根源。
+        if (tab == TAB_FILTER) refreshFilter();
         refreshLabels();
     }
 
@@ -268,9 +286,18 @@ public class GuiTerminalIo extends GuiScreen {
     private void buildFilterTab() {
         buttonList.add(new FlatButton(BTN_FILTER_FACE, guiLeft + 210, guiTop + 20, 82, 16, ""));
         buttonList.add(new FlatButton(BTN_KIND, guiLeft + 8, guiTop + 40, 76, 16, ""));
-        searchField = new GuiTextField(fontRendererObj, guiLeft + 90, guiTop + 40, 202, 16);
+        // 搜索框收窄到 142：右侧让位给「已选」和排序两个按钮（和 IO 节点同一排布）。
+        // 统一用 FutaSearchField（右键清空、变更回调），和共享终端同一手感；
+        // 它不画自带背景，暗底描边在 drawFilterTab 里补。
+        searchField = new FutaSearchField(fontRendererObj, guiLeft + 90, guiTop + 40, 142, 16);
         searchField.setMaxStringLength(48);
-        searchField.setText(lastQuery.equals("\u0000") ? "" : lastQuery);
+        searchField.setText(lastQuery.equals("\u0000") ? "" : lastQuery, false);
+        searchField.setChangeListener(text -> {
+            built = false;
+            refreshFilter();
+        });
+        buttonList.add(new FlatButton(BTN_VIEW, guiLeft + 234, guiTop + 40, 28, 16, ""));
+        buttonList.add(new FlatButton(BTN_SORT, guiLeft + 264, guiTop + 40, 28, 16, ""));
 
         TerminalIoConfig.Preset[] presets = fluidTab ? new TerminalIoConfig.Preset[0]
             : TerminalIoConfig.Preset.values();
@@ -337,23 +364,63 @@ public class GuiTerminalIo extends GuiScreen {
         String query = searchField == null ? "" : searchField.getText();
         int now = ClientStorageCache.getRevision();
         Object searchConfiguration = NeiSearchBridge.configurationToken();
+        // 失效条件必须覆盖所有会影响结果集的输入：查询词、数据版本、页签、
+        // 排序方式、视图（全部/已选）、NEI 解析器配置。漏了哪一个，那一个变化后
+        // 列表就会停在旧状态 —— 与 GuiIoNode 同一套修正。
         if (built && now == revision
             && query.equals(lastQuery)
             && fluidTab == fluidTabCache
+            && sortMode == sortModeCache
+            && viewSelected == viewSelectedCache
             && searchConfiguration == lastSearchConfiguration) return;
         lastSearchConfiguration = searchConfiguration;
 
         revision = now;
         lastQuery = query;
         fluidTabCache = fluidTab;
+        sortModeCache = sortMode;
+        viewSelectedCache = viewSelected;
         built = true;
 
-        List<StorageViewEntry> source = fluidTab ? ClientStorageCache.fluids() : ClientStorageCache.items();
+        List<StorageViewEntry> source;
+        if (viewSelected) {
+            source = selectedEntries();
+        } else {
+            source = fluidTab ? ClientStorageCache.fluids() : ClientStorageCache.items();
+        }
         StorageSearch.filter(source, StorageSearch.compile(query), shown);
-        StorageSort.sort(shown, StorageSort.BY_NAME);
+        // 排序方式与共享终端 / IO 节点共用一个配置（以前这里写死按名称）
+        StorageSort.sort(shown, sortMode);
         while (shown.size() > PAGE) {
             shown.remove(shown.size() - 1);
         }
+    }
+
+    /**
+     * 「已选（白名单）」视图的数据源：当前面、当前类型的全部白名单条目。
+     *
+     * <p>
+     * 条目优先从客户端缓存取（带真实存量）；缓存里没有的（已被取空、快照还没到）
+     * 用 0 存量合成一条 —— 白名单是一个「设置」，东西不在仓库里了也应该看得见、
+     * 点得掉。GT 造不出显示物品的流体条目只好跳过（和全量视图同一约束）。
+     */
+    private List<StorageViewEntry> selectedEntries() {
+        TerminalOutputFilter filter = currentFilter();
+        List<StorageViewEntry> result = new ArrayList<>();
+        if (fluidTab) {
+            for (FluidKey key : filter.getFluids()) {
+                StorageViewEntry entry = ClientStorageCache.fluidEntry(key);
+                if (entry == null) entry = StorageViewEntry.ofFluid(key, 0L);
+                if (entry != null) result.add(entry);
+            }
+        } else {
+            for (ItemKey key : filter.getItems()) {
+                StorageViewEntry entry = ClientStorageCache.itemEntry(key);
+                if (entry == null) entry = StorageViewEntry.ofItem(key, 0L);
+                result.add(entry);
+            }
+        }
+        return result;
     }
 
     private void pushConfig() {
@@ -440,6 +507,8 @@ public class GuiTerminalIo extends GuiScreen {
         setEnabled(BTN_KIND, filter);
         setEnabled(BTN_CLEAR, filter);
         setEnabled(BTN_FILTER_FACE, filter);
+        setEnabled(BTN_SORT, filter);
+        setEnabled(BTN_VIEW, filter);
         if (searchField != null) {
             searchField.setVisible(tab == TAB_FILTER);
             searchField.setEnabled(filter);
@@ -465,6 +534,15 @@ public class GuiTerminalIo extends GuiScreen {
         }
         GuiButton clearButton = findButton(BTN_CLEAR);
         if (clearButton != null) clearButton.displayString = tr("futa_gtnh.gui.terminal.io.clear");
+
+        GuiButton sortButton = findButton(BTN_SORT);
+        if (sortButton != null) sortButton.displayString = tr(StorageSort.translationKey(sortMode));
+        GuiButton viewButton = findButton(BTN_VIEW);
+        if (viewButton != null) {
+            viewButton.displayString = tr(
+                viewSelected ? "futa_gtnh.gui.terminal.io.view.selected" : "futa_gtnh.gui.terminal.io.view.all");
+            if (viewButton instanceof FlatButton) ((FlatButton) viewButton).setMarked(viewSelected);
+        }
 
         GuiButton filterFaceButton = findButton(BTN_FILTER_FACE);
         if (filterFaceButton != null) filterFaceButton.displayString = faceName(face) + " (" + pipCount(face) + ") >";
@@ -1177,7 +1255,12 @@ public class GuiTerminalIo extends GuiScreen {
         // 这里刻意不再画一行「筛选」小标题：页签按钮本身就写着，位置又正好在页签底下会压上
         drawFilterGrid(mouseX, mouseY);
 
-        // 文本框要自己画：GuiScreen 只画 buttonList 里的按钮，输入框不在里面
+        // 文本框要自己画：GuiScreen 只画 buttonList 里的按钮，输入框不在里面。
+        // FutaSearchField 不画自带背景，先补一个和原版输入框观感一致的暗底描边。
+        if (searchField != null && searchField.getVisible()) {
+            drawRect(guiLeft + 89, guiTop + 39, guiLeft + 233, guiTop + 57, 0xFFA0A0A0);
+            drawRect(guiLeft + 90, guiTop + 40, guiLeft + 232, guiTop + 56, 0xFF000000);
+        }
         if (searchField != null) searchField.drawTextBox();
         if (prefixField != null) prefixField.drawTextBox();
 
@@ -1204,7 +1287,9 @@ public class GuiTerminalIo extends GuiScreen {
         fontRendererObj
             .drawString(fontRendererObj.trimStringToWidth(summary, 184), guiLeft + 8, guiTop + 145, 0xA0A0A0);
         fontRendererObj.drawString(
-            fontRendererObj.trimStringToWidth(tr("futa_gtnh.gui.terminal.io.filter.hint"), 184),
+            fontRendererObj.trimStringToWidth(
+                tr(viewSelected ? "futa_gtnh.gui.terminal.io.view.hint" : "futa_gtnh.gui.terminal.io.filter.hint"),
+                184),
             guiLeft + 8,
             guiTop + 156,
             0x909090);
@@ -1240,7 +1325,14 @@ public class GuiTerminalIo extends GuiScreen {
         net.minecraft.client.renderer.RenderHelper.disableStandardItemLighting();
 
         if (shown.isEmpty()) {
-            fontRendererObj.drawString(tr("futa_gtnh.gui.terminal.io.empty"), gridX + 2, gridY + 2, 0x808080);
+            // 「已选」视图下白名单本来就是空的，别拿「没有匹配的条目」误导人
+            fontRendererObj.drawString(
+                tr(
+                    viewSelected && currentFilter().isEmpty(fluidTab) ? "futa_gtnh.gui.terminal.io.view.empty"
+                        : "futa_gtnh.gui.terminal.io.empty"),
+                gridX + 2,
+                gridY + 2,
+                0x808080);
         }
     }
 
@@ -1333,9 +1425,30 @@ public class GuiTerminalIo extends GuiScreen {
 
         if (button.id != BTN_DONE && !configReady()) return;
 
+        if (button.id == BTN_SORT) {
+            // 排序按钮只管排序：对现有结果就地重排，不重新过滤。
+            // 排序方式与共享终端 / IO 节点共用，改过就写进配置。
+            sortMode = StorageSort.next(sortMode);
+            sortModeCache = sortMode;
+            Config.saveClientGuiSort(sortMode);
+            StorageSort.sort(shown, sortMode);
+            refreshLabels();
+            return;
+        }
+
+        if (button.id == BTN_VIEW) {
+            viewSelected = !viewSelected;
+            built = false;
+            refreshFilter();
+            refreshLabels();
+            return;
+        }
+
         if (button.id == BTN_FILTER_FACE) {
             applyPrefixes();
             selectedFace = (selectedFace + 1) % TerminalIoConfig.FACES;
+            // 换面 = 换白名单，「已选」视图的内容必须跟着换
+            built = false;
             initGui();
             return;
         }
@@ -1383,6 +1496,11 @@ public class GuiTerminalIo extends GuiScreen {
                 if (prefixField != null && !fluidTab) prefixField.setText("");
                 refreshLabels();
                 pushConfig();
+                // 「已选」视图下清空白名单，网格要同步清空
+                if (viewSelected) {
+                    built = false;
+                    refreshFilter();
+                }
                 break;
             case BTN_DONE:
                 close();
@@ -1424,6 +1542,11 @@ public class GuiTerminalIo extends GuiScreen {
             currentFilter().toggleItem(entry.getItemKey());
         }
         pushConfig();
+        // 「已选」视图里点一下 = 移出白名单，列表要跟着收缩
+        if (viewSelected) {
+            built = false;
+            refreshFilter();
+        }
     }
 
     /**
@@ -1489,7 +1612,9 @@ public class GuiTerminalIo extends GuiScreen {
                 return;
             }
             searchField.textboxKeyTyped(typedChar, keyCode);
-            shown.clear();
+            // 这里以前有一句 shown.clear()：不改变文本的按键（Shift/方向键/输入法组合键……）
+            // 会把列表清空后撞上 refreshFilter 的早退条件，网格从此空白。
+            // refreshFilter 自己会清空并重填 shown，这里什么都不用做。
             refreshFilter();
             return;
         }

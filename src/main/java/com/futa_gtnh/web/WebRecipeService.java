@@ -85,7 +85,7 @@ public final class WebRecipeService {
         // 物品图标走离屏渲染（画出来才和游戏里一致），它要挂在渲染线程上
         WebIconRenderer.register();
 
-        if (Config.webRecipeEnable && Config.webRecipeAutoStart) {
+        if (Config.clientEnableWebGuide && Config.webRecipeEnable && Config.webRecipeAutoStart) {
             start();
         }
     }
@@ -110,17 +110,17 @@ public final class WebRecipeService {
      * 真正开跑还要等 tick 里那道人就绪检查。
      */
     public static void lateInit() {
-        if (available() && Config.webRecipeEnable && Config.webRecipePrebuild) {
+        if (available() && Config.clientEnableWebGuide && Config.webRecipeEnable && Config.webRecipePrebuild) {
             pendingIndex = true;
         }
     }
 
     public static boolean isEnabled() {
-        return Config.webRecipeEnable && available();
+        return Config.clientEnableWebGuide && Config.webRecipeEnable && available();
     }
 
     public static boolean start() {
-        if (!available() || !Config.webRecipeEnable) return false;
+        if (!available() || !Config.clientEnableWebGuide || !Config.webRecipeEnable) return false;
         boolean ok = WebRecipeServer.start(Config.webRecipeBindAddress, Config.webRecipePort, Config.webRecipeToken);
         if (ok) {
             startPending = false;
@@ -223,6 +223,10 @@ public final class WebRecipeService {
     public static void announce() {
         if (!available()) {
             message(EnumChatFormatting.RED + "网页配方功能需要 NotEnoughItems（配方数据全部来自 NEI）。");
+            return;
+        }
+        if (!Config.clientEnableWebGuide) {
+            message(EnumChatFormatting.RED + "合成向导已在客户端功能设置里关闭。");
             return;
         }
         if (!Config.webRecipeEnable) {

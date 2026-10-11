@@ -38,11 +38,29 @@ public final class RoguelikeMapClient {
     }
 
     public static boolean isMiniMapEnabled() {
-        return miniMapEnabled;
+        // 连带客户端功能开关：开关关闭时悬浮小地图视为关闭（overlay 每帧查这里）
+        return miniMapEnabled && isAvailable();
     }
 
     public static boolean isAvailable() {
-        return Config.enableRoguelikeMap && (Loader.isModLoaded("Roguelike") || Loader.isModLoaded("roguelike"));
+        // clientEnableDungeonMap 是「客户端功能设置界面」的开关（纯客户端停用）
+        return Config.clientEnableDungeonMap && Config.enableRoguelikeMap
+            && (Loader.isModLoaded("Roguelike") || Loader.isModLoaded("roguelike"));
+    }
+
+    /**
+     * 客户端功能开关关闭时把已展开的界面收掉：悬浮小地图复位、全屏地图退回游戏。
+     * 由设置界面「应用」时调用；开着的时候调用是空操作。
+     */
+    public static void closeAll() {
+        if (miniMapEnabled) {
+            miniMapEnabled = false;
+            notifyPlayer("地牢悬浮小地图：已在客户端功能设置里关闭");
+        }
+        Minecraft minecraft = Minecraft.getMinecraft();
+        if (minecraft.currentScreen instanceof GuiRoguelikeMap) {
+            minecraft.displayGuiScreen(null);
+        }
     }
 
     public static void toggleFullScreen() {
