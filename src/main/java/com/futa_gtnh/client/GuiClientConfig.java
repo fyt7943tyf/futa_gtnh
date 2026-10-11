@@ -87,24 +87,17 @@ public class GuiClientConfig extends GuiScreen {
     private static final int TOGGLE_MINIGAME = 6;
     private static final int TOGGLE_COUNT = 7;
 
-    private static final String[] NAME_KEYS = { "futa_gtnh.clientconfig.shared_bag_key.name",
-        "futa_gtnh.clientconfig.rts.name", "futa_gtnh.clientconfig.web_guide.name",
-        "futa_gtnh.clientconfig.dungeon_map.name", "futa_gtnh.clientconfig.locator.name",
-        "futa_gtnh.clientconfig.swift_step.name", "futa_gtnh.clientconfig.minigame.name" };
+    // 注意：这几个数组存的是「去掉 futa_gtnh.clientconfig. 前缀」的短键，
+    // tr() 会统一拼前缀 —— 存完整键的话前缀会拼两遍，翻译查不到就把原键吐出来
+    private static final String[] NAME_KEYS = { "shared_bag_key.name", "rts.name", "web_guide.name", "dungeon_map.name",
+        "locator.name", "swift_step.name", "minigame.name" };
 
-    private static final String[] DESC_KEYS = { "futa_gtnh.clientconfig.shared_bag_key.desc",
-        "futa_gtnh.clientconfig.rts.desc", "futa_gtnh.clientconfig.web_guide.desc",
-        "futa_gtnh.clientconfig.dungeon_map.desc", "futa_gtnh.clientconfig.locator.desc",
-        "futa_gtnh.clientconfig.swift_step.desc", "futa_gtnh.clientconfig.minigame.desc" };
+    private static final String[] DESC_KEYS = { "shared_bag_key.desc", "rts.desc", "web_guide.desc", "dungeon_map.desc",
+        "locator.desc", "swift_step.desc", "minigame.desc" };
 
     private static final Section[] SECTIONS = {
-        new Section(
-            "futa_gtnh.clientconfig.section.keys",
-            TOGGLE_SHARED_BAG,
-            TOGGLE_RTS,
-            TOGGLE_WEB_GUIDE,
-            TOGGLE_DUNGEON_MAP),
-        new Section("futa_gtnh.clientconfig.section.ui", TOGGLE_LOCATOR, TOGGLE_SWIFT_STEP, TOGGLE_MINIGAME) };
+        new Section("section.keys", TOGGLE_SHARED_BAG, TOGGLE_RTS, TOGGLE_WEB_GUIDE, TOGGLE_DUNGEON_MAP),
+        new Section("section.ui", TOGGLE_LOCATOR, TOGGLE_SWIFT_STEP, TOGGLE_MINIGAME) };
 
     /** ESC 返回的界面（模组列表入口进来时是 Mods 列表；null = 回游戏）。 */
     private final GuiScreen parentScreen;
