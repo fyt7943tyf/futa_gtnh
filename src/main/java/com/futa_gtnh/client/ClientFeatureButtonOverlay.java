@@ -29,10 +29,11 @@ import cpw.mods.fml.relauncher.SideOnly;
  * <ul>
  * <li>{@code InitGuiEvent.Post}：把 16×16 图标按钮塞进 {@link GuiInventory} /
  * {@link GuiContainerCreative} 的 buttonList；</li>
- * <li>{@code DrawScreenEvent.Pre}：每帧重定位 —— GTNH 标配 ServerUtilities，它的
- * 侧栏按钮（{@code serverutils.client.gui.GuiSidebar}）也在同一个 buttonList 里，
- * 反射找到它的实际位置，把我们的按钮放到它<b>下方</b>；SU 不在场或按不出来时
- * 退回背包面板左下角的固定位置；</li>
+ * <li>{@code DrawScreenEvent.Pre}：每帧重定位 —— 先按 ServerUtilities 侧栏
+ * （{@code serverutils.client.gui.GuiSidebar}，反射定位）的底边对齐作为起点，
+ * 再做一轮<b>通用碰撞检测</b>：与 buttonList 里任何其他可见按钮相交就推到其下方。
+ * SU 的包围盒是它自己每帧算的、实测未必盖住全部按钮，所以最终位置以碰撞检测
+ * 为准，不依赖任何侧栏的内部实现；</li>
  * <li>{@code DrawScreenEvent.Post}：悬停 tooltip（绕开 protected 的
  * drawHoveringText，用 GL11 手画一个原版样式的黑底紫边提示框）；</li>
  * <li>{@code ActionPerformedEvent.Post}：点击打开 {@link GuiClientConfig}。</li>
@@ -68,10 +69,10 @@ public class ClientFeatureButtonOverlay {
         "futa_gtnh",
         "textures/gui/settings_button.png");
 
-    // GuiSidebar 反射缓存（SU 不在场上时全 null，后续调用都是空操作）
+    // 反射缓存（一次性解析；SU 不在场上时 suSidebarClass 为 null，测量降级）
     private static boolean suLookupDone;
     private static Class<?> suSidebarClass;
-    private static Field suButtonListField;
+    private static Field buttonListField;
     private static Field suXField;
     private static Field suYField;
     private static Field suWField;
@@ -105,15 +106,20 @@ public class ClientFeatureButtonOverlay {
         int btnX;
         int btnY;
         if (suArea != null && suArea.width > 0 && suArea.height > 0) {
-            // 和 SU 侧栏同列对齐，贴着它的底边往下放（+2 跳过 SU 的包围盒内边距）
+            // 和 SU 侧栏同列对齐，贴着它测出来的底边往下放（+2 跳过 SU 的包围盒内边距）
             btnX = suArea.x + 2;
             btnY = suArea.y + suArea.height;
         } else {
             btnX = offsets[0] - SU_OFFSET_X;
             btnY = offsets[1] + offsets[2] - BTN_SIZE - FALLBACK_BOTTOM_MARGIN;
         }
-        ourButton.xPosition = btnX;
-        ourButton.yPosition = btnY;
+
+        // SU 的包围盒是它自己每帧算的，量出来未必盖住全部按钮（实测 GTNH 整合包里
+        // 会和侧栏最底下的按钮叠上）。所以测量结果只当「起点」，最终位置由通用
+        // 碰撞检测决定：和任何其他可见按钮相交就推到那个按钮下方，推到不叠为止。
+        int[] pos = resolveOverlap(event.gui, btnX, btnY);
+        ourButton.xPosition = pos[0];
+        ourButton.yPosition = pos[1];
     }
 
     /** 悬停 tooltip（SU 按钮/物品格都不会被遮：这个框画在最上层）。 */
@@ -152,6 +158,77 @@ public class ClientFeatureButtonOverlay {
     // ==================================================================
     // 辅助
     // ==================================================================
+
+    /**
+     * 通用防重叠：从起点开始，只要和 buttonList 里<b>任何其他可见按钮</b>相交，
+     * 就推到相交按钮中「最靠下的底边」之下，直到腾出空间（上限 32 轮防死循环）。
+     *
+     * <p>
+     * SU 侧栏的包围盒是它自己每帧算的，实测在这套整合包里未必盖住全部按钮，
+     * 所以测量结果只能当起点，最终位置必须以碰撞检测为准 —— 这样无论侧栏是
+     * 一列还是两列、有没有别的模组往里塞按钮，都不会叠。
+     */
+    private int[] resolveOverlap(GuiScreen gui, int x, int y) {
+        ensureReflection();
+        Rectangle mine = new Rectangle(x, y, BTN_SIZE, BTN_SIZE);
+        List<GuiButton> buttons = buttonsOf(gui);
+        if (buttons == null) return new int[] { mine.x, mine.y };
+
+        for (int pass = 0; pass < 32; pass++) {
+            Rectangle lowest = null;
+            for (GuiButton button : buttons) {
+                if (button == ourButton || !button.visible) continue;
+                Rectangle rect = boundsOf(gui, button);
+                if (rect == null || !mine.intersects(rect)) continue;
+                // 一次跳过与当前矩形相交的按钮里最靠下的那个，少走几轮
+                if (lowest == null || rect.y + rect.height > lowest.y + lowest.height) lowest = rect;
+            }
+            if (lowest == null) break;
+            mine.y = lowest.y + lowest.height;
+        }
+
+        // 极端情况（屏幕被按钮塞满）贴屏幕底边收场，不再无限往下
+        if (mine.y + BTN_SIZE > gui.height) mine.y = Math.max(0, gui.height - BTN_SIZE);
+        return new int[] { mine.x, mine.y };
+    }
+
+    /** @return 按钮包围盒；尺寸为 0（还没画过第一帧）或坐标离谱（侧栏全隐藏时的溢出值）返回 null。 */
+    private static Rectangle boundsOf(GuiScreen gui, GuiButton button) {
+        if (button.width <= 0 || button.height <= 0) return null;
+        if (button.xPosition < 0 || button.yPosition < 0) return null;
+        if (button.xPosition >= gui.width || button.yPosition >= gui.height) return null;
+        return new Rectangle(button.xPosition, button.yPosition, button.width, button.height);
+    }
+
+    /** @return 界面的 buttonList（反射，MCP 名优先 SRG 兜底）；拿不到返回 null。 */
+    @SuppressWarnings("unchecked")
+    private static List<GuiButton> buttonsOf(GuiScreen gui) {
+        if (ensureReflection() && buttonListField != null) {
+            try {
+                return (List<GuiButton>) buttonListField.get(gui);
+            } catch (Throwable ignored) {
+                // 理论上到不了这里；拿不到就保持起点位置
+            }
+        }
+        return null;
+    }
+
+    /** 一次性解析全部反射字段；失败的字段保持 null，对应能力降级。 */
+    private static boolean ensureReflection() {
+        if (suLookupDone) return suSidebarClass != null || buttonListField != null;
+        suLookupDone = true;
+        try {
+            suSidebarClass = Class.forName("serverutils.client.gui.GuiSidebar");
+        } catch (Throwable ignored) {
+            // SU 不在 classpath 上：侧栏测量降级为固定位置，碰撞检测照常工作
+        }
+        buttonListField = getDeclaredFieldMcpSrg(GuiScreen.class, "buttonList", SRG_BUTTON_LIST);
+        suXField = getFieldMcpSrg(GuiButton.class, "xPosition", SRG_X_POS);
+        suYField = getFieldMcpSrg(GuiButton.class, "yPosition", SRG_Y_POS);
+        suWField = getFieldMcpSrg(GuiButton.class, "width", SRG_WIDTH);
+        suHField = getFieldMcpSrg(GuiButton.class, "height", SRG_HEIGHT);
+        return buttonListField != null;
+    }
 
     /** @return [guiLeft, guiTop, 面板高]，不是受支持的背包类界面返回 null。 */
     private static int[] guiOffsets(GuiScreen gui) {
@@ -203,23 +280,10 @@ public class ClientFeatureButtonOverlay {
      * 见 EZMiner 的同款防御）都返回 null。
      */
     private static Rectangle getSuArea(GuiScreen gui) {
-        if (!suLookupDone) {
-            suLookupDone = true;
-            try {
-                suSidebarClass = Class.forName("serverutils.client.gui.GuiSidebar");
-                suButtonListField = getDeclaredFieldMcpSrg(GuiScreen.class, "buttonList", SRG_BUTTON_LIST);
-                suXField = getFieldMcpSrg(GuiButton.class, "xPosition", SRG_X_POS);
-                suYField = getFieldMcpSrg(GuiButton.class, "yPosition", SRG_Y_POS);
-                suWField = getFieldMcpSrg(GuiButton.class, "width", SRG_WIDTH);
-                suHField = getFieldMcpSrg(GuiButton.class, "height", SRG_HEIGHT);
-            } catch (Throwable ignored) {
-                // SU 不在 classpath 上；字段保持 null，之后每次调用都直接走兜底位置
-            }
-        }
-        if (suSidebarClass == null || suButtonListField == null) return null;
+        if (!ensureReflection() || suSidebarClass == null || buttonListField == null) return null;
         try {
             @SuppressWarnings("unchecked")
-            List<GuiButton> buttonList = (List<GuiButton>) suButtonListField.get(gui);
+            List<GuiButton> buttonList = (List<GuiButton>) buttonListField.get(gui);
             for (GuiButton btn : buttonList) {
                 if (suSidebarClass.isInstance(btn)) {
                     int w = suWField.getInt(btn);
