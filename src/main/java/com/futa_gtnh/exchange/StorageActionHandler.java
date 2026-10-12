@@ -91,7 +91,10 @@ public final class StorageActionHandler {
         SharedStorage storage = SharedStorageManager.getStorage();
         PacketStorageDelta delta = new PacketStorageDelta();
         DeltaRecorder recorder = new DeltaRecorder(storage, delta);
-        long amount = clamp(packet.getAmount());
+        // 上限是持久化设置，不是单次搬运数量；不要静默夹成 MAX_AMOUNT_PER_ACTION。
+        boolean settingLimit = packet.getAction() == PacketStorageAction.SET_ITEM_LIMIT
+            || packet.getAction() == PacketStorageAction.SET_FLUID_LIMIT;
+        long amount = settingLimit ? packet.getAmount() : clamp(packet.getAmount());
 
         if (station) {
             // 合成站只认「填合成栏 / 自动合成」两个动作，其它动作（终端界面专用的）直接忽略

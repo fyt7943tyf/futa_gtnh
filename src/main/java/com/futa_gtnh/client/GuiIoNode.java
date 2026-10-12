@@ -47,6 +47,7 @@ public class GuiIoNode extends FutaGuiContainer {
 
     private static final int GUI_WIDTH = 300;
     private static final int GUI_HEIGHT = 200;
+    private static final int FILTER_HEIGHT = 224;
 
     // ---- 按钮 id ----
     private static final int BTN_TAB_BASE = 0; // 0..2 页签
@@ -60,6 +61,8 @@ public class GuiIoNode extends FutaGuiContainer {
     private static final int BTN_VIEW = 34; // 切换「全部 / 已选（白名单）」视图
     private static final int BTN_PRESET_BASE = 40; // 40..44
     private static final int BTN_RATE_BASE = 50; // 50..55：三行 × 减/加
+    private static final int BTN_WHITELIST_PREV = 60;
+    private static final int BTN_WHITELIST_NEXT = 61;
 
     private static final int TAB_MAIN = 0;
     private static final int TAB_FILTER = 1;
@@ -98,6 +101,8 @@ public class GuiIoNode extends FutaGuiContainer {
     private boolean viewSelectedCache;
 
     private final List<StorageViewEntry> shown = new ArrayList<>();
+    private final OutputWhitelistPanel whitelist = new OutputWhitelistPanel();
+    private int filterRevision = -1;
 
     private String lastQuery = "\u0000";
     private Object lastSearchConfiguration;
@@ -171,9 +176,10 @@ public class GuiIoNode extends FutaGuiContainer {
 
     @Override
     public void initGui() {
+        ySize = tab == TAB_FILTER ? FILTER_HEIGHT : GUI_HEIGHT;
         super.initGui();
         guiLeft = (width - GUI_WIDTH) / 2;
-        guiTop = (height - GUI_HEIGHT) / 2;
+        guiTop = (height - ySize) / 2;
 
         buttonList.clear();
         searchField = null;
@@ -193,7 +199,8 @@ public class GuiIoNode extends FutaGuiContainer {
             buildRateTab();
         }
 
-        buttonList.add(new FlatButton(BTN_DONE, guiLeft + GUI_WIDTH - 68, guiTop + 168, 60, 16, ""));
+        buttonList.add(
+            new FlatButton(BTN_DONE, guiLeft + GUI_WIDTH - 68, guiTop + (tab == TAB_FILTER ? 202 : 168), 60, 16, ""));
 
         // 只在筛选页刷新：别的页签 searchField 是 null，进来会把 lastQuery 覆写成空串 ——
         // 那是「切个页签回来搜索词就丢了」的根源。筛选页自己的刷新交给 updateScreen 的轮询。
@@ -250,7 +257,9 @@ public class GuiIoNode extends FutaGuiContainer {
             prefixField.setText(joinPrefixes());
         }
 
-        buttonList.add(new FlatButton(BTN_CLEAR, guiLeft + 8, guiTop + 168, 60, 16, ""));
+        buttonList.add(new FlatButton(BTN_CLEAR, guiLeft + 8, guiTop + 202, 60, 16, ""));
+        buttonList.add(new FlatButton(BTN_WHITELIST_PREV, guiLeft + 8, guiTop + 180, 14, 16, "<"));
+        buttonList.add(new FlatButton(BTN_WHITELIST_NEXT, guiLeft + 174, guiTop + 180, 14, 16, ">"));
     }
 
     private void buildRateTab() {
@@ -304,6 +313,7 @@ public class GuiIoNode extends FutaGuiContainer {
         // 列表就会停在旧状态 —— 之前搜索「看起来失效」正是这里漏了排序方式，
         // 加上列表被 keyTyped 先清空，最后呈现为「打了字也没结果，点一下排序又有了」。
         if (built && now == revision
+            && filterRevision == currentFilter().getRevision()
             && query.equals(lastQuery)
             && fluidTab == fluidTabCache
             && sortMode == sortModeCache
@@ -312,6 +322,7 @@ public class GuiIoNode extends FutaGuiContainer {
         lastSearchConfiguration = searchConfiguration;
 
         revision = now;
+        filterRevision = currentFilter().getRevision();
         lastQuery = query;
         fluidTabCache = fluidTab;
         sortModeCache = sortMode;
@@ -361,6 +372,8 @@ public class GuiIoNode extends FutaGuiContainer {
 
     private void pushConfig() {
         if (!configReady()) return;
+        built = false;
+        whitelist.refresh(currentFilter(), fluidTab);
         try {
             NetworkHandler.INSTANCE.sendToServer(
                 PacketIoNodeConfig.update(
@@ -567,8 +580,8 @@ public class GuiIoNode extends FutaGuiContainer {
     /** 面板底和标题：这里在 {@code drawDefaultBackground} 之后、按钮之前，层次才对。 */
     @Override
     protected void drawGuiContainerBackgroundLayer(float partialTicks, int mouseX, int mouseY) {
-        drawRect(guiLeft, guiTop, guiLeft + GUI_WIDTH, guiTop + GUI_HEIGHT, 0xC0101010);
-        drawBorder(guiLeft, guiTop, GUI_WIDTH, GUI_HEIGHT, 0xFF808080);
+        drawRect(guiLeft, guiTop, guiLeft + GUI_WIDTH, guiTop + ySize, 0xC0101010);
+        drawBorder(guiLeft, guiTop, GUI_WIDTH, ySize, 0xFF808080);
         fontRendererObj.drawStringWithShadow(tr("futa_gtnh.gui.ionode.title"), guiLeft + 8, guiTop + 6, 0xFFFFFF);
     }
 
@@ -644,18 +657,15 @@ public class GuiIoNode extends FutaGuiContainer {
             fontRendererObj
                 .drawString(tr("futa_gtnh.gui.terminal.io.prefix.title"), guiLeft + 200, guiTop + 134, 0xC0C0C0);
         }
-        String summary = tr("futa_gtnh.gui.terminal.io.selected") + " "
-            + selectedCount()
-            + (currentFilter().isEmpty(fluidTab) ? tr("futa_gtnh.gui.terminal.io.no_filter") : "");
+        whitelist.refresh(currentFilter(), fluidTab);
+        String summary = tr("futa_gtnh.gui.terminal.io.whitelist.title") + " " + whitelist.size();
         fontRendererObj
-            .drawString(fontRendererObj.trimStringToWidth(summary, 184), guiLeft + 8, guiTop + 145, 0xA0A0A0);
-        fontRendererObj.drawString(
-            fontRendererObj.trimStringToWidth(
-                tr(viewSelected ? "futa_gtnh.gui.terminal.io.view.hint" : "futa_gtnh.gui.terminal.io.filter.hint"),
-                184),
-            guiLeft + 8,
-            guiTop + 156,
-            0x909090);
+            .drawString(fontRendererObj.trimStringToWidth(summary, 184), guiLeft + 8, guiTop + 145, 0xA0FFA0);
+        whitelist.draw(mc, fontRendererObj, itemRender, guiLeft + 8, guiTop + 158, mouseX, mouseY);
+        String pageLabel = (whitelist.page() + 1) + "/" + whitelist.pageCount();
+        fontRendererObj.drawString(pageLabel, guiLeft + 88, guiTop + 184, 0xA0A0A0);
+        setEnabled(BTN_WHITELIST_PREV, whitelist.page() > 0);
+        setEnabled(BTN_WHITELIST_NEXT, whitelist.page() + 1 < whitelist.pageCount());
     }
 
     private void drawFilterGrid(int mouseX, int mouseY) {
@@ -746,6 +756,16 @@ public class GuiIoNode extends FutaGuiContainer {
     private void drawTooltips(int mouseX, int mouseY) {
         if (tab != TAB_FILTER) return;
 
+        StorageViewEntry selected = whitelist.entryAt(mouseX, mouseY, guiLeft + 8, guiTop + 158);
+        if (selected != null) {
+            List<String> tooltip = new ArrayList<>(
+                selected.getDisplay()
+                    .getTooltip(mc.thePlayer, mc.gameSettings.advancedItemTooltips));
+            tooltip.add(tr("futa_gtnh.gui.terminal.io.whitelist.remove"));
+            drawHoveringText(tooltip, mouseX, mouseY, fontRendererObj);
+            return;
+        }
+
         int index = gridIndexAt(mouseX, mouseY);
         if (index < 0) return;
 
@@ -784,6 +804,11 @@ public class GuiIoNode extends FutaGuiContainer {
         }
 
         if (button.id != BTN_DONE && !configReady()) return;
+
+        if (button.id == BTN_WHITELIST_PREV || button.id == BTN_WHITELIST_NEXT) {
+            whitelist.movePage(button.id == BTN_WHITELIST_NEXT ? 1 : -1);
+            return;
+        }
 
         if (button.id == BTN_PREV_FACE || button.id == BTN_NEXT_FACE) {
             applyPrefixes();
@@ -874,6 +899,12 @@ public class GuiIoNode extends FutaGuiContainer {
         }
 
         if (tab != TAB_FILTER || mouseButton != 0 || !configReady()) return;
+
+        if (whitelist.removeAt(mouseX, mouseY, guiLeft + 8, guiTop + 158)) {
+            pushConfig();
+            refreshFilter();
+            return;
+        }
 
         int index = gridIndexAt(mouseX, mouseY);
         if (index < 0) return;

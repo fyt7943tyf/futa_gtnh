@@ -270,19 +270,47 @@ public final class ClientStorageCache {
         return key == null ? null : FLUID_LIMITS.get(key);
     }
 
+    /** 上限设置独立于库存；库存取空的条目也必须能继续查看、修改和取消。 */
+    public static synchronized List<StorageViewEntry> limitEntries(boolean fluid, boolean limitedOnly) {
+        List<StorageViewEntry> result = new ArrayList<>();
+        if (fluid) {
+            for (FluidKey key : FLUID_LIMITS.keySet()) {
+                StorageViewEntry entry = FLUID_INDEX.get(key);
+                if (entry == null) entry = StorageViewEntry.ofFluid(key, 0L);
+                if (entry != null) result.add(entry);
+            }
+            if (!limitedOnly) {
+                for (StorageViewEntry entry : FLUIDS) {
+                    if (!FLUID_LIMITS.containsKey(entry.getFluidKey())) result.add(entry);
+                }
+            }
+        } else {
+            for (ItemKey key : ITEM_LIMITS.keySet()) {
+                StorageViewEntry entry = ITEM_INDEX.get(key);
+                result.add(entry == null ? StorageViewEntry.ofItem(key, 0L) : entry);
+            }
+            if (!limitedOnly) {
+                for (StorageViewEntry entry : ITEMS) {
+                    if (!ITEM_LIMITS.containsKey(entry.getItemKey())) result.add(entry);
+                }
+            }
+        }
+        return result;
+    }
+
     /** 已满：设了上限且存量已经不低于它（自动化的东西再也进不来了）。 */
     public static synchronized boolean isItemFull(ItemKey key) {
         Long limit = getItemLimit(key);
         if (limit == null) return false;
         StorageViewEntry entry = key == null ? null : ITEM_INDEX.get(key);
-        return entry != null && entry.getAmount() >= limit.longValue();
+        return (entry == null ? 0L : entry.getAmount()) >= limit.longValue();
     }
 
     public static synchronized boolean isFluidFull(FluidKey key) {
         Long limit = getFluidLimit(key);
         if (limit == null) return false;
         StorageViewEntry entry = key == null ? null : FLUID_INDEX.get(key);
-        return entry != null && entry.getAmount() >= limit.longValue();
+        return (entry == null ? 0L : entry.getAmount()) >= limit.longValue();
     }
 
     // ==================================================================
@@ -385,6 +413,8 @@ public final class ClientStorageCache {
         FLUIDS.clear();
         ITEM_INDEX.clear();
         FLUID_INDEX.clear();
+        ITEM_LIMITS.clear();
+        FLUID_LIMITS.clear();
         incomingChunks = null;
         incomingReceived = 0;
         incomingTransferId = Integer.MIN_VALUE;

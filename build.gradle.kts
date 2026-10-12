@@ -52,6 +52,7 @@ tasks.named("check") {
     dependsOn(tasks.named("verifyBookmarkWithdrawal"))
     dependsOn(tasks.named("verifyTerminalSearch"))
     dependsOn(tasks.named("verifyTerminalNeiSearch"))
+    dependsOn(tasks.named("verifyStockControls"))
 }
 
 // Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.
@@ -143,6 +144,18 @@ tasks.register<JavaExec>("verifyDisassembler") {
     mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
     args("com.futa_gtnh.disassembler.DisassemblerRegression")
     classpath = files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
+tasks.register<JavaExec>("verifyStockControls") {
+    group = "verification"
+    description = "Checks excess stock persistence, manual/automation limits and paged IO whitelist removal"
+    dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.client.StockControlsRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 

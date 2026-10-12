@@ -24,6 +24,8 @@ import com.futa_gtnh.shared.ItemKey;
 public final class TerminalOutputFilter {
 
     private final Set<ItemKey> items = new HashSet<>();
+    /** 已选区域里明确取消的条目，优先于矿辞规则；重新选中即可恢复。 */
+    private final Set<ItemKey> excludedItems = new HashSet<>();
     private final Set<FluidKey> fluids = new HashSet<>();
     private final Set<Preset> presets = new HashSet<>();
     /** 自己敲的矿辞前缀，一律转小写保存。 */
@@ -36,7 +38,7 @@ public final class TerminalOutputFilter {
     private final Map<ItemKey, Boolean> itemCache = new HashMap<>();
     private int itemCacheRevision = -1;
 
-    int getRevision() {
+    public int getRevision() {
         return revision;
     }
 
@@ -71,6 +73,7 @@ public final class TerminalOutputFilter {
     public void toggleItem(ItemKey key) {
         if (key == null) return;
         if (!items.remove(key)) items.add(key);
+        excludedItems.remove(key);
         touch();
     }
 
@@ -78,6 +81,18 @@ public final class TerminalOutputFilter {
         if (key == null) return;
         if (!fluids.remove(key)) fluids.add(key);
         touch();
+    }
+
+    /** 删除操作保持幂等，重复点击或回包不会把刚删掉的条目重新加入。 */
+    public void removeItem(ItemKey key) {
+        if (items.remove(key)) {
+            excludedItems.add(key);
+            touch();
+        }
+    }
+
+    public void removeFluid(FluidKey key) {
+        if (fluids.remove(key)) touch();
     }
 
     public void togglePreset(Preset preset) {
@@ -113,6 +128,7 @@ public final class TerminalOutputFilter {
             fluids.clear();
         } else {
             items.clear();
+            excludedItems.clear();
             presets.clear();
             customPrefixes.clear();
         }
@@ -125,6 +141,7 @@ public final class TerminalOutputFilter {
 
     public void clear() {
         items.clear();
+        excludedItems.clear();
         fluids.clear();
         presets.clear();
         customPrefixes.clear();
@@ -141,6 +158,7 @@ public final class TerminalOutputFilter {
 
         ItemKey key = ItemKey.of(stack);
         if (key == null) return false;
+        if (excludedItems.contains(key)) return false;
         if (items.contains(key)) return true;
 
         if (itemCacheRevision != revision) {
@@ -238,6 +256,12 @@ public final class TerminalOutputFilter {
         }
         tag.setTag("items", itemList);
 
+        NBTTagList excludedList = new NBTTagList();
+        for (ItemKey key : excludedItems) {
+            excludedList.appendTag(key.writeToNbt());
+        }
+        tag.setTag("excludedItems", excludedList);
+
         NBTTagList fluidList = new NBTTagList();
         for (FluidKey key : fluids) {
             fluidList.appendTag(key.writeToNbt());
@@ -266,6 +290,12 @@ public final class TerminalOutputFilter {
         for (int i = 0; i < itemList.tagCount(); i++) {
             ItemKey key = ItemKey.readFromNbt(itemList.getCompoundTagAt(i));
             if (key != null) items.add(key);
+        }
+
+        NBTTagList excludedList = tag.getTagList("excludedItems", 10);
+        for (int i = 0; i < excludedList.tagCount(); i++) {
+            ItemKey key = ItemKey.readFromNbt(excludedList.getCompoundTagAt(i));
+            if (key != null && !items.contains(key)) excludedItems.add(key);
         }
 
         NBTTagList fluidList = tag.getTagList("fluids", 10);

@@ -67,6 +67,7 @@ public class GuiTerminalIo extends GuiScreen {
 
     private static final int GUI_WIDTH = 300;
     private static final int GUI_HEIGHT = 200;
+    private static final int FILTER_HEIGHT = 224;
 
     // ---- 按钮 id ----
     private static final int BTN_TAB_BASE = 0; // 0..2 页签
@@ -80,6 +81,8 @@ public class GuiTerminalIo extends GuiScreen {
     private static final int BTN_VIEW = 35; // 切换「全部 / 已选（白名单）」视图
     private static final int BTN_PRESET_BASE = 40; // 40..44
     private static final int BTN_RATE_BASE = 50; // 50..55：三行 × 减/加
+    private static final int BTN_WHITELIST_PREV = 60;
+    private static final int BTN_WHITELIST_NEXT = 61;
 
     private static final int TAB_FACES = 0;
     private static final int TAB_FILTER = 1;
@@ -143,6 +146,8 @@ public class GuiTerminalIo extends GuiScreen {
     private int lastMouseY;
 
     private final List<StorageViewEntry> shown = new ArrayList<>();
+    private final OutputWhitelistPanel whitelist = new OutputWhitelistPanel();
+    private int filterRevision = -1;
     private final List<GuiButton> faceModeButtons = new ArrayList<>();
 
     private String lastQuery = "\u0000";
@@ -228,7 +233,7 @@ public class GuiTerminalIo extends GuiScreen {
     public void initGui() {
         super.initGui();
         guiLeft = (width - GUI_WIDTH) / 2;
-        guiTop = (height - GUI_HEIGHT) / 2;
+        guiTop = (height - panelHeight()) / 2;
 
         // 每开一次界面重新记一遍诊断：写死成「一个进程只记一次」的话，
         // 第二次开界面就没有日志了（排查时正是要看第二次）
@@ -256,7 +261,8 @@ public class GuiTerminalIo extends GuiScreen {
             buildRateTab();
         }
 
-        buttonList.add(new FlatButton(BTN_DONE, guiLeft + GUI_WIDTH - 68, guiTop + 168, 60, 16, ""));
+        buttonList.add(
+            new FlatButton(BTN_DONE, guiLeft + GUI_WIDTH - 68, guiTop + (tab == TAB_FILTER ? 202 : 168), 60, 16, ""));
 
         // 只在筛选页刷新：别的页签 searchField 是 null，进来会把 lastQuery 覆写成空串 ——
         // 那是「切个页签回来搜索词就丢了」的根源。
@@ -314,7 +320,9 @@ public class GuiTerminalIo extends GuiScreen {
             prefixField.setText(joinPrefixes());
         }
 
-        buttonList.add(new FlatButton(BTN_CLEAR, guiLeft + 8, guiTop + 168, 60, 16, ""));
+        buttonList.add(new FlatButton(BTN_CLEAR, guiLeft + 8, guiTop + 202, 60, 16, ""));
+        buttonList.add(new FlatButton(BTN_WHITELIST_PREV, guiLeft + 8, guiTop + 180, 14, 16, "<"));
+        buttonList.add(new FlatButton(BTN_WHITELIST_NEXT, guiLeft + 174, guiTop + 180, 14, 16, ">"));
     }
 
     private void buildRateTab() {
@@ -368,6 +376,7 @@ public class GuiTerminalIo extends GuiScreen {
         // 排序方式、视图（全部/已选）、NEI 解析器配置。漏了哪一个，那一个变化后
         // 列表就会停在旧状态 —— 与 GuiIoNode 同一套修正。
         if (built && now == revision
+            && filterRevision == currentFilter().getRevision()
             && query.equals(lastQuery)
             && fluidTab == fluidTabCache
             && sortMode == sortModeCache
@@ -376,6 +385,7 @@ public class GuiTerminalIo extends GuiScreen {
         lastSearchConfiguration = searchConfiguration;
 
         revision = now;
+        filterRevision = currentFilter().getRevision();
         lastQuery = query;
         fluidTabCache = fluidTab;
         sortModeCache = sortMode;
@@ -425,6 +435,8 @@ public class GuiTerminalIo extends GuiScreen {
 
     private void pushConfig() {
         if (!configReady()) return;
+        built = false;
+        whitelist.refresh(currentFilter(), fluidTab);
         try {
             NetworkHandler.INSTANCE.sendToServer(
                 PacketStorageAction.nbt(
@@ -587,6 +599,10 @@ public class GuiTerminalIo extends GuiScreen {
         return StatCollector.translateToLocal(key);
     }
 
+    private int panelHeight() {
+        return tab == TAB_FILTER ? FILTER_HEIGHT : GUI_HEIGHT;
+    }
+
     // ==================================================================
     // 绘制
     // ==================================================================
@@ -595,8 +611,8 @@ public class GuiTerminalIo extends GuiScreen {
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         drawDefaultBackground();
 
-        drawRect(guiLeft, guiTop, guiLeft + GUI_WIDTH, guiTop + GUI_HEIGHT, 0xC0101010);
-        drawBorder(guiLeft, guiTop, GUI_WIDTH, GUI_HEIGHT, 0xFF808080);
+        drawRect(guiLeft, guiTop, guiLeft + GUI_WIDTH, guiTop + panelHeight(), 0xC0101010);
+        drawBorder(guiLeft, guiTop, GUI_WIDTH, panelHeight(), 0xFF808080);
         fontRendererObj.drawStringWithShadow(tr("futa_gtnh.gui.terminal.io.title"), guiLeft + 8, guiTop + 6, 0xFFFFFF);
 
         if (!configReady()) {
@@ -1281,18 +1297,15 @@ public class GuiTerminalIo extends GuiScreen {
             fontRendererObj
                 .drawString(tr("futa_gtnh.gui.terminal.io.prefix.title"), guiLeft + 200, guiTop + 134, 0xC0C0C0);
         }
-        String summary = tr("futa_gtnh.gui.terminal.io.selected") + " "
-            + selectedCount()
-            + (currentFilter().isEmpty(fluidTab) ? tr("futa_gtnh.gui.terminal.io.no_filter") : "");
+        whitelist.refresh(currentFilter(), fluidTab);
+        String summary = tr("futa_gtnh.gui.terminal.io.whitelist.title") + " " + whitelist.size();
         fontRendererObj
-            .drawString(fontRendererObj.trimStringToWidth(summary, 184), guiLeft + 8, guiTop + 145, 0xA0A0A0);
-        fontRendererObj.drawString(
-            fontRendererObj.trimStringToWidth(
-                tr(viewSelected ? "futa_gtnh.gui.terminal.io.view.hint" : "futa_gtnh.gui.terminal.io.filter.hint"),
-                184),
-            guiLeft + 8,
-            guiTop + 156,
-            0x909090);
+            .drawString(fontRendererObj.trimStringToWidth(summary, 184), guiLeft + 8, guiTop + 145, 0xA0FFA0);
+        whitelist.draw(mc, fontRendererObj, itemRender, guiLeft + 8, guiTop + 158, mouseX, mouseY);
+        String pageLabel = (whitelist.page() + 1) + "/" + whitelist.pageCount();
+        fontRendererObj.drawString(pageLabel, guiLeft + 88, guiTop + 184, 0xA0A0A0);
+        setEnabled(BTN_WHITELIST_PREV, whitelist.page() > 0);
+        setEnabled(BTN_WHITELIST_NEXT, whitelist.page() + 1 < whitelist.pageCount());
     }
 
     private void drawFilterGrid(int mouseX, int mouseY) {
@@ -1384,6 +1397,16 @@ public class GuiTerminalIo extends GuiScreen {
     private void drawTooltips(int mouseX, int mouseY) {
         if (tab != TAB_FILTER) return;
 
+        StorageViewEntry selected = whitelist.entryAt(mouseX, mouseY, guiLeft + 8, guiTop + 158);
+        if (selected != null) {
+            List<String> tooltip = new ArrayList<>(
+                selected.getDisplay()
+                    .getTooltip(mc.thePlayer, mc.gameSettings.advancedItemTooltips));
+            tooltip.add(tr("futa_gtnh.gui.terminal.io.whitelist.remove"));
+            drawHoveringText(tooltip, mouseX, mouseY, fontRendererObj);
+            return;
+        }
+
         int index = gridIndexAt(mouseX, mouseY);
         if (index < 0) return;
 
@@ -1424,6 +1447,11 @@ public class GuiTerminalIo extends GuiScreen {
         }
 
         if (button.id != BTN_DONE && !configReady()) return;
+
+        if (button.id == BTN_WHITELIST_PREV || button.id == BTN_WHITELIST_NEXT) {
+            whitelist.movePage(button.id == BTN_WHITELIST_NEXT ? 1 : -1);
+            return;
+        }
 
         if (button.id == BTN_SORT) {
             // 排序按钮只管排序：对现有结果就地重排，不重新过滤。
@@ -1531,6 +1559,12 @@ public class GuiTerminalIo extends GuiScreen {
         }
 
         if (tab != TAB_FILTER || mouseButton != 0 || !configReady()) return;
+
+        if (whitelist.removeAt(mouseX, mouseY, guiLeft + 8, guiTop + 158)) {
+            pushConfig();
+            refreshFilter();
+            return;
+        }
 
         int index = gridIndexAt(mouseX, mouseY);
         if (index < 0) return;

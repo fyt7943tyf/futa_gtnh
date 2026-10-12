@@ -86,6 +86,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
      * 避免和已有的按钮 id 撞车（撞了会直接按到别的按钮上）。
      */
     private static final int BTN_SEARCH_MODE = 12;
+    private static final int BTN_STORAGE_LIMITS = 13;
 
     private static final int TAB_ITEMS = 0;
     private static final int TAB_FLUIDS = 1;
@@ -288,10 +289,18 @@ public class GuiSharedTerminal extends FutaGuiContainer {
                     BTN_TERMINAL_IO,
                     guiLeft + 172,
                     guiTop + 5,
-                    56,
+                    27,
                     14,
-                    tr("futa_gtnh.gui.store.terminal_io")));
+                    tr("futa_gtnh.gui.store.terminal_io.short")));
         }
+        buttonList.add(
+            new GuiSmallButton(
+                BTN_STORAGE_LIMITS,
+                guiLeft + (container.getTerminal() == null ? 172 : 201),
+                guiTop + 5,
+                container.getTerminal() == null ? 56 : 27,
+                14,
+                tr("futa_gtnh.gui.limits.button")));
 
         updateTabStates();
         viewDirty = true;
@@ -692,7 +701,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         if (limitField == null) {
             limitField = new FutaSearchField(fontRendererObj, 0, 0, LIMIT_FIELD_W, 16);
         }
-        limitField.setMaxStringLength(18);
+        limitField.setMaxStringLength(19);
         Long current = entry.isFluid() ? ClientStorageCache.getFluidLimit(entry.getFluidKey())
             : ClientStorageCache.getItemLimit(entry.getItemKey());
         // 预填当前上限；没设过就预填现有存量 —— 大多数人想设的就是「别再多了」
@@ -1514,6 +1523,9 @@ public class GuiSharedTerminal extends FutaGuiContainer {
                 break;
             case BTN_TERMINAL_IO:
                 GuiTerminalIo.open(container);
+                break;
+            case BTN_STORAGE_LIMITS:
+                GuiStorageLimits.open(container);
                 break;
             case BTN_DRAIN:
                 container.sendDrainContainers();
