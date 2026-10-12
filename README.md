@@ -48,30 +48,27 @@ gradlew.bat build  rem 构建，产物在 build\libs\futa_gtnh-<版本>.jar
 
 开发客户端 / 服务端请用 `gradlew.bat runClient17` / `runServer17`（本项目使用 lwjgl3ify，不要用 `runClient`）。依赖、Mixin、目录结构等开发细节见 [README-开发环境.md](README-开发环境.md)。
 
-版本号只有一个来源：根目录的 `version.txt`，改它就行。
+版本号只有一个来源：根目录的 `version.txt`。正式发版时由 GitHub Actions 自动升版并写回；迭代构建保持版本不变。
 
 ## CI / CD（GitHub Actions）
 
 | Workflow | 触发条件 | 作用 |
 |---|---|---|
 | [CI 构建](.github/workflows/ci.yml) | push / PR 到 `main` | 编译并执行 Spotless、Checkstyle 检查，构建产物保留 7 天 |
-| [发版](.github/workflows/release.yml) | `version.txt` 变化推送到 `main`、推送 `v*` tag、手动触发 | 自动打 tag、创建 GitHub Release（自动生成变更日志）并附上 jar |
+| [发版](.github/workflows/release.yml) | Actions 页面手动触发，分支选择 `main` | 自动升版，构建检查通过后提交版本、创建 tag，附件核对完成后发布 Release |
 
 ### 发一个新版本
 
-日常发版只需两步：
+确认代码可以正式交付后：
 
-1. 把 `version.txt` 改成新版本号（例如 `1.5.0` → `1.5.1`）；
-2. 提交并推送到 `main`。
+1. 提交代码并推送到 `main`，等待 CI 通过；不手动修改版本。
+2. 打开 [Actions → 发版](https://github.com/fyt7943tyf/futa_gtnh/actions/workflows/release.yml)，点击 **Run workflow**，选择 `main` 和默认的 `patch`，保持“仅验证”关闭。
 
-发版 workflow 会自动检测到版本变化，创建 tag `v1.5.1` 并发布带 jar 的 Release。
+例如当前版本 `1.28.2`，工作流会自动准备 `1.28.3`，完成构建和检查后写回 `version.txt`、创建 `v1.28.3` 并发布带 JAR 的 Release。`minor` 和 `major` 分别增加次版本和主版本。
 
-需要手动控制时也有两种兜底方式（版本号必须与 `version.txt` 一致）：
+构建失败不会写回版本；写回成功但附件上传/发布失败时选择 `retry`，重建未发布 tag 的固定提交。已经发布的版本不能覆盖重发。只想验证发版流程时打开“仅验证”，产物会保存为 Actions artifact。
 
-```bash
-git tag v1.5.1 && git push origin v1.5.1   # 推 tag 触发
-# 或到 GitHub 仓库 Actions 页面手动运行「发版」workflow
-```
+详细规则与回退见 [GitHub 自动升版与正式发布](docs/GitHub自动升版与正式发布.md)。
 
 ## 目录结构
 

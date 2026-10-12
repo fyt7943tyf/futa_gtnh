@@ -84,7 +84,7 @@ GTNH 默认用 **Git tag** 当版本号。本项目不在 Git 仓库里，所以
 - `gradle.properties` 里设了 `gtnh.modules.gitVersion = false` 关掉 Git 版本推断；
 - 关掉后必须在构建脚本里提供版本号，`build.gradle.kts` 从 `version.txt` 读取，
   同时设置 `project.version`（决定 jar 文件名）和 `project.ext.modVersion`（RFG 内部要用）；
-- 只有一处需要维护：**改 `version.txt`**。
+- 版本唯一来源是 `version.txt`；迭代构建保持不变，正式发版由 [GitHub Actions 自动升版并写回](docs/GitHub自动升版与正式发布.md)。
 
 如果以后把项目放进 Git 仓库并打了 tag，可以删掉那行 `gtnh.modules.gitVersion = false` 恢复自动版本号。
 
