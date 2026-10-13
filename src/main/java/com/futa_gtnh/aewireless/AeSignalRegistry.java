@@ -96,7 +96,7 @@ public final class AeSignalRegistry {
         for (Map.Entry<Key, WeakReference<TileAeSignalTransmitter>> entry : TRANSMITTERS.entrySet()) {
             TileAeSignalTransmitter tile = entry.getValue()
                 .get();
-            if (tile == null || tile.getWorldObj() == null || tile.getWorldObj().isRemote) continue;
+            if (tile == null || tile.isInvalid() || tile.getWorldObj() == null || tile.getWorldObj().isRemote) continue;
             if (!AeSignalTeam.sameTeam(viewer, tile.getOwner())) continue;
             Key key = entry.getKey();
             result.add(new Entry(key.dim, key.x, key.y, key.z, displayName(tile), tile.getState()));

@@ -6,7 +6,7 @@ import java.util.List;
 
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.resources.I18n;
@@ -23,7 +23,9 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 
 import com.futa_gtnh.Config;
+import com.futa_gtnh.client.FutaGuiScreen;
 import com.futa_gtnh.client.KeyHandler;
+import com.futa_gtnh.client.ui.FutaIconButton;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketRtsBreak;
 import com.futa_gtnh.network.PacketRtsInteract;
@@ -65,7 +67,7 @@ import com.futa_gtnh.network.PacketRtsUndoRedo;
  * <b>顶栏布局</b>照 RTSBuilding 的规格移植（52px 栏、32×24 按钮、四态高亮、
  * 两行状态文字），图标用原版物品代替其自定义贴图。
  */
-public class GuiRtsOverlay extends GuiScreen {
+public class GuiRtsOverlay extends FutaGuiScreen {
 
     /** 按下后累计位移超过多少像素才算拖拽。 */
     private static final int DRAG_THRESHOLD_PIXELS = 4;
@@ -77,15 +79,6 @@ public class GuiRtsOverlay extends GuiScreen {
     private static final int BTN_Y = 4;
     private static final int BTN_GAP = 5;
     private static final int GROUP_GAP = 8;
-    private static final int TOP_BG = 0xC0101116;
-
-    // 按钮四态配色（照 QuickBuildStyle：active 亮绿边框是最醒目的识别色）
-    private static final int COL_IDLE_BG = 0xAA1F2329;
-    private static final int COL_IDLE_BORDER = 0xFF5B6673;
-    private static final int COL_HOVER_BG = 0xFF1D2530;
-    private static final int COL_HOVER_BORDER = 0xFF7A90AA;
-    private static final int COL_ACTIVE_BG = 0xFF2D6B47;
-    private static final int COL_ACTIVE_BORDER = 0xFF9AD2AE;
 
     /** 顶栏按钮。 */
     private static final class TopbarButton {
@@ -161,10 +154,23 @@ public class GuiRtsOverlay extends GuiScreen {
             if (b.type == TopbarButton.Type.REDO) b.x = this.width - 8 - BTN_W;
             if (b.type == TopbarButton.Type.UNDO) b.x = this.width - 8 - BTN_W * 2 - BTN_GAP;
         }
+        buttonList.clear();
+        for (int i = 0; i < buttons.size(); i++) {
+            TopbarButton button = buttons.get(i);
+            buttonList.add(new FutaIconButton(i, button.x, BTN_Y, BTN_W, BTN_H, "", button.icon));
+        }
         activeButton = -1;
         dragging = false;
         pressConsumed = false;
         paintTargetX = Integer.MIN_VALUE;
+    }
+
+    @Override
+    protected void actionPerformed(GuiButton button) {
+        if (button.id >= 0 && button.id < buttons.size()) {
+            TopbarButton control = buttons.get(button.id);
+            handleTopbarPress(control.x + BTN_W / 2, BTN_Y + BTN_H / 2);
+        }
     }
 
     @Override
@@ -384,7 +390,7 @@ public class GuiRtsOverlay extends GuiScreen {
         // 顶栏按钮：按下即生效（原版按钮语义）
         if (y < TOP_H) {
             pressConsumed = true;
-            handleTopbarPress(x, y);
+            super.mouseClicked(x, y, button);
             return;
         }
 
@@ -652,7 +658,7 @@ public class GuiRtsOverlay extends GuiScreen {
     }
 
     private void drawTopbar(int mouseX, int mouseY) {
-        drawRect(0, 0, this.width, TOP_H, TOP_BG);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(0, 0, this.width, TOP_H);
 
         RtsMode mode = RtsBuildPlanner.getMode();
         ItemStack held = RtsMode.showHeldItem(mode, this.mc.thePlayer);
@@ -673,10 +679,23 @@ public class GuiRtsOverlay extends GuiScreen {
                     active = false;
                     break;
             }
-            boolean hovered = mouseX >= b.x && mouseX < b.x + BTN_W && mouseY >= BTN_Y && mouseY < BTN_Y + BTN_H;
-            boolean pressed = hovered && activeButton == 0 && pressConsumed;
-            drawTopbarButton(b, hovered, active, pressed);
+            int index = buttons.indexOf(b);
+            FutaIconButton control = (FutaIconButton) buttonList.get(index);
+            control.active = active;
+            control.displayString = switch (b.type) {
+                case SHAPE -> I18n.format(
+                    RtsBuildPlanner.getShape()
+                        .langKey());
+                case FILL -> I18n.format(
+                    RtsBuildPlanner.getFill()
+                        .langKey());
+                case UNDO -> I18n.format("futa_gtnh.rts.topbar.undo");
+                case REDO -> I18n.format("futa_gtnh.rts.topbar.redo");
+                default -> "";
+            };
         }
+
+        super.drawScreen(mouseX, mouseY, 0);
 
         // --- 状态行 1：模式 + 手持物品（建造模式） ---------------------------
         String modeText = I18n.format("futa_gtnh.rts.hud.mode1", I18n.format(mode.langKey()));
@@ -712,45 +731,6 @@ public class GuiRtsOverlay extends GuiScreen {
             this.fontRendererObj
                 .drawStringWithShadow(warn, this.width - 8 - this.fontRendererObj.getStringWidth(warn), 44, 0xFFFF6E6E);
         }
-    }
-
-    private void drawTopbarButton(TopbarButton b, boolean hovered, boolean active, boolean pressed) {
-        int bg = pressed ? COL_ACTIVE_BG : (active ? COL_ACTIVE_BG : (hovered ? COL_HOVER_BG : COL_IDLE_BG));
-        int border = pressed ? COL_ACTIVE_BORDER
-            : (active ? COL_ACTIVE_BORDER : (hovered ? COL_HOVER_BORDER : COL_IDLE_BORDER));
-        drawRect(b.x, BTN_Y, b.x + BTN_W, BTN_Y + BTN_H, border);
-        drawRect(b.x + 1, BTN_Y + 1, b.x + BTN_W - 1, BTN_Y + BTN_H - 1, bg);
-
-        if (b.icon != null) {
-            // 16×16 物品图标在 32×24 按钮内居中
-            drawItemIcon(b.icon, b.x + 8, BTN_Y + 4);
-            return;
-        }
-
-        // 文字按钮：形状/填充显示当前值，撤销/重做显示固定标签
-        String text;
-        switch (b.type) {
-            case SHAPE:
-                text = I18n.format(
-                    RtsBuildPlanner.getShape()
-                        .langKey());
-                break;
-            case FILL:
-                text = I18n.format(
-                    RtsBuildPlanner.getFill()
-                        .langKey());
-                break;
-            case UNDO:
-                text = I18n.format("futa_gtnh.rts.topbar.undo");
-                break;
-            case REDO:
-                text = I18n.format("futa_gtnh.rts.topbar.redo");
-                break;
-            default:
-                text = "";
-                break;
-        }
-        drawScaledCenteredText(text, b.x + BTN_W / 2.0F, BTN_Y + BTN_H / 2.0F - 3, 0.75F, 0xFFD8E3EE);
     }
 
     /** 模式切换的大字提示：屏幕中上方 2 秒渐隐（1.3.0 切换零反馈的反面）。 */

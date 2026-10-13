@@ -190,3 +190,25 @@ tasks.named<Jar>("jar") {
         into("META-INF/licenses/gtnl/source")
     }
 }
+
+tasks.register<JavaExec>("verifyAeIntegration") {
+    group = "verification"
+    description = "Checks ME dock conservation, simulation, fluid NBT, detached handles and network text limits"
+    dependsOn(compileReadApiChecks, compileTerminalClickChecks, extractTerminalClickLwjgl)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.medock.AeIntegrationRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifyAeIntegration") }
+
+// Real GL/integrated-server screenshots, deliberately excluded from normal build/CI and release jars.
+if (providers.gradleProperty("uiSmoke").isPresent) {
+    tasks.withType<JavaExec>().matching { it.name == "runClient17" }.configureEach {
+        dependsOn(compileReadApiChecks)
+        classpath += files(compileReadApiChecks.flatMap { it.destinationDirectory })
+        systemProperty("futa.uiSmoke", "true")
+    }
+}

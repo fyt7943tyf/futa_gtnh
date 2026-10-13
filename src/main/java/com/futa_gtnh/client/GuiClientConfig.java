@@ -27,7 +27,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  *
  * <p>
  * <b>界面形态</b>参照 EZMiner 的配置面板（深色三层 drawRect + 分组小标题 +
- * 左标签右开关），控件走原版 {@link GuiButton}；七个开关一屏放得下，不需要滚动。
+ * 左标签右开关），控件由 MUI2 控件树绘制并处理点击，{@link GuiButton} 仅保存业务数据；七个开关一屏放得下，不需要滚动。
  *
  * <p>
  * <b>生效方式</b>是两步的（同 EZMiner）：点开关只改界面上的工作副本，
@@ -42,7 +42,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  * 本类，参数作 ESC 的返回目标）。
  */
 @SideOnly(Side.CLIENT)
-public class GuiClientConfig extends GuiScreen {
+public class GuiClientConfig extends FutaGuiScreen {
 
     private static final int GUI_WIDTH = 290;
     private static final int TITLE_H = 24;
@@ -173,15 +173,18 @@ public class GuiClientConfig extends GuiScreen {
     private int guiLeft;
     private int guiTop;
     private int panelHeight;
+    private int rowHeight = ROW_H;
 
     @Override
     public void initGui() {
         super.initGui();
         buttonList.clear();
 
+        int fixedHeight = TITLE_H + SECTIONS.length * SECTION_H + HINT_H + BOTTOM_H + PAD * 2;
+        rowHeight = Math.max(BUTTON_H, Math.min(ROW_H, (height - fixedHeight - 8) / TOGGLE_COUNT));
         int contentH = TITLE_H;
         for (Section section : SECTIONS) {
-            contentH += SECTION_H + section.toggleIds.length * ROW_H;
+            contentH += SECTION_H + section.toggleIds.length * rowHeight;
         }
         contentH += HINT_H + BOTTOM_H + PAD * 2;
         panelHeight = contentH;
@@ -196,11 +199,11 @@ public class GuiClientConfig extends GuiScreen {
                     new GuiButton(
                         BTN_TOGGLE_BASE + toggleId,
                         guiLeft + GUI_WIDTH - PAD - BUTTON_W,
-                        y + (ROW_H - BUTTON_H) / 2,
+                        y + (rowHeight - BUTTON_H) / 2,
                         BUTTON_W,
                         BUTTON_H,
                         boolLabel(values[toggleId])));
-                y += ROW_H;
+                y += rowHeight;
             }
         }
 
@@ -307,8 +310,7 @@ public class GuiClientConfig extends GuiScreen {
 
         // 深色面板三层叠（EZMiner 同款）：外阴影 → 面板 → 内衬，顶上一条强调线
         drawRect(guiLeft - 3, guiTop - 3, guiLeft + GUI_WIDTH + 3, guiTop + panelHeight + 3, COLOR_SHADOW);
-        drawRect(guiLeft, guiTop, guiLeft + GUI_WIDTH, guiTop + panelHeight, COLOR_PANEL);
-        drawRect(guiLeft + 1, guiTop + 1, guiLeft + GUI_WIDTH - 1, guiTop + panelHeight - 1, COLOR_INNER);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(guiLeft, guiTop, GUI_WIDTH, panelHeight);
         drawRect(guiLeft + 1, guiTop + 1, guiLeft + GUI_WIDTH - 1, guiTop + 3, COLOR_ACCENT);
 
         String title = tr("title");
@@ -334,12 +336,12 @@ public class GuiClientConfig extends GuiScreen {
 
             for (int toggleId : section.toggleIds) {
                 fontRendererObj
-                    .drawStringWithShadow(tr(NAME_KEYS[toggleId]), guiLeft + 14, y + (ROW_H - 8) / 2, 0xFFFFFF);
-                y += ROW_H;
+                    .drawStringWithShadow(tr(NAME_KEYS[toggleId]), guiLeft + 14, y + (rowHeight - 8) / 2, 0xFFFFFF);
+                y += rowHeight;
             }
         }
 
-        fontRendererObj.drawString(tr("hint"), guiLeft + PAD + 2, guiTop + panelHeight - PAD - BOTTOM_H - 2, 0x707070);
+        fontRendererObj.drawString(tr("hint"), guiLeft + PAD + 2, guiTop + panelHeight - PAD - BOTTOM_H - 2, 0xB0B0B0);
 
         super.drawScreen(mouseX, mouseY, partialTicks);
         drawTooltipForHover(mouseX, mouseY);
@@ -361,12 +363,12 @@ public class GuiClientConfig extends GuiScreen {
         for (Section section : SECTIONS) {
             y += SECTION_H;
             for (int toggleId : section.toggleIds) {
-                if (mouseY >= y && mouseY < y + ROW_H
+                if (mouseY >= y && mouseY < y + rowHeight
                     && mouseX >= guiLeft + PAD
                     && mouseX < guiLeft + GUI_WIDTH - PAD) {
                     return toggleId;
                 }
-                y += ROW_H;
+                y += rowHeight;
             }
         }
         return -1;

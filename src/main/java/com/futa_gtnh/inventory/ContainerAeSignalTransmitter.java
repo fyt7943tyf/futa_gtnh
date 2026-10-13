@@ -4,6 +4,7 @@ import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.Container;
 import net.minecraft.inventory.ICrafting;
+import net.minecraft.inventory.Slot;
 
 import com.futa_gtnh.aewireless.TileAeSignalTransmitter;
 import com.futa_gtnh.network.NetworkHandler;
@@ -26,6 +27,15 @@ public class ContainerAeSignalTransmitter extends Container {
         this.x = tile.xCoord;
         this.y = tile.yCoord;
         this.z = tile.zCoord;
+        // Right-click item reconciliation expects every hotbar slot to exist, even in a configuration GUI.
+        for (int row = 0; row < 3; row++) {
+            for (int column = 0; column < 9; column++) {
+                addSlotToContainer(new Slot(player.inventory, 9 + row * 9 + column, -3000, -3000));
+            }
+        }
+        for (int column = 0; column < 9; column++) {
+            addSlotToContainer(new Slot(player.inventory, column, -3000, -3000));
+        }
     }
 
     public int dim() {
@@ -46,7 +56,15 @@ public class ContainerAeSignalTransmitter extends Container {
 
     @Override
     public boolean canInteractWith(EntityPlayer player) {
-        return player.worldObj.provider.dimensionId == dim && player.getDistanceSq(x + 0.5, y + 0.5, z + 0.5) <= 64;
+        return player != null && !tile.isInvalid()
+            && player.worldObj == tile.getWorldObj()
+            && player.worldObj.getTileEntity(x, y, z) == tile
+            && player.getDistanceSq(x + 0.5, y + 0.5, z + 0.5) <= 64
+            && tile.canManage(player);
+    }
+
+    public boolean matches(int dimension, int posX, int posY, int posZ) {
+        return dim == dimension && x == posX && y == posY && z == posZ;
     }
 
     /** 服务端：每 20 tick 给界面上每个玩家补一份快照（状态变化靠它刷出来）。 */

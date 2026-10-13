@@ -80,6 +80,9 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
     /** 放容器物品的槽。 */
     public static final int SLOT_CONTAINER = 0;
 
+    private static final gregtech.api.interfaces.IIconContainer DOCK_ICON = gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
+        .create("futa_gtnh", "me_super_dock");
+
     private AENetworkProxy proxy;
     private int priority = 0;
     private boolean handlersDirty = true;
@@ -101,6 +104,11 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
 
     private MTEAeSuperDock(String name, int tier, String[] description, ITexture[][][] textures) {
         super(name, tier, 1, description, textures);
+    }
+
+    @Override
+    protected boolean forceUseMui2() {
+        return true;
     }
 
     @Override
@@ -144,6 +152,15 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
     @Override
     public boolean isValidSlot(int slot) {
         return slot == SLOT_CONTAINER;
+    }
+
+    @Override
+    public int getInventoryStackLimit() {
+        return 1;
+    }
+
+    private boolean isDocked(ItemStack stack) {
+        return stack != null && stack == containerStack() && stack.stackSize == 1;
     }
 
     /** 界面专用槽，不吃自动化（内容进出全部走 ME 网络）。 */
@@ -354,7 +371,7 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
 
         @Override
         public IAEItemStack injectItems(IAEItemStack input, Actionable mode, BaseActionSource src) {
-            if (input == null || input.getStackSize() <= 0) return input;
+            if (!isDocked(docked) || input == null || input.getStackSize() <= 0) return input;
             ItemStack prototype = prototype();
             long count = count();
             boolean empty = prototype == null || count <= 0;
@@ -371,7 +388,7 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
 
         @Override
         public IAEItemStack extractItems(IAEItemStack request, Actionable mode, BaseActionSource src) {
-            if (request == null || request.getStackSize() <= 0) return null;
+            if (!isDocked(docked) || request == null || request.getStackSize() <= 0) return null;
             ItemStack prototype = prototype();
             long count = count();
             if (prototype == null || count <= 0) return null;
@@ -389,6 +406,7 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
 
         @Override
         public IItemList<IAEItemStack> getAvailableItems(IItemList<IAEItemStack> out, int iteration) {
+            if (!isDocked(docked)) return out;
             ItemStack prototype = prototype();
             long count = count();
             if (prototype != null && count > 0) {
@@ -442,20 +460,25 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
 
         @Override
         public IAEFluidStack injectItems(IAEFluidStack input, Actionable mode, BaseActionSource src) {
-            if (input == null || input.getStackSize() <= 0) return input;
+            if (!isDocked(docked) || input == null || input.getStackSize() <= 0) return input;
             FluidStack contents = contents();
             Fluid inputFluid = input.getFluid();
             if (inputFluid == null) return input;
             Fluid locked = lockedFluid();
             if (locked != null && locked != inputFluid) return input;
-            if (contents != null && contents.getFluid() != inputFluid) return input;
+            if (contents != null && !contents.isFluidEqual(input.getFluidStack())) return input;
             long current = contents == null ? 0 : contents.amount;
             long space = capacity() - current;
             long accepted = Math.min(Math.max(0, space), input.getStackSize());
             if (accepted <= 0) return input;
             if (mode == Actionable.MODULATE) {
                 FluidStack next = new FluidStack(inputFluid, (int) Math.min(current + accepted, Integer.MAX_VALUE));
-                if (contents != null && contents.tag != null) next.tag = contents.tag;
+                FluidStack source = contents == null ? input.getFluidStack() : contents;
+                if (source.tag != null) next.tag = (NBTTagCompound) source.tag.copy();
+                if (docked.stackTagCompound != null && docked.stackTagCompound.getBoolean("mLockFluid")
+                    && locked == null) {
+                    docked.stackTagCompound.setString("lockedFluidName", inputFluid.getName());
+                }
                 write(next);
             }
             if (accepted >= input.getStackSize()) return null;
@@ -466,9 +489,9 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
 
         @Override
         public IAEFluidStack extractItems(IAEFluidStack request, Actionable mode, BaseActionSource src) {
-            if (request == null || request.getStackSize() <= 0) return null;
+            if (!isDocked(docked) || request == null || request.getStackSize() <= 0) return null;
             FluidStack contents = contents();
-            if (contents == null || contents.getFluid() != request.getFluid()) return null;
+            if (contents == null || !contents.isFluidEqual(request.getFluidStack())) return null;
             long taken = Math.min(contents.amount, request.getStackSize());
             if (taken <= 0) return null;
             if (mode == Actionable.MODULATE) {
@@ -484,6 +507,7 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
 
         @Override
         public IItemList<IAEFluidStack> getAvailableItems(IItemList<IAEFluidStack> out, int iteration) {
+            if (!isDocked(docked)) return out;
             FluidStack contents = contents();
             if (contents != null) {
                 IAEFluidStack stored = AEFluidStack.create(contents);
@@ -580,10 +604,7 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
         boolean active, boolean redstone) {
         ITexture casing = Textures.BlockIcons.MACHINE_CASINGS[1][color + 1];
         if (side == facing) {
-            return new ITexture[] { casing,
-                TextureFactory.of(
-                    active ? Textures.BlockIcons.OVERLAY_ME_FLUID_HATCH_ACTIVE
-                        : Textures.BlockIcons.OVERLAY_ME_FLUID_HATCH) };
+            return new ITexture[] { casing, TextureFactory.of(DOCK_ICON) };
         }
         return new ITexture[] { casing };
     }

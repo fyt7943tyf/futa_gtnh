@@ -58,7 +58,7 @@ import com.futa_gtnh.shared.ItemKey;
  * 发回服务端（{@code SET_TERMINAL_IO}），服务端立刻回一份权威值覆盖本地。
  * 界面<b>不新建容器</b>：终端界面那个容器一直开着，关掉这里就回到终端界面。
  */
-public class GuiTerminalIo extends GuiScreen {
+public class GuiTerminalIo extends FutaGuiScreen {
 
     /** {@code GL_CONSTANT_COLOR}：混合因子取 {@code glBlendColor} 设的常量色（LWJGL 没导出这两个）。 */
     private static final int GL_CONSTANT_COLOR = 0x8001;
@@ -170,51 +170,10 @@ public class GuiTerminalIo extends GuiScreen {
      * 这里直接画自己的底：普通态深灰、悬停态提亮、选中态绿色填充 + 亮边，
      * 一眼就能分清「能点」「正指着」「就是它」。
      */
-    private final class FlatButton extends GuiButton {
-
-        /** 选中态（当前页签 / 当前方向 / 已勾选的预设）。 */
-        private boolean marked;
+    private final class FlatButton extends com.futa_gtnh.client.ui.FutaMarkedButton {
 
         private FlatButton(int id, int x, int y, int width, int height, String label) {
             super(id, x, y, width, height, label);
-        }
-
-        private void setMarked(boolean value) {
-            this.marked = value;
-        }
-
-        @Override
-        public void drawButton(net.minecraft.client.Minecraft mc, int mouseX, int mouseY) {
-            if (!this.visible) return;
-
-            boolean hovered = mouseX >= this.xPosition && mouseY >= this.yPosition
-                && mouseX < this.xPosition + this.width
-                && mouseY < this.yPosition + this.height;
-
-            int fill;
-            int edge;
-            if (marked) {
-                fill = hovered ? 0xFF3E8E45 : 0xFF2E6B34;
-                edge = 0xFF7BE38A;
-            } else {
-                fill = hovered ? 0xFF4C4C4C : 0xFF333333;
-                edge = 0xFF6E6E6E;
-            }
-
-            drawRect(this.xPosition, this.yPosition, this.xPosition + this.width, this.yPosition + this.height, fill);
-            drawBorder(this.xPosition, this.yPosition, this.width, this.height, edge);
-
-            // 画字之前把状态显式复位：drawRect 会把当前颜色留在它设的填充色上，
-            // 而这些扁平按钮是自己画的，不能像原版按钮那样指望别人替你收拾干净。
-            GL11.glEnable(GL11.GL_TEXTURE_2D);
-            GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
-            String label = this.displayString == null ? "" : this.displayString;
-            fontRendererObj.drawStringWithShadow(
-                label,
-                this.xPosition + (this.width - fontRendererObj.getStringWidth(label)) / 2,
-                this.yPosition + (this.height - 8) / 2,
-                0xFFFFFF);
-            GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
         }
     }
 
@@ -315,7 +274,12 @@ public class GuiTerminalIo extends GuiScreen {
         }
 
         if (!fluidTab) {
-            prefixField = new GuiTextField(fontRendererObj, guiLeft + 200, guiTop + 146, 92, 16);
+            prefixField = new com.futa_gtnh.client.widget.FutaSearchField(
+                fontRendererObj,
+                guiLeft + 200,
+                guiTop + 146,
+                92,
+                16);
             prefixField.setMaxStringLength(64);
             prefixField.setText(joinPrefixes());
         }
@@ -611,7 +575,7 @@ public class GuiTerminalIo extends GuiScreen {
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         drawDefaultBackground();
 
-        drawRect(guiLeft, guiTop, guiLeft + GUI_WIDTH, guiTop + panelHeight(), 0xC0101010);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(guiLeft, guiTop, GUI_WIDTH, panelHeight());
         drawBorder(guiLeft, guiTop, GUI_WIDTH, panelHeight(), 0xFF808080);
         fontRendererObj.drawStringWithShadow(tr("futa_gtnh.gui.terminal.io.title"), guiLeft + 8, guiTop + 6, 0xFFFFFF);
 

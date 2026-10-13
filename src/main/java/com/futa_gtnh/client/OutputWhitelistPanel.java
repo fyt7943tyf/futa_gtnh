@@ -89,7 +89,8 @@ final class OutputWhitelistPanel extends Gui {
         for (int col = 0; col < COLS; col++) {
             int x = left + col * CELL;
             boolean hovered = mouseX >= x && mouseX < x + CELL && mouseY >= top && mouseY < top + CELL;
-            drawRect(x, top, x + CELL, top + CELL, hovered ? 0x90633333 : 0x60306030);
+            com.futa_gtnh.client.ui.FutaUiTheme.slot(x, top);
+            if (hovered) drawRect(x, top, x + CELL, top + CELL, 0x40633333);
             drawRect(x, top, x + CELL, top + 1, 0xFF55AA55);
         }
         RenderHelper.enableGUIStandardItemLighting();

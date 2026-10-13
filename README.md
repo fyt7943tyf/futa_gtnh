@@ -36,10 +36,12 @@
 
 1. 前往 [Releases](https://github.com/fyt7943tyf/futa_gtnh/releases) 下载最新的 `futa_gtnh-<版本>.jar`；
 2. 放进 GTNH 整合包的 `mods/` 文件夹，**客户端与服务端都要装**；
-3. 硬性前置：**GregTech（GT5-Unofficial）**、**lwjgl3ify** —— GTNH 整合包自带，无需额外操作；
+3. 硬性前置：**GregTech（GT5-Unofficial）**、**lwjgl3ify**、**ModularUI2 2.3.89-1.7.10+** —— 对应 GTNH 整合包自带；
 4. 可选联动（装了自动增强，不装不影响运行）：NEI、NotEnoughCharacters（拼音搜索）、MouseTweaks、Tinkers' Construct、Baubles-Expanded、LootGames 2.2.14+、Enhanced LootBags、Vending Machine、Applied Energistics 2（共享背包存储元件，见[共享背包文档](README-共享背包.md)）。
 
 ## 从源码构建
+
+1.29.1 的游戏内 MUI2 控件迁移、GT/AE 贴图预览与验证记录见 [改动与交付说明](docs/1.29.1-改动与交付说明.md)。
 
 环境要求：**JDK 17+**（推荐 JDK 25，与 CI 保持一致）。
 

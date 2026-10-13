@@ -5,7 +5,6 @@ import java.util.List;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.util.StatCollector;
 
@@ -18,7 +17,7 @@ import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageAction;
 
 /** 全服库存上限管理；只编辑设置，不改存量，手动存入仍允许超限。 */
-public class GuiStorageLimits extends GuiScreen {
+public class GuiStorageLimits extends FutaGuiScreen {
 
     private static final int GUI_WIDTH = 300;
     private static final int GUI_HEIGHT = 224;
@@ -157,7 +156,7 @@ public class GuiStorageLimits extends GuiScreen {
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         drawDefaultBackground();
-        drawRect(left, top, left + GUI_WIDTH, top + GUI_HEIGHT, 0xEE181818);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(left, top, GUI_WIDTH, GUI_HEIGHT);
         fontRendererObj.drawStringWithShadow(tr("limits.title"), left + 8, top + 6, 0xFFFFFF);
         super.drawScreen(mouseX, mouseY, partialTicks);
         drawField(search, left + 8, top + 48, 144);

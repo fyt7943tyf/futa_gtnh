@@ -158,12 +158,13 @@ public class CommonProxy {
         GameRegistry.registerItem(aeSignalReceiverCover, ItemAeSignalReceiverCover.NAME);
         FutaGtnhMod.aeSignalReceiverCover = aeSignalReceiverCover;
 
+        gregtech.api.interfaces.ITexture wirelessCoverTexture = gregtech.api.render.TextureFactory.of(
+            gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
+                .create("futa_gtnh", "ae_signal_receiver_cover"));
         gregtech.api.covers.CoverRegistry.registerCover(
             new ItemStack(aeSignalReceiverCover),
-            gregtech.api.render.TextureFactory.of(gregtech.api.enums.Textures.BlockIcons.OVERLAY_CONTROLLER),
-            context -> new CoverAeSignalReceiver(
-                context,
-                gregtech.api.render.TextureFactory.of(gregtech.api.enums.Textures.BlockIcons.OVERLAY_CONTROLLER)),
+            wirelessCoverTexture,
+            context -> new CoverAeSignalReceiver(context, wirelessCoverTexture),
             gregtech.api.covers.CoverPlacer.builder()
                 .onlyPlaceIf(CoverAeSignalReceiver::isCoverPlaceable)
                 .build());

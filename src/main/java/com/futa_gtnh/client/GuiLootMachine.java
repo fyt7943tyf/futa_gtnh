@@ -8,12 +8,10 @@ import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumChatFormatting;
-import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.StatCollector;
 
 import org.lwjgl.opengl.GL11;
 
-import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.block.TileEntityLootMachine;
 import com.futa_gtnh.inventory.ContainerLootMachine;
 import com.futa_gtnh.lootbag.EnhancedLootBagsCompat;
@@ -57,10 +55,6 @@ public class GuiLootMachine extends FutaGuiContainer {
     public boolean hideNeiItemPanel() {
         return false;
     }
-
-    private static final ResourceLocation TEXTURE = new ResourceLocation(
-        FutaGtnhMod.MODID,
-        "textures/gui/loot_machine.png");
 
     // 出货网格 9x4=36 格。GUI 贴图画布是 256x256（原版约定），面板高度压在 256
     // 以内，网格因此从 5 行缩到 4 行；超出的结果走「…还有 N 组」截断提示。
@@ -228,15 +222,23 @@ public class GuiLootMachine extends FutaGuiContainer {
     @Override
     protected void drawGuiContainerBackgroundLayer(float partialTicks, int mouseX, int mouseY) {
         GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
-        mc.getTextureManager()
-            .bindTexture(TEXTURE);
-        drawTexturedModalRect(guiLeft, guiTop, 0, 0, xSize, ySize);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(guiLeft, guiTop, xSize, ySize);
+        for (Object value : inventorySlots.inventorySlots) {
+            net.minecraft.inventory.Slot slot = (net.minecraft.inventory.Slot) value;
+            com.futa_gtnh.client.ui.FutaUiTheme
+                .slot(guiLeft + slot.xDisplayPosition - 1, guiTop + slot.yDisplayPosition - 1);
+        }
+        for (int row = 0; row < GRID_ROWS; row++) {
+            for (int col = 0; col < GRID_COLS; col++) {
+                com.futa_gtnh.client.ui.FutaUiTheme.slot(guiLeft + GRID_X + col * 18, guiTop + GRID_Y + row * 18);
+            }
+        }
     }
 
     @Override
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         // 标题与「物品栏」标签都按原版容器（GuiChest）的样式：左对齐、深灰、无阴影
-        fontRendererObj.drawString(StatCollector.translateToLocal("container.futa_gtnh.loot_machine"), 8, 6, 0x404040);
+        fontRendererObj.drawString(StatCollector.translateToLocal("container.futa_gtnh.loot_machine"), 8, 6, 0xE0E0E0);
 
         // 输入槽右边的两行状态：时运等级 / 剩余机会（槽位格 y=22..40，文字贴右排）
         int fortune = currentFortune();
@@ -244,7 +246,7 @@ public class GuiLootMachine extends FutaGuiContainer {
             StatCollector.translateToLocalFormatted("futa_gtnh.loot_machine.gui.fortune", roman(fortune)),
             STATUS_X,
             24,
-            fortune > 0 ? 0x2C5BA8 : 0x404040);
+            fortune > 0 ? 0x96C4F0 : 0xE0E0E0);
 
         int rollsLeft = ClientLootMachineState.getRollsMax() - ClientLootMachineState.getRollsUsed();
         fontRendererObj.drawString(
@@ -269,18 +271,18 @@ public class GuiLootMachine extends FutaGuiContainer {
                 + EnumChatFormatting.RED
                 + StatCollector.translateToLocal("futa_gtnh.loot_machine.gui.token_unavailable");
         }
-        fontRendererObj.drawString(tokenLine, 8, TOKEN_LINE_Y, 0x404040);
+        fontRendererObj.drawString(tokenLine, 8, TOKEN_LINE_Y, 0xE0E0E0);
 
         // 玩家背包标签（原版文案「物品栏」）；截断提示挂在同一行右对齐
         String invLabel = StatCollector.translateToLocal("container.inventory");
-        fontRendererObj.drawString(invLabel, 8, INV_LABEL_Y, 0x404040);
+        fontRendererObj.drawString(invLabel, 8, INV_LABEL_Y, 0xE0E0E0);
 
         ItemStack[] stacks = ClientLootMachineState.getSelectedStacks();
         if (stacks.length > GRID_CELLS) {
             String truncation = EnumChatFormatting.RED + StatCollector
                 .translateToLocalFormatted("futa_gtnh.loot_machine.gui.truncated", stacks.length - GRID_CELLS);
             fontRendererObj
-                .drawString(truncation, xSize - 8 - fontRendererObj.getStringWidth(truncation), INV_LABEL_Y, 0x404040);
+                .drawString(truncation, xSize - 8 - fontRendererObj.getStringWidth(truncation), INV_LABEL_Y, 0xE0E0E0);
         }
     }
 

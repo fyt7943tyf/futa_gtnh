@@ -299,14 +299,17 @@ public class ClientFeatureButtonOverlay {
         return null;
     }
 
-    /** 16×16 图标按钮：自绘贴图 + 悬停提亮，风格与 EZMiner 的 TexturedButton 一致。 */
+    /** 16×16 设置入口：MUI2 主题和可由资源包替换的齿轮图标。 */
     private static final class TexturedButton extends GuiButton {
 
-        private final ResourceLocation texture;
+        private final com.cleanroommc.modularui.drawable.UITexture texture;
 
         TexturedButton(int id, int x, int y, ResourceLocation texture) {
             super(id, x, y, BTN_SIZE, BTN_SIZE, "");
-            this.texture = texture;
+            this.texture = com.cleanroommc.modularui.drawable.UITexture.builder()
+                .location(texture)
+                .imageSize(32, 32)
+                .build();
         }
 
         @Override
@@ -316,27 +319,8 @@ public class ClientFeatureButtonOverlay {
                 && mouseX < xPosition + width
                 && mouseY < yPosition + height;
 
-            GL11.glEnable(GL11.GL_BLEND);
-            GL11.glDisable(GL11.GL_TEXTURE_2D);
-            if (hovered) {
-                // 悬停时铺一层 13% 白（与 EZMiner 的 hover 效果一致）
-                drawRect(xPosition, yPosition, xPosition + width, yPosition + height, 0x22FFFFFF);
-            }
-            GL11.glEnable(GL11.GL_TEXTURE_2D);
-            GL11.glColor4f(1f, 1f, 1f, hovered ? 1f : 0.85f);
-
-            minecraft.getTextureManager()
-                .bindTexture(texture);
-            Tessellator tessellator = Tessellator.instance;
-            tessellator.startDrawingQuads();
-            tessellator.addVertexWithUV(xPosition, yPosition + height, zLevel, 0, 1);
-            tessellator.addVertexWithUV(xPosition + width, yPosition + height, zLevel, 1, 1);
-            tessellator.addVertexWithUV(xPosition + width, yPosition, zLevel, 1, 0);
-            tessellator.addVertexWithUV(xPosition, yPosition, zLevel, 0, 0);
-            tessellator.draw();
-
-            GL11.glDisable(GL11.GL_BLEND);
-            GL11.glColor4f(1f, 1f, 1f, 1f);
+            com.futa_gtnh.client.ui.FutaUiTheme.button(xPosition, yPosition, width, height, hovered);
+            texture.draw(xPosition + 1, yPosition + 1, width - 2, height - 2);
         }
     }
 

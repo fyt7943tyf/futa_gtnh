@@ -102,6 +102,16 @@ public class ClientProxy extends CommonProxy {
         // 这时候（LoadComplete）NEI 刚把各模组的配方处理器注册完，
         // 是开始建网页配方索引的最早时机（更早读到的是一张空表）
         com.futa_gtnh.web.WebRecipeService.lateInit();
+        // Optional development-only harness; its classes are never included in the mod jar.
+        if (Boolean.getBoolean("futa.uiSmoke")) {
+            try {
+                Class.forName("com.futa_gtnh.client.UiSmokeCheck")
+                    .getMethod("register")
+                    .invoke(null);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException("Cannot start UI smoke checks", e);
+            }
+        }
     }
 
     /**

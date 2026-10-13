@@ -38,6 +38,7 @@ public class ModEventHandler {
     @SubscribeEvent
     public void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        com.futa_gtnh.network.ServerActions.tick();
         SharedStorageManager.onServerTick();
         // 推进寻物扫描。没有任务时它第一件事就是返回，开销是一次 isEmpty()
         LocatorManager.onServerTick();

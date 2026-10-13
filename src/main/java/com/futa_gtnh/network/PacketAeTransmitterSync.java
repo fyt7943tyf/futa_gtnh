@@ -88,10 +88,7 @@ public class PacketAeTransmitterSync implements IMessage {
     }
 
     private static String trimTo(String value, int maxBytes) {
-        if (value == null) return "";
-        byte[] bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        if (bytes.length <= maxBytes) return value;
-        return new String(bytes, 0, maxBytes, java.nio.charset.StandardCharsets.UTF_8);
+        return Utf8Text.limit(value, maxBytes);
     }
 
     public int getDim() {

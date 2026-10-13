@@ -58,7 +58,7 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // after:appliedenergistics2 也是软依赖排序：共享背包存储元件要往 AE2 的
     // cell registry 里注册 ICellHandler（见 com.futa_gtnh.ae2 包），排在 AE2
     // 之后能保证它的注册表已经就绪；缺席时那条功能整体不启用。
-    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure;after:appliedenergistics2")
+    dependencies = "required-after:gregtech;required-after:modularui2;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure;after:appliedenergistics2")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";
@@ -186,6 +186,7 @@ public class FutaGtnhMod {
     /** 服务端停止前落盘。此时各维度还没被卸载，写文件是安全的。 */
     @Mod.EventHandler
     public void serverStopping(FMLServerStoppingEvent event) {
+        com.futa_gtnh.network.ServerActions.clear();
         SharedStorageManager.onServerStopping();
         com.futa_gtnh.lootassist.LootassistManager.onServerStopping();
         // AE2 共享背包元件的运行时状态（网络注册表/镜像缓存）清空；没装 AE2 时是空操作

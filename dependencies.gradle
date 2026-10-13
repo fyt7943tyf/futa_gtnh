@@ -21,6 +21,10 @@
 def lwjgl3ifyVersion = '3.0.35'
 
 dependencies {
+    // UI layer: explicitly pin the same MUI2 version used by this GT release.
+    compileOnly("com.github.GTNewHorizons:ModularUI2:2.3.89-1.7.10:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.89-1.7.10:dev")
+
     // ---- GregTech（GT5-Unofficial）----
     // GTNH 的核心模组，提供 GT 的方块/物品/机器/配方 API
     compileOnly("com.github.GTNewHorizons:GT5-Unofficial:5.09.54.175:dev")

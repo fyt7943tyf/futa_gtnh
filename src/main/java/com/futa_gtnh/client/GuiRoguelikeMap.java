@@ -5,14 +5,13 @@ import java.util.Collection;
 import java.util.List;
 
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.util.EnumChatFormatting;
 
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 
 /** Roguelike Dungeons 全屏地图。 */
-public final class GuiRoguelikeMap extends GuiScreen {
+public final class GuiRoguelikeMap extends FutaGuiScreen {
 
     private static final int MAP_LEFT = 8;
     private static final int MAP_TOP = 42;
@@ -78,7 +77,7 @@ public final class GuiRoguelikeMap extends GuiScreen {
         }
 
         drawDefaultBackground();
-        drawRect(4, 4, width - 4, height - 4, 0xD0101010);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(4, 4, width - 8, height - 8);
 
         fontRendererObj.drawStringWithShadow("Roguelike 地牢地图", 8, 8, 0xFFFFFF);
         int level = selectedLevel;

@@ -7,6 +7,7 @@ import net.minecraft.world.World;
 
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.aewireless.TileAeSignalTransmitter;
+import com.futa_gtnh.inventory.ContainerAeSignalTransmitter;
 
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
@@ -55,10 +56,7 @@ public class PacketAeTransmitterConfig implements IMessage {
     }
 
     private static String trimTo(String value, int maxBytes) {
-        if (value == null) return "";
-        byte[] bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        if (bytes.length <= maxBytes) return value;
-        return new String(bytes, 0, maxBytes, java.nio.charset.StandardCharsets.UTF_8);
+        return Utf8Text.limit(value, maxBytes);
     }
 
     public static class Handler implements IMessageHandler<PacketAeTransmitterConfig, IMessage> {
@@ -66,20 +64,25 @@ public class PacketAeTransmitterConfig implements IMessage {
         @Override
         public IMessage onMessage(PacketAeTransmitterConfig message, MessageContext ctx) {
             EntityPlayerMP player = ctx.getServerHandler().playerEntity;
+            ServerActions.enqueue(() -> apply(message, player));
+            return null;
+        }
+
+        private void apply(PacketAeTransmitterConfig message, EntityPlayerMP player) {
+            if (!(player.openContainer instanceof ContainerAeSignalTransmitter container)
+                || !container.matches(message.dim, message.x, message.y, message.z)
+                || !container.canInteractWith(player)) return;
             World world = MinecraftServer.getServer()
                 .worldServerForDimension(message.dim);
-            if (world == null) return null;
+            if (world == null) return;
             TileEntity tile = world.getTileEntity(message.x, message.y, message.z);
-            if (!(tile instanceof TileAeSignalTransmitter transmitter)) return null;
+            if (!(tile instanceof TileAeSignalTransmitter transmitter)) return;
             if (!transmitter.canManage(player)) {
                 FutaGtnhMod.LOG.info("玩家 {} 尝试改名不属于自己队伍的发信端，已拒绝", player.getCommandSenderName());
-                return null;
+                return;
             }
             String name = message.name == null ? "" : message.name.trim();
-            if (name.length() > TileAeSignalTransmitter.MAX_NAME_LENGTH)
-                name = name.substring(0, TileAeSignalTransmitter.MAX_NAME_LENGTH);
             transmitter.setSignalName(name);
-            return null;
         }
     }
 }

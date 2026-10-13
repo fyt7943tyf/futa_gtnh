@@ -123,50 +123,10 @@ public class GuiIoNode extends FutaGuiContainer {
      * 自绘的扁平按钮 —— 和 {@link GuiTerminalIo} 里的那一个同一套：
      * 深灰底、悬停提亮、选中绿色填充，一眼分清「能点 / 正指着 / 就是它」。
      */
-    private final class FlatButton extends GuiButton {
-
-        /** 选中态（当前页签 / 当前方向 / 已勾选的预设）。 */
-        private boolean marked;
+    private final class FlatButton extends com.futa_gtnh.client.ui.FutaMarkedButton {
 
         private FlatButton(int id, int x, int y, int width, int height, String label) {
             super(id, x, y, width, height, label);
-        }
-
-        private void setMarked(boolean value) {
-            this.marked = value;
-        }
-
-        @Override
-        public void drawButton(net.minecraft.client.Minecraft mc, int mouseX, int mouseY) {
-            if (!this.visible) return;
-
-            boolean hovered = mouseX >= this.xPosition && mouseY >= this.yPosition
-                && mouseX < this.xPosition + this.width
-                && mouseY < this.yPosition + this.height;
-
-            int fill;
-            int edge;
-            if (marked) {
-                fill = hovered ? 0xFF3E8E45 : 0xFF2E6B34;
-                edge = 0xFF7BE38A;
-            } else {
-                fill = hovered ? 0xFF4C4C4C : 0xFF333333;
-                edge = 0xFF6E6E6E;
-            }
-
-            drawRect(this.xPosition, this.yPosition, this.xPosition + this.width, this.yPosition + this.height, fill);
-            drawBorder(this.xPosition, this.yPosition, this.width, this.height, edge);
-
-            // 画字之前把颜色状态复位：drawRect 会把填充色留在 GL 状态里
-            GL11.glEnable(GL11.GL_TEXTURE_2D);
-            GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
-            String label = this.displayString == null ? "" : this.displayString;
-            fontRendererObj.drawStringWithShadow(
-                label,
-                this.xPosition + (this.width - fontRendererObj.getStringWidth(label)) / 2,
-                this.yPosition + (this.height - 8) / 2,
-                0xFFFFFF);
-            GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
         }
     }
 
@@ -252,7 +212,12 @@ public class GuiIoNode extends FutaGuiContainer {
         }
 
         if (!fluidTab) {
-            prefixField = new GuiTextField(fontRendererObj, guiLeft + 200, guiTop + 146, 92, 16);
+            prefixField = new com.futa_gtnh.client.widget.FutaSearchField(
+                fontRendererObj,
+                guiLeft + 200,
+                guiTop + 146,
+                92,
+                16);
             prefixField.setMaxStringLength(64);
             prefixField.setText(joinPrefixes());
         }
@@ -580,7 +545,7 @@ public class GuiIoNode extends FutaGuiContainer {
     /** 面板底和标题：这里在 {@code drawDefaultBackground} 之后、按钮之前，层次才对。 */
     @Override
     protected void drawGuiContainerBackgroundLayer(float partialTicks, int mouseX, int mouseY) {
-        drawRect(guiLeft, guiTop, guiLeft + GUI_WIDTH, guiTop + ySize, 0xC0101010);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(guiLeft, guiTop, GUI_WIDTH, ySize);
         drawBorder(guiLeft, guiTop, GUI_WIDTH, ySize, 0xFF808080);
         fontRendererObj.drawStringWithShadow(tr("futa_gtnh.gui.ionode.title"), guiLeft + 8, guiTop + 6, 0xFFFFFF);
     }

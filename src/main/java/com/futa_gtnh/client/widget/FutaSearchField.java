@@ -109,4 +109,11 @@ public class FutaSearchField extends GuiTextField {
         TextChangeListener listener = changeListener;
         if (listener != null) listener.onSearchTextChanged(getText());
     }
+
+    @Override
+    public void drawTextBox() {
+        com.futa_gtnh.client.ui.FutaUiTheme.SLOT.applyColor(0xFFFFFFFF);
+        com.futa_gtnh.client.ui.FutaUiTheme.SLOT.draw(xPosition - 1, yPosition - 1, width + 2, boxHeight + 2);
+        super.drawTextBox();
+    }
 }

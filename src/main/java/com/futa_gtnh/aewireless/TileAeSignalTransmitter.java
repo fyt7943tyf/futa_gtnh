@@ -71,8 +71,9 @@ public class TileAeSignalTransmitter extends AENetworkTile {
      * 设置名字（服务端，GUI 应用按钮走这里）。空名字会被 {@link AeSignalRegistry} 视为「未命名」。
      */
     public void setSignalName(String name) {
-        String trimmed = name == null ? "" : name.trim();
-        if (trimmed.length() > MAX_NAME_LENGTH) trimmed = trimmed.substring(0, MAX_NAME_LENGTH);
+        String trimmed = net.minecraft.util.ChatAllowedCharacters.filerAllowedCharacters(name == null ? "" : name)
+            .trim();
+        trimmed = com.futa_gtnh.network.Utf8Text.limitLength(trimmed, MAX_NAME_LENGTH);
         this.signalName = trimmed;
         markDirty();
     }
@@ -88,7 +89,8 @@ public class TileAeSignalTransmitter extends AENetworkTile {
 
     /** 玩家是否可以改这台发信端的名字（所有者本人或同队）。 */
     public boolean canManage(net.minecraft.entity.player.EntityPlayer player) {
-        if (owner == null || player == null) return true;
+        if (player == null) return false;
+        if (owner == null) return true;
         return AeSignalTeam.sameTeam(owner, player.getUniqueID());
     }
 

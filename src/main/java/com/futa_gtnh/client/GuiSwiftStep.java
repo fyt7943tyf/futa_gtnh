@@ -3,7 +3,6 @@ package com.futa_gtnh.client;
 import java.util.Locale;
 
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.StatCollector;
@@ -17,7 +16,7 @@ import com.futa_gtnh.network.PacketSetSwiftStep;
 import com.futa_gtnh.network.PacketSetSwiftStepMagnet;
 
 /** 迅步设置界面，按移动、生长和恢复分为三个页面。 */
-public class GuiSwiftStep extends GuiScreen {
+public class GuiSwiftStep extends FutaGuiScreen {
 
     private static final int GUI_WIDTH = 200;
     private static final int GUI_HEIGHT = 344;
@@ -286,6 +285,7 @@ public class GuiSwiftStep extends GuiScreen {
 
         int left = (width - GUI_WIDTH) / 2;
         int top = (height - GUI_HEIGHT) / 2;
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(left, top, GUI_WIDTH, GUI_HEIGHT);
         drawCenteredFittedString(
             EnumChatFormatting.GOLD + tr("item.futa_gtnh.swift_step.name"),
             width / 2,

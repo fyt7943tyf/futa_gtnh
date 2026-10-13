@@ -133,7 +133,7 @@ public final class StoragePanel {
         layout((GuiContainer) screen, screen);
 
         // 背景 + 边框（原版箱子配色）
-        fill(x - PAD, y - PAD, x + width + PAD, y + SEARCH_H + FOOTER_H + PAD, 0xFFC6C6C6);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(x - PAD, y - PAD, width + PAD * 2, SEARCH_H + FOOTER_H + PAD * 2);
         border(x - PAD, y - PAD, x + width + PAD, y + SEARCH_H + FOOTER_H + PAD, 0xFF555555);
 
         if (search == null) {
@@ -162,7 +162,7 @@ public final class StoragePanel {
             StatCollector.translateToLocalFormatted("futa_gtnh.panel.page", page + 1, totalPages, filtered.size()),
             x + 1,
             y + SEARCH_H + 2,
-            0x404040);
+            0xE0E0E0);
 
         visible = true;
     }

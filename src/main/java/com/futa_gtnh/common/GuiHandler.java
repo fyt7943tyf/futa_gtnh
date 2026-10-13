@@ -61,7 +61,7 @@ public class GuiHandler implements IGuiHandler {
 
         if (id == GUI_AE_SIGNAL_TRANSMITTER) {
             com.futa_gtnh.aewireless.TileAeSignalTransmitter transmitter = resolveAeTransmitter(world, x, y, z);
-            if (transmitter == null) return null;
+            if (transmitter == null || !transmitter.canManage(player)) return null;
             if (player instanceof EntityPlayerMP serverPlayer) {
                 NetworkHandler.INSTANCE
                     .sendTo(com.futa_gtnh.network.PacketAeTransmitterSync.of(transmitter, serverPlayer), serverPlayer);

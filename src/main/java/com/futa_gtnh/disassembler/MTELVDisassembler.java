@@ -41,6 +41,16 @@ import io.netty.buffer.ByteBuf;
 /** LV-only machine with independent real output tanks and an atomic, persistent processing buffer. */
 public final class MTELVDisassembler extends MTETieredMachineBlock {
 
+    @Override
+    protected boolean forceUseMui2() {
+        return true;
+    }
+
+    private static final gregtech.api.interfaces.IIconContainer FRONT = gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
+        .create("futa_gtnh", "disassembler");
+    private static final gregtech.api.interfaces.IIconContainer FRONT_ACTIVE = gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
+        .create("futa_gtnh", "disassembler_active");
+
     private DisassemblyBuffer buffer = new DisassemblyBuffer(
         DisassemblyCatalog.itemSlots,
         DisassemblyCatalog.fluidSlots,
@@ -410,10 +420,7 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
     public ITexture[] getTexture(IGregTechTileEntity tile, ForgeDirection side, ForgeDirection facing, int color,
         boolean active, boolean redstone) {
         ITexture casing = Textures.BlockIcons.MACHINE_CASINGS[1][color + 1];
-        if (side == facing) return new ITexture[] { casing,
-            TextureFactory.of(
-                active ? Textures.BlockIcons.OVERLAY_FRONT_DISASSEMBLER_ACTIVE
-                    : Textures.BlockIcons.OVERLAY_FRONT_DISASSEMBLER) };
+        if (side == facing) return new ITexture[] { casing, TextureFactory.of(active ? FRONT_ACTIVE : FRONT) };
         return new ITexture[] { casing };
     }
 

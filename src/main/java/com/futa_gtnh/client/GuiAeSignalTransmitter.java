@@ -1,14 +1,13 @@
 package com.futa_gtnh.client;
 
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.StatCollector;
 
 import org.lwjgl.input.Keyboard;
 
 import com.futa_gtnh.aewireless.TileAeSignalTransmitter;
+import com.futa_gtnh.client.widget.FutaSearchField;
 import com.futa_gtnh.inventory.ContainerAeSignalTransmitter;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketAeTransmitterConfig;
@@ -22,9 +21,9 @@ import com.futa_gtnh.network.PacketAeTransmitterConfig;
  */
 public class GuiAeSignalTransmitter extends FutaGuiContainer {
 
-    private static final ResourceLocation TEXTURE = new ResourceLocation("textures/gui/book.png");
-
-    private GuiTextField nameField;
+    private FutaSearchField nameField;
+    private boolean nameEdited;
+    private boolean initialNameReceived;
     private GuiButton applyButton;
 
     private final int dim, x, y, z;
@@ -43,11 +42,14 @@ public class GuiAeSignalTransmitter extends FutaGuiContainer {
     public void initGui() {
         super.initGui();
         Keyboard.enableRepeatEvents(true);
-        String current = ClientAeTransmitterState.name();
-        nameField = new GuiTextField(fontRendererObj, guiLeft + 16, guiTop + 30, xSize - 32, 16);
+        com.futa_gtnh.network.PacketAeTransmitterSync initial = snapshot();
+        String current = initial == null ? "" : initial.getName();
+        initialNameReceived = initial != null;
+        nameField = new FutaSearchField(fontRendererObj, guiLeft + 16, guiTop + 30, xSize - 32, 16);
         nameField.setMaxStringLength(TileAeSignalTransmitter.MAX_NAME_LENGTH);
         nameField.setFocused(true);
-        nameField.setText(current);
+        nameField.setText(current, false);
+        nameField.setChangeListener(text -> nameEdited = true);
         applyButton = new GuiButton(
             0,
             guiLeft + 16,
@@ -73,9 +75,13 @@ public class GuiAeSignalTransmitter extends FutaGuiContainer {
 
     @Override
     protected void keyTyped(char typedChar, int keyCode) {
+        if (keyCode == Keyboard.KEY_ESCAPE) {
+            super.keyTyped(typedChar, keyCode);
+            return;
+        }
         if (nameField != null && nameField.isFocused()) {
             if (keyCode == Keyboard.KEY_RETURN) {
-                actionPerformed(applyButton);
+                if (applyButton.enabled) actionPerformed(applyButton);
                 return;
             }
             nameField.textboxKeyTyped(typedChar, keyCode);
@@ -93,36 +99,50 @@ public class GuiAeSignalTransmitter extends FutaGuiContainer {
     @Override
     protected void drawGuiContainerBackgroundLayer(float partialTicks, int mouseX, int mouseY) {
         drawDefaultBackground();
-        mc.getTextureManager()
-            .bindTexture(TEXTURE);
-        // 用原版成书贴图的左侧干净区域当底板（避开右侧翻页箭头）
-        drawTexturedModalRect(guiLeft, guiTop, 0, 0, xSize, ySize);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(guiLeft, guiTop, xSize, ySize);
+        drawRect(guiLeft + 15, guiTop + 29, guiLeft + xSize - 15, guiTop + 47, 0xFF20232B);
         if (nameField != null) nameField.drawTextBox();
     }
 
     @Override
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         fontRendererObj
-            .drawString(StatCollector.translateToLocal("futa_gtnh.aewireless.transmitter.title"), 16, 12, 0x404040);
-        fontRendererObj.drawString(StatCollector.translateToLocal("futa_gtnh.aewireless.name"), 16, 20, 0x606060);
+            .drawString(StatCollector.translateToLocal("futa_gtnh.aewireless.transmitter.title"), 16, 12, 0xE0E0E0);
+        fontRendererObj.drawString(StatCollector.translateToLocal("futa_gtnh.aewireless.name"), 16, 20, 0xD0D0D0);
         PacketAeTransmitterSnapshotText text = snapshotText();
         fontRendererObj.drawString(text.state, 16, 84, text.color);
         String list = truncate(text.list, 144);
         if (!list.isEmpty()) {
             fontRendererObj
-                .drawString(StatCollector.translateToLocal("futa_gtnh.aewireless.visible"), 16, 96, 0x606060);
-            fontRendererObj.drawString(list, 16, 106, 0x606060);
+                .drawString(StatCollector.translateToLocal("futa_gtnh.aewireless.visible"), 16, 96, 0xD0D0D0);
+            fontRendererObj.drawString(list, 16, 106, 0xD0D0D0);
         }
+    }
+
+    @Override
+    public void updateScreen() {
+        super.updateScreen();
+        com.futa_gtnh.network.PacketAeTransmitterSync incoming = snapshot();
+        if (!initialNameReceived && incoming != null && nameField != null) {
+            if (!nameEdited) nameField.setText(incoming.getName(), false);
+            initialNameReceived = true;
+        }
+        if (nameField != null) nameField.updateCursorCounter();
+        if (applyButton != null) applyButton.enabled = incoming != null;
+    }
+
+    private com.futa_gtnh.network.PacketAeTransmitterSync snapshot() {
+        com.futa_gtnh.network.PacketAeTransmitterSync value = ClientAeTransmitterState.snapshot();
+        return value != null && value.getDim() == dim && value.getX() == x && value.getY() == y && value.getZ() == z
+            ? value
+            : null;
     }
 
     private static String truncate(String text, int maxWidth) {
         if (text == null || text.isEmpty()) return "";
         if (fontRendererStaticWidth(text) <= maxWidth) return text;
-        StringBuilder sb = new StringBuilder();
-        while (sb.length() < text.length() && fontRendererStaticWidth(sb.toString() + "…") <= maxWidth) {
-            sb.append(text.charAt(sb.length()));
-        }
-        return sb + "…";
+        return net.minecraft.client.Minecraft.getMinecraft().fontRenderer
+            .trimStringToWidth(text, Math.max(0, maxWidth - fontRendererStaticWidth("…"))) + "…";
     }
 
     private static int fontRendererStaticWidth(String text) {
@@ -143,7 +163,7 @@ public class GuiAeSignalTransmitter extends FutaGuiContainer {
     }
 
     private PacketAeTransmitterSnapshotText snapshotText() {
-        com.futa_gtnh.network.PacketAeTransmitterSync snapshot = ClientAeTransmitterState.snapshot();
+        com.futa_gtnh.network.PacketAeTransmitterSync snapshot = snapshot();
         if (snapshot == null) {
             return new PacketAeTransmitterSnapshotText(
                 StatCollector.translateToLocal("futa_gtnh.aewireless.state.offline"),

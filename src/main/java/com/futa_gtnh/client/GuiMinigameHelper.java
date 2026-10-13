@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Locale;
 
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.StatCollector;
 
@@ -37,7 +36,7 @@ import com.futa_gtnh.network.PacketLootassistAction;
  * 每条记录的主点位是<b>地表入口</b>（地牢生成时挖穿地表的那个洞口，玩家导航用），
  * 悬浮提示里带地下主方块坐标。
  */
-public class GuiMinigameHelper extends GuiScreen {
+public class GuiMinigameHelper extends FutaGuiScreen {
 
     // ---- 布局 ----
     private static final int GUI_WIDTH = 330;
@@ -217,7 +216,7 @@ public class GuiMinigameHelper extends GuiScreen {
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         drawDefaultBackground();
 
-        drawRect(guiLeft, guiTop, guiLeft + GUI_WIDTH, guiTop + GUI_HEIGHT, COLOR_PANEL);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(guiLeft, guiTop, GUI_WIDTH, GUI_HEIGHT);
         drawBorder(guiLeft, guiTop, GUI_WIDTH, GUI_HEIGHT);
 
         fontRendererObj.drawStringWithShadow(

@@ -8,7 +8,6 @@ import net.minecraft.client.gui.GuiButton;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumChatFormatting;
-import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.StatCollector;
 
 import org.lwjgl.input.Keyboard;
@@ -40,10 +39,6 @@ import com.futa_gtnh.shared.ItemKey;
  * {@link NeiAwareGui} 的统一入口，输入兜底在基类，这里只声明自己的差异。
  */
 public class GuiSharedTerminal extends FutaGuiContainer {
-
-    private static final ResourceLocation TEXTURE = new ResourceLocation(
-        FutaGtnhMod.MODID,
-        "textures/gui/shared_terminal.png");
 
     // 按钮 id
     private static final int BTN_TAB_ITEMS = 0;
@@ -576,6 +571,27 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     /** 上限输入框。整数字符串，空 = 不限制。 */
     private FutaSearchField limitField;
 
+    private com.futa_gtnh.client.ui.FutaUiLayer limitUi;
+    private final List<GuiButton> limitButtons = new ArrayList<>();
+
+    private void prepareLimitControls() {
+        if (limitUi == null) {
+            limitUi = new com.futa_gtnh.client.ui.FutaUiLayer(this, button -> {
+                if (button.id == 0) applyLimitFromField();
+                else if (button.id == 1) sendLimit(-1L);
+                else closeLimitDialog();
+            });
+        }
+        int y = limitPanelTop + LIMIT_H - 22;
+        if (limitButtons.isEmpty() || limitButtons.get(0).xPosition != limitPanelLeft + 6
+            || limitButtons.get(0).yPosition != y) {
+            limitButtons.clear();
+            limitButtons.add(new GuiButton(0, limitPanelLeft + 6, y, 52, 16, "确定"));
+            limitButtons.add(new GuiButton(1, limitPanelLeft + 62, y, 52, 16, "不限"));
+            limitButtons.add(new GuiButton(2, limitPanelLeft + 118, y, 52, 16, "取消"));
+        }
+    }
+
     private int limitPanelLeft;
     private int limitPanelTop;
 
@@ -587,20 +603,8 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     private boolean handleLimitDialogClick(int mouseX, int mouseY) {
         if (limitTarget == null) return false;
 
-        int buttonY = limitPanelTop + LIMIT_H - 22;
-        if (hit(mouseX, mouseY, limitPanelLeft + 6, buttonY, 52, 16)) {
-            applyLimitFromField();
-            return true;
-        }
-        if (hit(mouseX, mouseY, limitPanelLeft + 62, buttonY, 52, 16)) {
-            // 「不限」= 取消上限。和「设成 0」区别开：0 是一件都不许再进
-            sendLimit(-1L);
-            return true;
-        }
-        if (hit(mouseX, mouseY, limitPanelLeft + 118, buttonY, 52, 16)) {
-            closeLimitDialog();
-            return true;
-        }
+        prepareLimitControls();
+        if (limitUi.click(limitButtons, mouseX, mouseY, 0)) return true;
 
         // 点输入框里就交给它（能拖光标），点在面板别处不关，点面板外关掉
         if (limitField != null && hit(mouseX, mouseY, limitPanelLeft + 8, limitPanelTop + 34, LIMIT_FIELD_W, 16)) {
@@ -680,6 +684,8 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     }
 
     private void closeLimitDialog() {
+        if (limitUi != null) limitUi.close();
+        limitButtons.clear();
         limitTarget = null;
         if (limitField != null) limitField.setFocused(false);
     }
@@ -732,7 +738,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         GL11.glDisable(GL11.GL_LIGHTING);
         GL11.glDisable(GL11.GL_DEPTH_TEST);
         drawRect(left - 1, top - 1, left + LIMIT_W + 1, top + LIMIT_H + 1, 0xFF000000);
-        drawRect(left, top, left + LIMIT_W, top + LIMIT_H, 0xFF1A1C20);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(left, top, LIMIT_W, LIMIT_H);
         drawRect(left, top, left + LIMIT_W, top + 16, 0xFF2A2E36);
 
         boolean fluid = limitTarget.isFluid();
@@ -758,29 +764,11 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
         if (limitField != null) limitField.drawTextBox();
 
-        int buttonY = top + LIMIT_H - 22;
-        drawLimitButton(left + 6, buttonY, 52, "确定", hit(mouseX, mouseY, left + 6, buttonY, 52, 16), 0xFF3E7D3E);
-        drawLimitButton(left + 62, buttonY, 52, "不限", hit(mouseX, mouseY, left + 62, buttonY, 52, 16), 0xFF3A3F47);
-        drawLimitButton(left + 118, buttonY, 52, "取消", hit(mouseX, mouseY, left + 118, buttonY, 52, 16), 0xFF3A3F47);
+        prepareLimitControls();
+        limitUi.draw(limitButtons, mouseX, mouseY, 0);
 
         GL11.glEnable(GL11.GL_LIGHTING);
         GL11.glEnable(GL11.GL_DEPTH_TEST);
-    }
-
-    private void drawLimitButton(int x, int y, int w, String label, boolean hovered, int color) {
-        drawRect(x, y, x + w, y + 16, hovered ? brighten(color) : color);
-        drawRect(x, y, x + w, y + 1, 0xFF000000);
-        drawRect(x, y + 15, x + w, y + 16, 0xFF000000);
-        int textWidth = fontRendererObj.getStringWidth(label);
-        fontRendererObj.drawStringWithShadow(label, x + (w - textWidth) / 2, y + 4, 0xFFFFFF);
-    }
-
-    private static int brighten(int argb) {
-        int a = (argb >>> 24) & 0xFF;
-        int r = Math.min(255, ((argb >> 16) & 0xFF) + 30);
-        int g = Math.min(255, ((argb >> 8) & 0xFF) + 30);
-        int b = Math.min(255, (argb & 0xFF) + 30);
-        return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     private static boolean hit(int mouseX, int mouseY, int x, int y, int w, int h) {
@@ -808,7 +796,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     /** 工具按钮的悬停说明：工具叫什么、点了会怎样、仓库里有没有。 */
     private void drawToolButtonTooltip(int mouseX, int mouseY) {
         for (GuiToolButton button : toolButtons) {
-            if (!button.func_146115_a()) continue;
+            if (!com.futa_gtnh.client.ui.FutaUiLayer.contains(button, mouseX, mouseY)) continue;
 
             CraftingToolShortcuts.Entry entry = button.entry();
             if (entry == null) return;
@@ -836,7 +824,8 @@ public class GuiSharedTerminal extends FutaGuiContainer {
      * 说明不了它到底把东西收进哪儿、开关状态存在哪，所以自己画一个。
      */
     private void drawAutoStoreTooltip(int mouseX, int mouseY) {
-        if (autoStoreButton == null || !autoStoreButton.func_146115_a()) return;
+        if (autoStoreButton == null || !com.futa_gtnh.client.ui.FutaUiLayer.contains(autoStoreButton, mouseX, mouseY))
+            return;
 
         drawHoveringText(
             java.util.Arrays.asList(
@@ -856,9 +845,12 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     @Override
     protected void drawGuiContainerBackgroundLayer(float partialTicks, int mouseX, int mouseY) {
         GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
-        mc.getTextureManager()
-            .bindTexture(TEXTURE);
-        drawTexturedModalRect(guiLeft, guiTop, 0, 0, xSize, ySize);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(guiLeft, guiTop, xSize, ySize);
+        for (Object value : inventorySlots.inventorySlots) {
+            net.minecraft.inventory.Slot slot = (net.minecraft.inventory.Slot) value;
+            com.futa_gtnh.client.ui.FutaUiTheme
+                .slot(guiLeft + slot.xDisplayPosition - 1, guiTop + slot.yDisplayPosition - 1);
+        }
 
         // 聚焦时把搜索框描一圈亮边 —— 得让玩家一眼看出「现在敲键盘是往这里输」
         // 还是「不在输入状态」
@@ -901,7 +893,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
             "futa_gtnh.gui.page",
             filtered.isEmpty() ? 0 : scrollRow / ContainerSharedTerminal.ROWS + 1,
             filtered.isEmpty() ? 0 : maxScrollRow() / ContainerSharedTerminal.ROWS + 1);
-        fontRendererObj.drawString(pageText, 42, ContainerSharedTerminal.NAV_Y + 3, 0x404040);
+        fontRendererObj.drawString(pageText, 42, ContainerSharedTerminal.NAV_Y + 3, 0xE0E0E0);
 
         String typeText = StatCollector.translateToLocalFormatted(
             tab == TAB_FLUIDS ? "futa_gtnh.gui.types.fluid" : "futa_gtnh.gui.types.item",
@@ -930,7 +922,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
             fontRendererObj.trimStringToWidth(status, ContainerSharedTerminal.SIDEBAR_X - 16),
             8,
             ContainerSharedTerminal.STATUS_Y,
-            0x404040);
+            0xE0E0E0);
 
         drawSidebarLabels();
 
@@ -945,7 +937,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
             armor,
             ContainerSharedTerminal.ARMOR_X + 9 - fontRendererObj.getStringWidth(armor) / 2,
             ContainerSharedTerminal.ARMOR_LABEL_Y,
-            0x404040);
+            0xE0E0E0);
 
         String crafting = tr("futa_gtnh.gui.crafting");
         fontRendererObj.drawString(
@@ -954,7 +946,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
             ContainerSharedTerminal.CRAFT_X + ContainerSharedTerminal.CRAFT_SLOTS * 9
                 - fontRendererObj.getStringWidth(crafting) / 2,
             ContainerSharedTerminal.CRAFT_LABEL_Y,
-            0x404040);
+            0xE0E0E0);
     }
 
     /**
@@ -1550,6 +1542,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
     @Override
     public void onGuiClosed() {
+        if (limitUi != null) limitUi.close();
         super.onGuiClosed();
         Keyboard.enableRepeatEvents(false);
         container.clearPageDisplay();

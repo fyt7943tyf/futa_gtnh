@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Locale;
 
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.entity.RenderItem;
 import net.minecraft.init.Blocks;
@@ -52,7 +51,7 @@ import com.futa_gtnh.network.PacketLocatorResult;
  * 关闭界面<b>不会</b>取消追踪 —— 玩家正是要关掉界面去看那道光束的。
  * 取消有两个入口：界面里的「停止」按钮，或者潜行右键魔杖。
  */
-public class GuiLocatorWand extends GuiScreen {
+public class GuiLocatorWand extends FutaGuiScreen {
 
     // ---- 布局 ----
     private static final int GUI_WIDTH = 268;
@@ -417,7 +416,7 @@ public class GuiLocatorWand extends GuiScreen {
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         drawDefaultBackground();
 
-        drawRect(guiLeft, guiTop, guiLeft + GUI_WIDTH, guiTop + GUI_HEIGHT, COLOR_PANEL);
+        com.futa_gtnh.client.ui.FutaUiTheme.panel(guiLeft, guiTop, GUI_WIDTH, GUI_HEIGHT);
         drawBorder(guiLeft, guiTop, GUI_WIDTH, GUI_HEIGHT);
 
         fontRendererObj
