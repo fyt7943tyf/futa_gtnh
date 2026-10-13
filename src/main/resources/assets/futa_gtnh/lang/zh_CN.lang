@@ -441,3 +441,49 @@ futa_gtnh.gui.limits.choose=选择左侧物品或流体，再填写最大库存�
 futa_gtnh.gui.limits.invalid=请输入范围内的非负整数
 futa_gtnh.gui.terminal.io.whitelist.title=已选白名单（单击取消）
 futa_gtnh.gui.terminal.io.whitelist.remove=单击取消此条目输出；优先于矿辞规则，重新选中可恢复。
+
+
+# ===== AE 无线控制（发信端 + 接收端覆盖板） =====
+tile.futa_gtnh.ae_signal_transmitter.name=AE 无线发信端
+item.futa_gtnh.ae_signal_receiver_cover.name=AE 无线接收端覆盖板
+futa_gtnh.aewireless.transmitter.title=AE 无线发信端
+futa_gtnh.aewireless.name=信号名称（仅供显示，改名不断链）
+futa_gtnh.aewireless.apply=应用
+futa_gtnh.aewireless.visible=同队可见的发信端：
+futa_gtnh.aewireless.sender=发信端
+futa_gtnh.aewireless.sender.none=（未选择）
+futa_gtnh.aewireless.type.item=监听物品
+futa_gtnh.aewireless.type.fluid=监听流体
+futa_gtnh.aewireless.monitor=左：物品（NEI 可拖入） 右：流体（拿容器点击）
+futa_gtnh.aewireless.threshold=阈值
+futa_gtnh.aewireless.condition.above=存量 ≥ 阈值时触发
+futa_gtnh.aewireless.condition.below=存量 ≤ 阈值时触发
+futa_gtnh.aewireless.action.enable=条件满足 → 启用机器
+futa_gtnh.aewireless.action.disable=条件满足 → 停用机器
+futa_gtnh.aewireless.interval=监听间隔（tick，5-600）
+futa_gtnh.aewireless.linklost.keep=断联时保持现状
+futa_gtnh.aewireless.linklost.enable=断联时启用机器
+futa_gtnh.aewireless.linklost.disable=断联时停用机器
+futa_gtnh.aewireless.status.amount=当前存量：%s%s（%s）
+futa_gtnh.aewireless.status.state=链路状态：%s
+futa_gtnh.aewireless.state.online=在线
+futa_gtnh.aewireless.state.conflict=网络里有多个发信端，此台未生效
+futa_gtnh.aewireless.state.offline=离线（无电/无通道/未入网）
+futa_gtnh.aewireless.link.ok=正常
+futa_gtnh.aewireless.link.not_set=未选择发信端
+futa_gtnh.aewireless.link.not_found=找不到发信端（区块未加载或被拆除）
+futa_gtnh.aewireless.link.no_team=与发信端所有者不同队伍
+futa_gtnh.aewireless.link.offline=发信端离线
+futa_gtnh.aewireless.link.conflict=发信端处于冲突状态
+futa_gtnh.aewireless.link.no_monitor=尚未设置监听的物品/流体
+
+# ===== ME 超级对接站 =====
+gt.blockmachines.futa_gtnh.super_dock.lv.name=ME 超级对接站
+futa_gtnh.medock.name=ME 超级对接站
+futa_gtnh.medock.priority=优先级（越高越优先写入）
+futa_gtnh.medock.empty=放入超级/量子储罐或超级/量子箱
+futa_gtnh.medock.chest_empty=数字箱：空（容量 %s）
+futa_gtnh.medock.chest_info=%s：%s / %s
+futa_gtnh.medock.tank_empty=储罐：空（容量 %s mB）
+futa_gtnh.medock.tank_info=%s：%s / %s mB
+futa_gtnh.medock.hint=内容随容器物品 NBT 走，随时取出原样可用；接 AE 线缆供通道。

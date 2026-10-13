@@ -444,3 +444,49 @@ futa_gtnh.gui.limits.choose=Select an item or fluid, then enter its maximum stoc
 futa_gtnh.gui.limits.invalid=Enter a valid nonnegative integer
 futa_gtnh.gui.terminal.io.whitelist.title=Selected (click to remove)
 futa_gtnh.gui.terminal.io.whitelist.remove=Click to block this entry, including ore rules. Select it again to restore output.
+
+
+# ===== AE wireless control (transmitter block + receiver cover) =====
+tile.futa_gtnh.ae_signal_transmitter.name=AE Signal Transmitter
+item.futa_gtnh.ae_signal_receiver_cover.name=AE Signal Receiver Cover
+futa_gtnh.aewireless.transmitter.title=AE Signal Transmitter
+futa_gtnh.aewireless.name=Signal name (display only; renaming keeps links)
+futa_gtnh.aewireless.apply=Apply
+futa_gtnh.aewireless.visible=Team-visible transmitters:
+futa_gtnh.aewireless.sender=Transmitter
+futa_gtnh.aewireless.sender.none=(none selected)
+futa_gtnh.aewireless.type.item=Watch item
+futa_gtnh.aewireless.type.fluid=Watch fluid
+futa_gtnh.aewireless.monitor=Left: item (NEI drag) Right: fluid (click with filled container)
+futa_gtnh.aewireless.threshold=Threshold
+futa_gtnh.aewireless.condition.above=Trigger when stored >= threshold
+futa_gtnh.aewireless.condition.below=Trigger when stored <= threshold
+futa_gtnh.aewireless.action.enable=Condition met -> enable machine
+futa_gtnh.aewireless.action.disable=Condition met -> disable machine
+futa_gtnh.aewireless.interval=Interval (ticks, 5-600)
+futa_gtnh.aewireless.linklost.keep=On link lost: keep state
+futa_gtnh.aewireless.linklost.enable=On link lost: enable machine
+futa_gtnh.aewireless.linklost.disable=On link lost: disable machine
+futa_gtnh.aewireless.status.amount=Stored: %s%s (%s)
+futa_gtnh.aewireless.status.state=Link: %s
+futa_gtnh.aewireless.state.online=Online
+futa_gtnh.aewireless.state.conflict=Multiple transmitters on this network; this one inactive
+futa_gtnh.aewireless.state.offline=Offline (no power/channel/network)
+futa_gtnh.aewireless.link.ok=OK
+futa_gtnh.aewireless.link.not_set=No transmitter selected
+futa_gtnh.aewireless.link.not_found=Transmitter not found (chunk unloaded or removed)
+futa_gtnh.aewireless.link.no_team=Owner not in your team
+futa_gtnh.aewireless.link.offline=Transmitter offline
+futa_gtnh.aewireless.link.conflict=Transmitter in conflict state
+futa_gtnh.aewireless.link.no_monitor=Watched item/fluid not set
+
+# ===== ME Super Dock =====
+gt.blockmachines.futa_gtnh.super_dock.lv.name=ME Super Dock
+futa_gtnh.medock.name=ME Super Dock
+futa_gtnh.medock.priority=Priority (higher = preferred insert target)
+futa_gtnh.medock.empty=Insert a super/quantum tank or chest item
+futa_gtnh.medock.chest_empty=Digital chest: empty (capacity %s)
+futa_gtnh.medock.chest_info=%s: %s / %s
+futa_gtnh.medock.tank_empty=Tank: empty (capacity %s mB)
+futa_gtnh.medock.tank_info=%s: %s / %s mB
+futa_gtnh.medock.hint=Contents live in the item NBT; take it out anytime. Connect AE cable for a channel.

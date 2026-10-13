@@ -80,5 +80,9 @@ public final class NetworkHandler {
             PacketStorageSnapshotRequest.class,
             31,
             Side.SERVER);
+        // AE 无线发信端：改名请求（C2S）/ 状态快照（S2C）
+        INSTANCE
+            .registerMessage(PacketAeTransmitterConfig.Handler.class, PacketAeTransmitterConfig.class, 32, Side.SERVER);
+        INSTANCE.registerMessage(PacketAeTransmitterSync.Handler.class, PacketAeTransmitterSync.class, 33, Side.CLIENT);
     }
 }

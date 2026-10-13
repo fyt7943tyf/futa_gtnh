@@ -8,6 +8,10 @@ import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.world.World;
 import net.minecraftforge.oredict.ShapedOreRecipe;
 
+import com.futa_gtnh.aewireless.BlockAeSignalTransmitter;
+import com.futa_gtnh.aewireless.CoverAeSignalReceiver;
+import com.futa_gtnh.aewireless.ItemAeSignalReceiverCover;
+import com.futa_gtnh.aewireless.TileAeSignalTransmitter;
 import com.futa_gtnh.block.BlockIoNode;
 import com.futa_gtnh.block.BlockLootMachine;
 import com.futa_gtnh.block.BlockSharedTerminal;
@@ -48,6 +52,12 @@ public class CommonProxy {
 
     /** 自选抽奖机方块。没装 Enhanced LootBags 时为 null。 */
     public static BlockLootMachine blockLootMachine;
+
+    /** AE 无线发信端方块。没装 AE2 或配置关闭时为 null。 */
+    public static BlockAeSignalTransmitter blockAeSignalTransmitter;
+
+    /** AE 无线接收端覆盖板物品。没装 AE2 或配置关闭时为 null。 */
+    public static ItemAeSignalReceiverCover aeSignalReceiverCover;
 
     /** 迅步。没装 Baubles 时为 null。 */
     public static ItemSwiftStep swiftStep;
@@ -122,6 +132,56 @@ public class CommonProxy {
             Loader.instance()
                 .getConfigDir());
         com.futa_gtnh.disassembler.DisassemblerRegistration.addCraftingRecipe();
+        registerAeSignalWireless();
+        com.futa_gtnh.medock.SuperDockRegistration.register(
+            Loader.instance()
+                .getConfigDir());
+        com.futa_gtnh.medock.SuperDockRegistration.addCraftingRecipe();
+    }
+
+    /**
+     * 注册 AE 无线控制的接收端覆盖板（发信端方块在 preInit 已注册）。
+     *
+     * <p>
+     * GT 的 cover 注册表此时已就绪（GTSWN 也是在 postInit 注册自己的 cover）。
+     * 没装 AE2 / 配置关闭时整个功能组都不存在。
+     */
+    private void registerAeSignalWireless() {
+        if (!Config.enableAeSignalWireless) return;
+        if (!com.futa_gtnh.ae2.Ae2Compat.isAvailable()) {
+            FutaGtnhMod.LOG.info("没有检测到 Applied Energistics 2，跳过 AE 无线控制的注册");
+            return;
+        }
+        if (blockAeSignalTransmitter == null) return;
+
+        aeSignalReceiverCover = new ItemAeSignalReceiverCover();
+        GameRegistry.registerItem(aeSignalReceiverCover, ItemAeSignalReceiverCover.NAME);
+        FutaGtnhMod.aeSignalReceiverCover = aeSignalReceiverCover;
+
+        gregtech.api.covers.CoverRegistry.registerCover(
+            new ItemStack(aeSignalReceiverCover),
+            gregtech.api.render.TextureFactory.of(gregtech.api.enums.Textures.BlockIcons.OVERLAY_CONTROLLER),
+            context -> new CoverAeSignalReceiver(
+                context,
+                gregtech.api.render.TextureFactory.of(gregtech.api.enums.Textures.BlockIcons.OVERLAY_CONTROLLER)),
+            gregtech.api.covers.CoverPlacer.builder()
+                .onlyPlaceIf(CoverAeSignalReceiver::isCoverPlaceable)
+                .build());
+
+        if (Config.enableRecipe) {
+            // 发信端：末影珍珠（跨空间）+ 钢板 + GT 机器控制器覆盖板（控制语义）
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(blockAeSignalTransmitter, 1),
+                    new Object[] { "EPE", "PCP", "EPE", 'E', "enderpearl", 'P', "plateSteel", 'C',
+                        gregtech.api.enums.ItemList.Cover_Controller.get(1) }));
+            // 接收端覆盖板 ×2：末影珍珠 + 红石 + 铁板
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(aeSignalReceiverCover, 2),
+                    new Object[] { " E ", "RPR", 'E', "enderpearl", 'R', "dustRedstone", 'P', "plateIron" }));
+        }
+        FutaGtnhMod.LOG.info("已注册 AE 无线控制（发信端方块 + 接收端覆盖板）");
     }
 
     /**
@@ -163,6 +223,17 @@ public class CommonProxy {
         // 它只是客户端自己放的一个「发光标记」
         swiftLight = new BlockSwiftLight();
         GameRegistry.registerBlock(swiftLight, null, BlockSwiftLight.NAME);
+
+        // AE 无线发信端（软联动：装了 AE2 且配置开着才注册；
+        // 方块类本身不引用 AE 类型，TE 只在放置后才实例化）
+        if (Config.enableAeSignalWireless && com.futa_gtnh.ae2.Ae2Compat.isAvailable()) {
+            blockAeSignalTransmitter = new BlockAeSignalTransmitter();
+            GameRegistry.registerBlock(blockAeSignalTransmitter, BlockAeSignalTransmitter.NAME);
+            GameRegistry.registerTileEntity(
+                TileAeSignalTransmitter.class,
+                FutaGtnhMod.MODID + ":" + BlockAeSignalTransmitter.NAME);
+            FutaGtnhMod.blockAeSignalTransmitter = blockAeSignalTransmitter;
+        }
     }
 
     /**

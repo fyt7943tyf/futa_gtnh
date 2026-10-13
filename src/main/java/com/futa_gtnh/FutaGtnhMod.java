@@ -104,6 +104,12 @@ public class FutaGtnhMod {
     /** AE2 共享背包存储元件（流体通道）。同上。 */
     public static com.futa_gtnh.ae2.ItemSharedStorageCell aeSharedCellFluid;
 
+    /** AE 无线发信端方块。没装 AE2 或配置关闭时为 null。方块类不引用 AE 类型。 */
+    public static com.futa_gtnh.aewireless.BlockAeSignalTransmitter blockAeSignalTransmitter;
+
+    /** AE 无线接收端覆盖板物品。没装 AE2 或配置关闭时为 null。 */
+    public static com.futa_gtnh.aewireless.ItemAeSignalReceiverCover aeSignalReceiverCover;
+
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
         LOG.info("{} preInit (version {})", NAME, Tags.VERSION);
