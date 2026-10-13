@@ -74,6 +74,19 @@ public class Config {
      */
     public static boolean ae2CellObeyLimits = true;
 
+    /**
+     * 共享存储里的新增内容，是否主动投递给 ME 网络里正在等它的合成 CPU。
+     *
+     * <p>
+     * AE2 的合成 CPU 只在「产物从网络物品库存注入」时才会认账
+     * （{@code CraftingGridCache.injectItems → CraftingCPUCluster.injectItems}）。
+     * 东西直接落进共享存储（共享终端入库、IO 节点、GT 管道、ME 超级对接站……）时，
+     * 不主动投一次，CPU 的等待表就永远消不掉 —— 表现是终端数量涨了、合成监视器
+     * 却看不到产物，也就是「卡合成」。默认 true：投递是「把已经存在的东西告诉 CPU」，
+     * 不复制物品；没人要的余量照常留在共享存储里。
+     */
+    public static boolean ae2CellFeedCraftingCpu = true;
+
     // ------------------------------------------------------------------
     // 客户端功能开关（设置界面）
     // ------------------------------------------------------------------
@@ -643,6 +656,12 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             ae2CellObeyLimits,
             "AE 网络通过共享背包元件写入时是否遵守共享背包的「存量上限」。默认 true（与 GT 管道/漏斗等自动化一致）；false 时 AE 视同玩家手动写入。");
+
+        ae2CellFeedCraftingCpu = configuration.getBoolean(
+            "ae2CellFeedCraftingCpu",
+            Configuration.CATEGORY_GENERAL,
+            ae2CellFeedCraftingCpu,
+            "共享存储里新增的东西，是否主动投递给 ME 网络里正在等它的合成 CPU（修「产物进了共享存储，AE 合成监视器却看不到、卡合成」）。默认 true。");
 
         // 客户端功能开关（见字段区的说明），设置界面读写
         clientEnableSharedBagKey = configuration.getBoolean(
