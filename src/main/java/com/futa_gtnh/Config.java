@@ -296,6 +296,15 @@ public class Config {
     public static boolean enableDisassembler = true;
     public static int disassemblerMetaTileId = 32700;
 
+    /** 是否注册「AE 无线控制」（发信端方块 + 接收端覆盖板；需装 AE2）。 */
+    public static boolean enableAeSignalWireless = true;
+
+    /** 是否注册「ME 超级对接站」（需装 AE2）。 */
+    public static boolean enableAeSuperDock = true;
+
+    /** ME 超级对接站的稳定 GT MTE ID。 */
+    public static int dockMetaTileId = 32701;
+
     // ------------------------------------------------------------------
     // 界面（客户端行为）
     // ------------------------------------------------------------------
@@ -822,6 +831,26 @@ public class Config {
             1,
             32766,
             "拆解机的稳定 GT MTE ID；冲突时修改，已有世界不可随意更换。客户端和服务端需一致。");
+
+        enableAeSignalWireless = configuration.getBoolean(
+            "enableAeSignalWireless",
+            Configuration.CATEGORY_GENERAL,
+            enableAeSignalWireless,
+            "注册 AE 无线控制：发信端方块（加入 ME 网络，每网络限一个生效）+ 接收端覆盖板（按库存阈值远程启停机器）。需装 Applied Energistics 2，没装时此项无效。");
+
+        enableAeSuperDock = configuration.getBoolean(
+            "enableAeSuperDock",
+            Configuration.CATEGORY_GENERAL,
+            enableAeSuperDock,
+            "注册 ME 超级对接站：把 GT 超级/量子储罐或超级/量子箱作为物品放入，内容直接接入 ME 网络存储，可配优先级。需装 Applied Energistics 2，没装时此项无效。");
+
+        dockMetaTileId = configuration.getInt(
+            "dockMetaTileId",
+            Configuration.CATEGORY_GENERAL,
+            dockMetaTileId,
+            1,
+            32766,
+            "ME 超级对接站的稳定 GT MTE ID；冲突时修改，已有世界不可随意更换。客户端和服务端需一致。");
 
         tinkersAutoFill = configuration.getBoolean(
             "tinkersAutoFill",

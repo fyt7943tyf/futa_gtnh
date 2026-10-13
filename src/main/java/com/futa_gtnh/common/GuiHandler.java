@@ -40,6 +40,9 @@ public class GuiHandler implements IGuiHandler {
     public static final int GUI_IO_NODE_BASE = 2;
     public static final int GUI_IO_NODE_COUNT = 6;
 
+    /** AE 无线发信端的命名/状态界面。 */
+    public static final int GUI_AE_SIGNAL_TRANSMITTER = 8;
+
     @Override
     public Object getServerGuiElement(int id, net.minecraft.entity.player.EntityPlayer player, World world, int x,
         int y, int z) {
@@ -54,6 +57,16 @@ public class GuiHandler implements IGuiHandler {
                 PacketIoNodeSync.send(serverPlayer, node);
             }
             return new ContainerIoNode(node, player);
+        }
+
+        if (id == GUI_AE_SIGNAL_TRANSMITTER) {
+            com.futa_gtnh.aewireless.TileAeSignalTransmitter transmitter = resolveAeTransmitter(world, x, y, z);
+            if (transmitter == null) return null;
+            if (player instanceof EntityPlayerMP serverPlayer) {
+                NetworkHandler.INSTANCE
+                    .sendTo(com.futa_gtnh.network.PacketAeTransmitterSync.of(transmitter, serverPlayer), serverPlayer);
+            }
+            return new com.futa_gtnh.inventory.ContainerAeSignalTransmitter(transmitter, player);
         }
 
         if (id == GUI_LOOT_MACHINE) {
@@ -97,6 +110,15 @@ public class GuiHandler implements IGuiHandler {
             return new GuiIoNode(new ContainerIoNode(node, player), id - GUI_IO_NODE_BASE);
         }
 
+        if (id == GUI_AE_SIGNAL_TRANSMITTER) {
+            com.futa_gtnh.aewireless.TileAeSignalTransmitter transmitter = resolveAeTransmitter(world, x, y, z);
+            if (transmitter == null) return null;
+            // 客户端 GUI 类只在客户端方法体里解析（同共享终端的做法）
+            return new com.futa_gtnh.client.GuiAeSignalTransmitter(
+                new com.futa_gtnh.inventory.ContainerAeSignalTransmitter(transmitter, player),
+                player);
+        }
+
         if (id == GUI_LOOT_MACHINE) {
             TileEntityLootMachine machine = resolveLootMachine(world, x, y, z);
             if (machine == null) return null;
@@ -135,5 +157,12 @@ public class GuiHandler implements IGuiHandler {
         if (world == null) return null;
         net.minecraft.tileentity.TileEntity tile = world.getTileEntity(x, y, z);
         return tile instanceof TileEntityIoNode ? (TileEntityIoNode) tile : null;
+    }
+
+    private static com.futa_gtnh.aewireless.TileAeSignalTransmitter resolveAeTransmitter(World world, int x, int y,
+        int z) {
+        if (world == null) return null;
+        net.minecraft.tileentity.TileEntity tile = world.getTileEntity(x, y, z);
+        return tile instanceof com.futa_gtnh.aewireless.TileAeSignalTransmitter transmitter ? transmitter : null;
     }
 }
