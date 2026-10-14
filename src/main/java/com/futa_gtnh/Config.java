@@ -82,8 +82,8 @@ public class Config {
      * （{@code CraftingGridCache.injectItems → CraftingCPUCluster.injectItems}）。
      * 东西直接落进共享存储（共享终端入库、IO 节点、GT 管道、ME 超级对接站……）时，
      * 不主动投一次，CPU 的等待表就永远消不掉 —— 表现是终端数量涨了、合成监视器
-     * 却看不到产物，也就是「卡合成」。默认 true：投递是「把已经存在的东西告诉 CPU」，
-     * 不复制物品；没人要的余量照常留在共享存储里。
+     * 却看不到产物，也就是「卡合成」。默认 true：投递先预留共享库实物，只交给合成缓存；
+     * 未收下的余量和确认过的最终产物退回共享库，保持数量守恒。异常结果不确定时保留托管库存。
      */
     public static boolean ae2CellFeedCraftingCpu = true;
 

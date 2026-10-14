@@ -8,6 +8,7 @@ import net.minecraft.command.ICommandSender;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.util.EnumChatFormatting;
 
+import com.futa_gtnh.Config;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageFile;
 import com.futa_gtnh.shared.SharedStorageManager;
@@ -43,7 +44,7 @@ public class CommandSharedStorage extends CommandBase {
 
     @Override
     public String getCommandUsage(ICommandSender sender) {
-        return "/futashared <info|save|reload|clear>";
+        return "/futashared <info|save|reload|clear|escrow>";
     }
 
     @Override
@@ -53,6 +54,55 @@ public class CommandSharedStorage extends CommandBase {
         switch (sub) {
             case "info":
                 sendInfo(sender);
+                break;
+
+            case "escrow":
+                if (!requireOp(sender)) return;
+                SharedStorage escrow = SharedStorageManager.getStorage();
+                if (args.length >= 2 && "refund".equalsIgnoreCase(args[1])) {
+                    if (args.length < 3 || !"confirm".equalsIgnoreCase(args[2])) {
+                        reply(
+                            sender,
+                            EnumChatFormatting.RED
+                                + "请先关闭 ae2CellFeedCraftingCpu 并确认 CPU 没有收下这些货；盲目退回可能复制物品。确认：/futashared escrow refund confirm");
+                        return;
+                    }
+                    if (Config.ae2CellFeedCraftingCpu) {
+                        reply(sender, EnumChatFormatting.RED + "请先关闭 ae2CellFeedCraftingCpu，再核对并退回托管库存。");
+                        return;
+                    }
+                    escrow.refundCraftingEscrow();
+                    SharedStorageManager.saveNow();
+                    reply(sender, EnumChatFormatting.GREEN + "可识别的合成托管库存已退回共享库；缺失模组的条目仍保留在存档。");
+                } else {
+                    reply(
+                        sender,
+                        "合成托管：" + escrow.snapshotCraftingItems()
+                            .size()
+                            + " 种物品 / "
+                            + escrow.snapshotCraftingFluids()
+                                .size()
+                            + " 种流体（不计入可用库存）。");
+                    for (java.util.Map.Entry<com.futa_gtnh.shared.ItemKey, Long> entry : escrow
+                        .snapshotCraftingItems()) {
+                        reply(
+                            sender,
+                            entry.getKey()
+                                .prototype()
+                                .getDisplayName() + " x "
+                                + format(entry.getValue()));
+                    }
+                    for (java.util.Map.Entry<com.futa_gtnh.shared.FluidKey, Long> entry : escrow
+                        .snapshotCraftingFluids()) {
+                        reply(
+                            sender,
+                            entry.getKey()
+                                .prototype()
+                                .getLocalizedName() + " x "
+                                + format(entry.getValue())
+                                + " mB");
+                    }
+                }
                 break;
 
             case "save":

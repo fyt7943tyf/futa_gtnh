@@ -42,7 +42,7 @@ final class SharedItemCellInventory extends AbstractSharedCellInventory<IAEItemS
         SharedStorage storage = SharedStorageManager.getStorage();
         if (!Config.ae2CellObeyLimits) {
             // 手动路径不设上限：剩余容量 = 全局上限 - 现有（现有 ≥ 0，不会溢出）
-            return Math.max(0L, SharedStorage.MAX_AMOUNT - storage.getItemAmount(key));
+            return storage.itemManualSpaceLeft(key);
         }
         return storage.itemSpaceLeft(key);
     }

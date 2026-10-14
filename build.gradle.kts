@@ -212,3 +212,16 @@ if (providers.gradleProperty("uiSmoke").isPresent) {
         systemProperty("futa.uiSmoke", "true")
     }
 }
+
+// Exercises the production crafting transfer with real shared storage, MC/NBT and AE contracts.
+tasks.register<JavaExec>("verifyAeCraftingDelivery") {
+    group = "verification"
+    description = "Checks crafting stock conservation, final-output returns, refills and durable failure escrow"
+    dependsOn(compileReadApiChecks, extractTerminalClickLwjgl)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.ae2.CraftingDeliveryRegression")
+    classpath = files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifyAeCraftingDelivery") }

@@ -41,7 +41,7 @@ final class SharedFluidCellInventory extends AbstractSharedCellInventory<IAEFlui
     protected long spaceLeft(FluidKey key) {
         SharedStorage storage = SharedStorageManager.getStorage();
         if (!Config.ae2CellObeyLimits) {
-            return Math.max(0L, SharedStorage.MAX_AMOUNT - storage.getFluidAmount(key));
+            return storage.fluidManualSpaceLeft(key);
         }
         return storage.fluidSpaceLeft(key);
     }

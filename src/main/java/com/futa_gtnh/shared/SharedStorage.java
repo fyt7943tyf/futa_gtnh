@@ -41,10 +41,18 @@ public class SharedStorage {
     public static final long MAX_AMOUNT = Long.MAX_VALUE;
 
     /** 存档格式版本。将来改结构时靠它做迁移。 */
-    public static final int FORMAT_VERSION = 2;
+    public static final int FORMAT_VERSION = 3;
 
     private final LinkedHashMap<ItemKey, Long> items = new LinkedHashMap<>();
     private final LinkedHashMap<FluidKey, Long> fluids = new LinkedHashMap<>();
+
+    // Removed from spendable stock, but with rollback capacity retained. An uncertain AE callback
+    // leaves this escrow durable and blocks automatic delivery of that key until an OP resolves it.
+    private final LinkedHashMap<ItemKey, Long> craftingItems = new LinkedHashMap<>();
+    private final LinkedHashMap<FluidKey, Long> craftingFluids = new LinkedHashMap<>();
+    private final List<NBTTagCompound> unreadableCraftingItems = new ArrayList<>();
+    private final List<NBTTagCompound> unreadableCraftingFluids = new ArrayList<>();
+    private long craftingEpoch;
 
     /**
      * 按条目的存量上限。没进这张表 = 不限制（见 {@link #getItemLimit}）。
@@ -151,7 +159,7 @@ public class SharedStorage {
         long have = getItemAmount(key);
         // 手动存放时上限不参与，但全局上限仍然要守：long 加爆了会让合计值变负
         long ceiling = obeyLimit ? limitOf(itemLimits, key) : MAX_AMOUNT;
-        long space = ceiling - have;
+        long space = Math.max(0L, ceiling - have) - craftingItems.getOrDefault(key, 0L);
         if (space <= 0L) return 0L;
 
         long accepted = Math.min(amount, space);
@@ -243,7 +251,7 @@ public class SharedStorage {
 
         long have = getFluidAmount(key);
         long ceiling = obeyLimit ? limitOf(fluidLimits, key) : MAX_AMOUNT;
-        long space = ceiling - have;
+        long space = Math.max(0L, ceiling - have) - craftingFluids.getOrDefault(key, 0L);
         if (space <= 0L) return 0L;
 
         long accepted = Math.min(amount, space);
@@ -350,11 +358,22 @@ public class SharedStorage {
 
     /** 清空全部内容，<b>包括隔离区</b> —— 这是 /futashared clear 的语义，管理员要的就是彻底清掉。 */
     public synchronized void clear() {
-        if (items.isEmpty() && fluids.isEmpty() && unreadableItems.isEmpty() && unreadableFluids.isEmpty()) {
+        if (items.isEmpty() && fluids.isEmpty()
+            && unreadableItems.isEmpty()
+            && unreadableFluids.isEmpty()
+            && craftingItems.isEmpty()
+            && craftingFluids.isEmpty()
+            && unreadableCraftingItems.isEmpty()
+            && unreadableCraftingFluids.isEmpty()) {
             return;
         }
         items.clear();
         fluids.clear();
+        craftingItems.clear();
+        craftingFluids.clear();
+        unreadableCraftingItems.clear();
+        unreadableCraftingFluids.clear();
+        craftingEpoch++;
         unreadableItems.clear();
         unreadableFluids.clear();
         itemTotal = 0L;
@@ -518,12 +537,116 @@ public class SharedStorage {
      */
     public synchronized long itemSpaceLeft(ItemKey key) {
         if (key == null) return 0L;
-        return Math.max(0L, limitOf(itemLimits, key) - getItemAmount(key));
+        return Math
+            .max(0L, Math.max(0L, limitOf(itemLimits, key) - getItemAmount(key)) - craftingItems.getOrDefault(key, 0L));
     }
 
     public synchronized long fluidSpaceLeft(FluidKey key) {
         if (key == null) return 0L;
-        return Math.max(0L, limitOf(fluidLimits, key) - getFluidAmount(key));
+        return Math.max(
+            0L,
+            Math.max(0L, limitOf(fluidLimits, key) - getFluidAmount(key)) - craftingFluids.getOrDefault(key, 0L));
+    }
+
+    public synchronized long itemManualSpaceLeft(ItemKey key) {
+        return key == null ? 0L : MAX_AMOUNT - getItemAmount(key) - craftingItems.getOrDefault(key, 0L);
+    }
+
+    public synchronized long fluidManualSpaceLeft(FluidKey key) {
+        return key == null ? 0L : MAX_AMOUNT - getFluidAmount(key) - craftingFluids.getOrDefault(key, 0L);
+    }
+
+    /** A real withdrawal with a reserved rollback slot; no storage lock is held across AE callbacks. */
+    public synchronized CraftingReservation reserveItemForCrafting(ItemKey key, long requested) {
+        if (key == null || requested <= 0L || craftingItems.containsKey(key)) return null;
+        long amount = Math.min(requested, getItemAmount(key));
+        if (amount <= 0L) return null;
+        craftingItems.put(key, amount);
+        extractItem(key, amount);
+        return new CraftingReservation(key, null, amount, craftingEpoch);
+    }
+
+    public synchronized CraftingReservation reserveFluidForCrafting(FluidKey key, long requested) {
+        if (key == null || requested <= 0L || craftingFluids.containsKey(key)) return null;
+        long amount = Math.min(requested, getFluidAmount(key));
+        if (amount <= 0L) return null;
+        craftingFluids.put(key, amount);
+        extractFluid(key, amount);
+        return new CraftingReservation(null, key, amount, craftingEpoch);
+    }
+
+    public final class CraftingReservation {
+
+        private final ItemKey item;
+        private final FluidKey fluid;
+        private final long amount;
+        private final long epoch;
+        private boolean finished;
+
+        private CraftingReservation(ItemKey item, FluidKey fluid, long amount, long epoch) {
+            this.item = item;
+            this.fluid = fluid;
+            this.amount = amount;
+            this.epoch = epoch;
+        }
+
+        public long getAmount() {
+            return amount;
+        }
+
+        /** Returned final outputs are legitimate even if the CPU completed the task and kept nothing. */
+        public void finish(long returned) {
+            synchronized (SharedStorage.this) {
+                if (finished || epoch != craftingEpoch || returned < 0L || returned > amount) {
+                    throw new IllegalStateException("Invalid or stale crafting reservation");
+                }
+                if (item != null) {
+                    if (!Long.valueOf(amount)
+                        .equals(craftingItems.get(item))) throw new IllegalStateException("Missing item escrow");
+                    craftingItems.remove(item);
+                    if (insertItemManual(item, returned) != returned)
+                        throw new IllegalStateException("Item rollback capacity lost");
+                } else {
+                    if (!Long.valueOf(amount)
+                        .equals(craftingFluids.get(fluid))) throw new IllegalStateException("Missing fluid escrow");
+                    craftingFluids.remove(fluid);
+                    if (insertFluidManual(fluid, returned) != returned)
+                        throw new IllegalStateException("Fluid rollback capacity lost");
+                }
+                finished = true;
+                markChanged();
+            }
+        }
+    }
+
+    public synchronized List<Map.Entry<ItemKey, Long>> snapshotCraftingItems() {
+        List<Map.Entry<ItemKey, Long>> result = new ArrayList<>();
+        for (Map.Entry<ItemKey, Long> entry : craftingItems.entrySet())
+            result.add(new AbstractMap.SimpleImmutableEntry<>(entry));
+        return result;
+    }
+
+    public synchronized List<Map.Entry<FluidKey, Long>> snapshotCraftingFluids() {
+        List<Map.Entry<FluidKey, Long>> result = new ArrayList<>();
+        for (Map.Entry<FluidKey, Long> entry : craftingFluids.entrySet())
+            result.add(new AbstractMap.SimpleImmutableEntry<>(entry));
+        return result;
+    }
+
+    /** OP-only recovery after checking the receiving CPU; never automatically refund uncertain transfers. */
+    public synchronized void refundCraftingEscrow() {
+        for (Map.Entry<ItemKey, Long> entry : snapshotCraftingItems()) {
+            craftingItems.remove(entry.getKey());
+            long returned = insertItemManual(entry.getKey(), entry.getValue());
+            if (returned < entry.getValue()) craftingItems.put(entry.getKey(), entry.getValue() - returned);
+        }
+        for (Map.Entry<FluidKey, Long> entry : snapshotCraftingFluids()) {
+            craftingFluids.remove(entry.getKey());
+            long returned = insertFluidManual(entry.getKey(), entry.getValue());
+            if (returned < entry.getValue()) craftingFluids.put(entry.getKey(), entry.getValue() - returned);
+        }
+        craftingEpoch++;
+        markChanged();
     }
 
     private static <K> long limitOf(Map<K, Long> limits, K key) {
@@ -537,7 +660,11 @@ public class SharedStorage {
 
     public synchronized NBTTagCompound writeToNbt() {
         NBTTagCompound root = new NBTTagCompound();
-        root.setInteger("version", FORMAT_VERSION);
+        // Normal saves remain v2-compatible; only unresolved transfers need the escrow-aware v3 reader.
+        boolean escrow = !craftingItems.isEmpty() || !craftingFluids.isEmpty()
+            || !unreadableCraftingItems.isEmpty()
+            || !unreadableCraftingFluids.isEmpty();
+        root.setInteger("version", escrow ? FORMAT_VERSION : 2);
 
         NBTTagList itemList = new NBTTagList();
         for (Map.Entry<ItemKey, Long> entry : items.entrySet()) {
@@ -583,6 +710,25 @@ public class SharedStorage {
         }
         root.setTag("fluidLimits", fluidLimitList);
 
+        NBTTagList heldItems = new NBTTagList();
+        for (Map.Entry<ItemKey, Long> entry : craftingItems.entrySet()) {
+            NBTTagCompound tag = entry.getKey()
+                .writeToNbt();
+            tag.setLong("amount", entry.getValue());
+            heldItems.appendTag(tag);
+        }
+        for (NBTTagCompound tag : unreadableCraftingItems) heldItems.appendTag(tag.copy());
+        root.setTag("craftingItems", heldItems);
+        NBTTagList heldFluids = new NBTTagList();
+        for (Map.Entry<FluidKey, Long> entry : craftingFluids.entrySet()) {
+            NBTTagCompound tag = entry.getKey()
+                .writeToNbt();
+            tag.setLong("amount", entry.getValue());
+            heldFluids.appendTag(tag);
+        }
+        for (NBTTagCompound tag : unreadableCraftingFluids) heldFluids.appendTag(tag.copy());
+        root.setTag("craftingFluids", heldFluids);
+
         return root;
     }
 
@@ -610,6 +756,11 @@ public class SharedStorage {
     public synchronized int readFromNbt(NBTTagCompound root) {
         items.clear();
         fluids.clear();
+        craftingItems.clear();
+        craftingFluids.clear();
+        unreadableCraftingItems.clear();
+        unreadableCraftingFluids.clear();
+        craftingEpoch++;
         itemLimits.clear();
         fluidLimits.clear();
         unreadableItems.clear();
@@ -668,6 +819,29 @@ public class SharedStorage {
             FluidKey key = FluidKey.readFromNbt(tag);
             if (key == null || !tag.hasKey("limit")) continue;
             fluidLimits.put(key, Math.max(0L, tag.getLong("limit")));
+        }
+
+        NBTTagList heldItems = root.getTagList("craftingItems", 10);
+        for (int i = 0; i < heldItems.tagCount(); i++) {
+            NBTTagCompound tag = heldItems.getCompoundTagAt(i);
+            ItemKey key = ItemKey.readFromNbt(tag);
+            long amount = tag.getLong("amount");
+            if (key == null || amount <= 0L) {
+                unreadableCraftingItems.add((NBTTagCompound) tag.copy());
+                continue;
+            }
+            craftingItems.put(key, saturatingAdd(craftingItems.getOrDefault(key, 0L), amount));
+        }
+        NBTTagList heldFluids = root.getTagList("craftingFluids", 10);
+        for (int i = 0; i < heldFluids.tagCount(); i++) {
+            NBTTagCompound tag = heldFluids.getCompoundTagAt(i);
+            FluidKey key = FluidKey.readFromNbt(tag);
+            long amount = tag.getLong("amount");
+            if (key == null || amount <= 0L) {
+                unreadableCraftingFluids.add((NBTTagCompound) tag.copy());
+                continue;
+            }
+            craftingFluids.put(key, saturatingAdd(craftingFluids.getOrDefault(key, 0L), amount));
         }
 
         markChanged();

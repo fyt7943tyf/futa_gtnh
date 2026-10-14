@@ -1,8 +1,6 @@
 package com.futa_gtnh.ae2;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,13 +21,13 @@ import com.futa_gtnh.shared.SharedStorageListener;
 import com.futa_gtnh.shared.SharedStorageManager;
 
 import appeng.api.AEApi;
-import appeng.api.config.Actionable;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.crafting.ICraftingGrid;
 import appeng.api.networking.events.MENetworkCellArrayUpdate;
 import appeng.api.networking.security.IActionHost;
 import appeng.api.networking.security.MachineSource;
 import appeng.api.networking.storage.IStorageGrid;
+import appeng.api.storage.IMEInventory;
 import appeng.api.storage.data.IAEFluidStack;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IAEStack;
@@ -58,7 +56,7 @@ import appeng.util.item.AEItemStackType;
  * 全链路开销是「一次 volatile 读」。</li>
  * <li>本元件自己的写入触发的监听回调用 {@link ThreadLocal} 抑制掉 ——
  * AE 的 NetworkMonitor 已经为这次操作发过差量，再推就是重复。</li>
- * <li>同一批变更除了发通知，还会<b>投递给在等的合成 CPU</b>
+ * <li>同一批变更除了发通知，还会<b>投递实物给在等的合成 CPU</b>
  * （{@link #feedWaitingCraftingCpus}）。这不是可选项：AE 的合成 CPU 只在
  * 「产物从网络物品库存注入」时才认账，光发通知会卡合成。只有真的在等这件东西的
  * 网络才走这一步，其余网络的开销是「一次 {@code isRequesting()} 判空」。</li>
@@ -111,10 +109,31 @@ final class AeCellBridge {
     private static volatile boolean anyActiveCells;
     private static volatile boolean storageReplaced;
 
-    // volatile 非 final：flush 时整体换成新集合。监听线程每次回调单次读字段后在集合上操作，
-    // 交换期间新增的条目落在旧集合里也会被完整发完，最多晚一 tick，不会丢。
-    private static volatile Set<ItemKey> pendingItems = ConcurrentHashMap.newKeySet();
-    private static volatile Set<FluidKey> pendingFluids = ConcurrentHashMap.newKeySet();
+    // Queue publication and listener additions share a short lock, never held during storage/AE calls.
+    // Without it a worker can add to the previous set after the tick has already drained that set.
+    private static final Object PENDING_LOCK = new Object();
+    private static Set<ItemKey> pendingItems = ConcurrentHashMap.newKeySet();
+    private static Set<FluidKey> pendingFluids = ConcurrentHashMap.newKeySet();
+
+    static final class PendingChanges {
+
+        final Set<ItemKey> items;
+        final Set<FluidKey> fluids;
+
+        PendingChanges(Set<ItemKey> items, Set<FluidKey> fluids) {
+            this.items = items;
+            this.fluids = fluids;
+        }
+    }
+
+    static PendingChanges drainPendingChanges() {
+        synchronized (PENDING_LOCK) {
+            PendingChanges result = new PendingChanges(pendingItems, pendingFluids);
+            pendingItems = ConcurrentHashMap.newKeySet();
+            pendingFluids = ConcurrentHashMap.newKeySet();
+            return result;
+        }
+    }
 
     /** 本元件自己写共享存储期间为 true：那次写入的差量 NetworkMonitor 自己会发。 */
     private static final ThreadLocal<Boolean> SUPPRESS = ThreadLocal.withInitial(() -> Boolean.FALSE);
@@ -125,14 +144,18 @@ final class AeCellBridge {
         public void onItemChanged(ItemKey key) {
             if (!installed || SUPPRESS.get()
                 .booleanValue() || !anyActiveCells || key == null) return;
-            pendingItems.add(key);
+            synchronized (PENDING_LOCK) {
+                pendingItems.add(key);
+            }
         }
 
         @Override
         public void onFluidChanged(FluidKey key) {
             if (!installed || SUPPRESS.get()
                 .booleanValue() || !anyActiveCells || key == null) return;
-            pendingFluids.add(key);
+            synchronized (PENDING_LOCK) {
+                pendingFluids.add(key);
+            }
         }
 
         @Override
@@ -180,20 +203,6 @@ final class AeCellBridge {
     private static int fluidRevisionWatermark = -1;
 
     // ==================================================================
-    // 合成投递基准（全部在桥锁内）
-    // ==================================================================
-
-    /**
-     * 每个网络已经「投递」过多少（见 {@link #feedWaitingCraftingCpus}）。
-     *
-     * <p>
-     * 按网络对象身份（{@link IdentityHashMap}）分开记 —— 和元件注册表同一个生命周期，
-     * 网络拆掉后由 {@link #pruneFeedBaselines} 清理。
-     */
-    private static final IdentityHashMap<IGrid, Map<ItemKey, Long>> itemFeedBaseline = new IdentityHashMap<>();
-    private static final IdentityHashMap<IGrid, Map<FluidKey, Long>> fluidFeedBaseline = new IdentityHashMap<>();
-
-    // ==================================================================
     // 安装 / 重置
     // ==================================================================
 
@@ -214,8 +223,6 @@ final class AeCellBridge {
         fluidMirror = null;
         itemRevisionWatermark = -1;
         fluidRevisionWatermark = -1;
-        itemFeedBaseline.clear();
-        fluidFeedBaseline.clear();
         storageReplaced = false;
         anyActiveCells = false;
     }
@@ -269,11 +276,12 @@ final class AeCellBridge {
 
     /** 在不触发监听器的情况下执行一次共享存储写入（元件自己的 MODULATE 路径）。 */
     static <T> T suppressed(Supplier<T> storageWrite) {
+        boolean previous = SUPPRESS.get();
         SUPPRESS.set(Boolean.TRUE);
         try {
             return storageWrite.get();
         } finally {
-            SUPPRESS.set(Boolean.FALSE);
+            SUPPRESS.set(previous);
         }
     }
 
@@ -366,8 +374,6 @@ final class AeCellBridge {
         if (!anyActiveCells) {
             pendingItems.clear();
             pendingFluids.clear();
-            itemFeedBaseline.clear();
-            fluidFeedBaseline.clear();
             storageReplaced = false;
             return;
         }
@@ -381,9 +387,6 @@ final class AeCellBridge {
             fluidMirror = null;
             itemRevisionWatermark = -1;
             fluidRevisionWatermark = -1;
-            // 基准是「相对上一次投递的增量」，存档换了就没有参考价值了
-            itemFeedBaseline.clear();
-            fluidFeedBaseline.clear();
             pendingItems.clear();
             pendingFluids.clear();
             for (IGrid grid : collectLiveGrids()) {
@@ -398,18 +401,15 @@ final class AeCellBridge {
             }
         }
 
-        if (pendingItems.isEmpty() && pendingFluids.isEmpty()) return;
-
-        Set<ItemKey> items = pendingItems;
-        Set<FluidKey> fluids = pendingFluids;
-        pendingItems = ConcurrentHashMap.newKeySet();
-        pendingFluids = ConcurrentHashMap.newKeySet();
+        PendingChanges changes = drainPendingChanges();
+        Set<ItemKey> items = changes.items;
+        Set<FluidKey> fluids = changes.fluids;
+        if (items.isEmpty() && fluids.isEmpty()) return;
 
         List<IGrid> liveGrids = collectLiveGrids();
-        // ★ 顺序有意义：先投给在等的合成 CPU，再发变更通知。投递会把产物变成
-        // 「CPU 的账」，通知负责让终端/发信器看见它。
+        // ★ 顺序有意义：先向等待的 CPU 投递实物，再广播结算后的共享库存。
+        // 中间产物进入 CPU；最终产物被确认后退回共享库。
         feedWaitingCraftingCpus(liveGrids, items, fluids);
-        pruneFeedBaselines(liveGrids);
 
         for (IGrid grid : liveGrids) {
             try {
@@ -434,133 +434,65 @@ final class AeCellBridge {
     // ==================================================================
 
     /**
-     * <b>这一节解决的是「卡合成」</b>：AE 的合成 CPU 只会从
-     * {@code CraftingCPUCluster.injectItems(...)} 里认出「我等的那批产物到货了」
-     * （它在那里做 {@code waiting = false} 与 {@code waitingFor.decStackSize}），
-     * 而唯一的调用者是 {@code CraftingGridCache.injectItems(...)} —— 也就是说
-     * <b>产物必须真的从网络物品库存走一遍注入</b>：AE2 的
-     * {@code NetworkInventoryHandler.injectItems} 第一轮就问合成缓存
-     * （它是 {@code isAutoCraftingInventory() == true}、优先级最高的 cell provider），
-     * 在等的 CPU 会当场把货收下，剩下的才轮到普通存储元件。
-     *
-     * <p>
-     * 而我们这条桥以前只对网络发「变更通知」（{@code postAlterationOfStoredItems}）——
-     * 那东西只喂 watcher（终端列表、发信器、存储总线），<b>碰不到 CPU 的等待表</b>。
-     * 于是：物品直接落进共享背包（共享终端入库、IO 节点、GT 管道、对接站……）时，
-     * 终端/AE 读得到、数量也对，但合成监视器永远等不到产物 —— 表现就是卡合成
-     * （只有 missing 模式下每 1200 tick 一次的 {@code tryExtractItems()} 兜底轮询能救）。
-     *
-     * <p>
-     * 做法：拿「共享背包当前量 − 该网络上次已投递量」当增量（相对量，天然不会翻倍），
-     * 只投给<b>真的在等这件东西</b>的网络（{@code ICraftingGrid.isRequesting(...)}，
-     * 它问的是 CPU 的 {@code waitingFor}），走
-     * {@code IStorageGrid.getItemInventory().injectItems(...)}。
-     * CPU 收下的部分变成 CPU 自己的账（不计进元件，读数不会变两份），
-     * 没人要的余量照常留在共享背包里。
+     * External warehouse writes bypass AE's injection path. Reserve real stock, offer it only to the
+     * crafting cache, and restore the returned remainder (including acknowledged final outputs).
+     * No absolute-stock watermark is needed: every successful transfer settles its actual quantities.
      */
+    @SuppressWarnings("unchecked")
     private static void feedWaitingCraftingCpus(List<IGrid> grids, Set<ItemKey> items, Set<FluidKey> fluids) {
-        if (!Config.ae2CellFeedCraftingCpu) return;
-        if (items.isEmpty() && fluids.isEmpty()) return;
-
-        // 走「当前量」直查而不是先拍快照：投递要写共享存储，写操作不能基于可能已经过期的读数
+        if (!Config.ae2CellFeedCraftingCpu || (items.isEmpty() && fluids.isEmpty())) return;
         SharedStorage storage = SharedStorageManager.getStorage();
         for (IGrid grid : grids) {
-            if (!items.isEmpty()) feedItems(grid, storage, items);
-            if (!fluids.isEmpty()) feedFluids(grid, storage, fluids);
-        }
-    }
-
-    private static void feedItems(IGrid grid, SharedStorage storage, Set<ItemKey> pending) {
-        IStorageGrid storageGrid = grid.getCache(IStorageGrid.class);
-        ICraftingGrid craftingGrid = grid.getCache(ICraftingGrid.class);
-        MachineSource source = machineSourceOf(grid);
-        // 拿不到合成缓存就宁可不动：投进去而没人要的话，货会被网络里别的存储元件接走，那才叫真出错
-        if (storageGrid == null || craftingGrid == null || source == null) return;
-
-        Map<ItemKey, Long> baseline = itemFeedBaseline.get(grid);
-        if (baseline == null) {
-            baseline = new HashMap<>();
-            itemFeedBaseline.put(grid, baseline);
-        }
-
-        for (ItemKey key : pending) {
-            if (key == null) continue;
-
-            // 基准 = 这个网络已经为这个条目投递过的量；共享背包只增不减时它就是绝对值
-            long previous = baseline.getOrDefault(key, 0L);
-            long delta = storage.getItemAmount(key) - previous;
-            if (delta <= 0L) continue;
-
-            IAEItemStack stack = AEApi.instance()
-                .storage()
-                .createItemStack(key.prototype());
-            if (stack == null) continue;
-            stack.setStackSize(delta);
-
-            if (!craftingGrid.isRequesting(stack)) continue;
-
-            // 抑制监听器：这次注入可能写回共享背包元件（CPU 没全收时），
-            // 那条写入的通知由 AE 自己的 NetworkMonitor 发，不需要我们再推一遍
-            IAEItemStack offer = stack.copy();
-            long delivered = AeCellBridge.suppressed(() -> {
-                IAEStack<?> leftover = storageGrid.getItemInventory()
-                    .injectItems(offer, Actionable.MODULATE, source);
-                return leftover == null ? delta : delta - Math.max(0L, leftover.getStackSize());
-            });
-            if (delivered > 0L) {
-                // 基准取 max：AE 那边把货搬去自己的存储（共享背包读数回落）不算「可以再投一次」，
-                // 否则同一批货会被反复投进去
-                baseline.put(key, Math.max(previous, storage.getItemAmount(key)));
+            try {
+                ICraftingGrid craftingGrid = grid.getCache(ICraftingGrid.class);
+                MachineSource source = machineSourceOf(grid);
+                if (!(craftingGrid instanceof IMEInventory<?>) || source == null) continue;
+                for (ItemKey key : items) {
+                    try {
+                        IAEItemStack stack = AEApi.instance()
+                            .storage()
+                            .createItemStack(key.prototype());
+                        if (stack == null) continue;
+                        stack.setStackSize(Math.min(storage.getItemAmount(key), REPORT_CAP));
+                        if (stack.getStackSize() <= 0L || !craftingGrid.isRequesting(stack)) continue;
+                        suppressed(() -> {
+                            CraftingDelivery
+                                .item(storage, key, stack, (IMEInventory<IAEItemStack>) craftingGrid, source);
+                            return null;
+                        });
+                    } catch (Throwable error) {
+                        FutaGtnhMod.LOG.error(
+                            "AE2 crafting delivery failed; uncertain stock is retained in /futashared escrow",
+                            error);
+                    } finally {
+                        SharedStorageManager.broadcastItemChange(key);
+                    }
+                }
+                for (FluidKey key : fluids) {
+                    try {
+                        IAEFluidStack stack = AEApi.instance()
+                            .storage()
+                            .createFluidStack(key.prototype());
+                        if (stack == null) continue;
+                        stack.setStackSize(Math.min(storage.getFluidAmount(key), REPORT_CAP));
+                        if (stack.getStackSize() <= 0L || !craftingGrid.isRequesting(stack)) continue;
+                        suppressed(() -> {
+                            CraftingDelivery
+                                .fluid(storage, key, stack, (IMEInventory<IAEFluidStack>) craftingGrid, source);
+                            return null;
+                        });
+                    } catch (Throwable error) {
+                        FutaGtnhMod.LOG.error(
+                            "AE2 fluid crafting delivery failed; uncertain stock is retained in /futashared escrow",
+                            error);
+                    } finally {
+                        SharedStorageManager.broadcastFluidChange(key);
+                    }
+                }
+            } catch (Throwable error) {
+                FutaGtnhMod.LOG.warn("AE2 crafting cache is unavailable; delivery skipped for this network", error);
             }
         }
-    }
-
-    private static void feedFluids(IGrid grid, SharedStorage storage, Set<FluidKey> pending) {
-        IStorageGrid storageGrid = grid.getCache(IStorageGrid.class);
-        ICraftingGrid craftingGrid = grid.getCache(ICraftingGrid.class);
-        MachineSource source = machineSourceOf(grid);
-        if (storageGrid == null || craftingGrid == null || source == null) return;
-
-        Map<FluidKey, Long> baseline = fluidFeedBaseline.get(grid);
-        if (baseline == null) {
-            baseline = new HashMap<>();
-            fluidFeedBaseline.put(grid, baseline);
-        }
-
-        for (FluidKey key : pending) {
-            if (key == null) continue;
-
-            long previous = baseline.getOrDefault(key, 0L);
-            long delta = storage.getFluidAmount(key) - previous;
-            if (delta <= 0L) continue;
-
-            IAEFluidStack stack = AEApi.instance()
-                .storage()
-                .createFluidStack(key.prototype());
-            if (stack == null) continue;
-            stack.setStackSize(delta);
-
-            if (!craftingGrid.isRequesting(stack)) continue;
-
-            IAEFluidStack offer = stack.copy();
-            long delivered = AeCellBridge.suppressed(() -> {
-                IAEStack<?> leftover = storageGrid.getFluidInventory()
-                    .injectItems(offer, Actionable.MODULATE, source);
-                return leftover == null ? delta : delta - Math.max(0L, leftover.getStackSize());
-            });
-            if (delivered > 0L) {
-                // 基准取 max，理由同 feedItems
-                baseline.put(key, Math.max(previous, storage.getFluidAmount(key)));
-            }
-        }
-    }
-
-    /** 网络拆掉后清掉它的投递基准（基准只对仍然存在的网络有意义）。 */
-    private static void pruneFeedBaselines(List<IGrid> liveGrids) {
-        if (itemFeedBaseline.size() > liveGrids.size()) itemFeedBaseline.keySet()
-            .retainAll(liveGrids);
-        if (fluidFeedBaseline.size() > liveGrids.size()) fluidFeedBaseline.keySet()
-            .retainAll(liveGrids);
     }
 
     /**
