@@ -6,6 +6,9 @@ import net.minecraft.nbt.NBTTagList;
 import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.FluidStack;
 
+import com.futa_gtnh.shared.FluidKey;
+import com.futa_gtnh.shared.ItemKey;
+
 /**
  * 「共享终端方块往哪个面主动搬东西」的配置：方向 + 筛选。
  *
@@ -309,9 +312,21 @@ public final class TerminalIoConfig {
         return index >= 0 && outputFilters[index].matches(stack);
     }
 
+    /** 规范化键直查（主动搬运的热路径用，见 {@link TerminalOutputFilter#matches(ItemKey)}）。 */
+    public boolean matchesOutput(ForgeDirection face, ItemKey key) {
+        int index = index(face);
+        return index >= 0 && outputFilters[index].matches(key);
+    }
+
     public boolean matchesOutput(ForgeDirection face, FluidStack stack) {
         int index = index(face);
         return index >= 0 && outputFilters[index].matches(stack);
+    }
+
+    /** 规范化键直查（主动搬运的热路径用）。 */
+    public boolean matchesOutput(ForgeDirection face, FluidKey key) {
+        int index = index(face);
+        return index >= 0 && outputFilters[index].matches(key);
     }
 
     /** 输出槽位索引缓存同时跟踪方向与白名单变化。 */

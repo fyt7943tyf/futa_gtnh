@@ -11,6 +11,7 @@ import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.FluidTankInfo;
 import net.minecraftforge.fluids.IFluidHandler;
 
+import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 
 /**
@@ -41,6 +42,8 @@ public class TileEntityIoNode extends TileEntity {
     private final TerminalIoConfig io = new TerminalIoConfig();
     /** 主动搬运的节流计时，单位 tick。 */
     private int ioTimer;
+    /** 连续空轮数：驱动空闲退避（搬不动东西时逐步拉长间隔，见 {@link TerminalIoEngine}）。 */
+    private int idleRounds;
     /** 连接重算的兜底计时。 */
     private int recheckTimer;
 
@@ -215,14 +218,17 @@ public class TileEntityIoNode extends TileEntity {
         if (!io.hasAnyMode()) return;
 
         int interval = Math.max(1, io.getIntervalTicks());
-        if (++ioTimer < interval) return;
+        if (++ioTimer < TerminalIoEngine.idleWaitTicks(interval, idleRounds)) return;
         ioTimer = 0;
 
+        boolean moved = false;
         try {
-            TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io);
+            moved = TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io);
         } catch (Throwable t) {
             FutaGtnhMod.LOG.warn("IO 节点：主动搬运时出错（{} {} {}），这一轮跳过", xCoord, yCoord, zCoord, t);
         }
+        idleRounds = moved || !Config.ioIdleBackoff ? 0
+            : Math.min(idleRounds + 1, TerminalIoEngine.IDLE_BACKOFF_STEPS.length);
     }
 
     // ==================================================================

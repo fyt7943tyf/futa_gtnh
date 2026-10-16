@@ -302,6 +302,42 @@ public class SharedStorage {
         return result;
     }
 
+    // ------------------------------------------------------------------
+    // 共享只读快照缓存（IO 节点 / 共享终端的主动搬运轮询用）
+    //
+    // 每轮搬运都要遍历全部条目，而全服可能有几十上百个节点在同一 tick 做这件事。
+    // 条目键是表里的同一批实例、值是不可变 Long，内容只在 revision 变化时才会不同，
+    // 所以按 revision 缓存一份共享列表，让所有节点复用同一次拷贝。
+    // 调用方把它当只读对象：不改列表、不改条目、拿到的 key 实例不重新加工。
+    // ------------------------------------------------------------------
+
+    private List<Map.Entry<ItemKey, Long>> itemSnapshotCache;
+    private List<Map.Entry<FluidKey, Long>> fluidSnapshotCache;
+    private int itemSnapshotRevision = -1;
+    private int fluidSnapshotRevision = -1;
+
+    /**
+     * 带 revision 缓存的物品条目快照；内容没变时多个调用方共享同一份。
+     *
+     * @return 只读列表；调用方不得修改列表或其中的条目
+     */
+    public synchronized List<Map.Entry<ItemKey, Long>> snapshotItemsCached() {
+        if (itemSnapshotCache == null || itemSnapshotRevision != revision) {
+            itemSnapshotCache = snapshotItems();
+            itemSnapshotRevision = revision;
+        }
+        return itemSnapshotCache;
+    }
+
+    /** 同 {@link #snapshotItemsCached()}，流体侧。 */
+    public synchronized List<Map.Entry<FluidKey, Long>> snapshotFluidsCached() {
+        if (fluidSnapshotCache == null || fluidSnapshotRevision != revision) {
+            fluidSnapshotCache = snapshotFluids();
+            fluidSnapshotRevision = revision;
+        }
+        return fluidSnapshotCache;
+    }
+
     /** Captures revision, items and fluids atomically; called by the server-thread read API. */
     synchronized SharedStorageSnapshot snapshotForReadApi(String generation) {
         List<SharedStorageSnapshot.ItemEntry> itemRows = new ArrayList<>(items.size());
