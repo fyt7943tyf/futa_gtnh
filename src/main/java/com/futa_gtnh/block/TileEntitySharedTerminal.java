@@ -16,6 +16,7 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidTankInfo;
 import net.minecraftforge.fluids.IFluidHandler;
 
+import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
@@ -55,6 +56,17 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     private final TerminalIoConfig io = new TerminalIoConfig();
     /** 主动搬运的节流计时，单位 tick。 */
     private int ioTimer;
+    /** 连续空轮数：驱动空闲退避（搬不动东西时逐步拉长间隔，见 {@link TerminalIoEngine}）。 */
+    private int idleRounds;
+    /**
+     * 各条目的堆叠上限缓存。
+     *
+     * <p>
+     * 堆叠上限是键（物品 + 元数据 + NBT）的确定性函数，算过一次就不会变；
+     * 以前每次可见数量查询都为它造一个原型栈（NBT 深拷贝），是被动抽取热路径上
+     * 纯粹的浪费。条目数以仓库里出现过的种类为界，不会失控。
+     */
+    private final Map<ItemKey, Integer> maxStackSizes = new HashMap<>();
 
     public TerminalIoConfig getIo() {
         return io;
@@ -88,23 +100,35 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         if (!io.hasAnyMode()) return;
 
         int interval = Math.max(1, io.getIntervalTicks());
-        if (++ioTimer < interval) return;
+        if (++ioTimer < TerminalIoEngine.idleWaitTicks(interval, idleRounds)) return;
         ioTimer = 0;
 
+        boolean moved = false;
         try {
-            TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io);
+            moved = TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io);
         } catch (Throwable t) {
             // 相邻方块是别的模组写的，出什么怪事都不该把整个服务端 tick 带崩
             FutaGtnhMod.LOG.warn("共享终端：主动搬运时出错（{} {} {}），这个面这一轮跳过", xCoord, yCoord, zCoord, t);
         }
+        idleRounds = moved || !Config.ioIdleBackoff ? 0
+            : Math.min(idleRounds + 1, TerminalIoEngine.IDLE_BACKOFF_STEPS.length);
     }
 
     private boolean allowsOutput(ForgeDirection face, ItemStack stack) {
         return io.getMode(face, false) == TerminalIoConfig.Mode.PUSH && io.matchesOutput(face, stack);
     }
 
+    /** 规范化键直查版 {@link #allowsOutput(ForgeDirection, ItemStack)}：热路径不构造原型栈。 */
+    private boolean allowsOutput(ForgeDirection face, ItemKey key) {
+        return io.getMode(face, false) == TerminalIoConfig.Mode.PUSH && io.matchesOutput(face, key);
+    }
+
     private boolean allowsOutput(ForgeDirection face, FluidStack stack) {
         return io.getMode(face, true) == TerminalIoConfig.Mode.PUSH && io.matchesOutput(face, stack);
+    }
+
+    private boolean allowsOutput(ForgeDirection face, FluidKey key) {
+        return io.getMode(face, true) == TerminalIoConfig.Mode.PUSH && io.matchesOutput(face, key);
     }
 
     // ==================================================================
@@ -138,9 +162,9 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     public FluidStack drain(ForgeDirection from, int maxDrain, boolean doDrain) {
         if (maxDrain <= 0 || io.getMode(from, true) != TerminalIoConfig.Mode.PUSH) return null;
         for (Map.Entry<FluidKey, Long> entry : SharedStorageManager.getStorage()
-            .snapshotFluids()) {
+            .snapshotFluidsCached()) {
             FluidKey key = entry.getKey();
-            if (entry.getValue() > 0L && allowsOutput(from, key.prototype())) {
+            if (entry.getValue() > 0L && allowsOutput(from, key)) {
                 return drainFluid(key, maxDrain, doDrain);
             }
         }
@@ -176,10 +200,10 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     public boolean canDrain(ForgeDirection from, Fluid fluid) {
         if (io.getMode(from, true) != TerminalIoConfig.Mode.PUSH) return false;
         for (Map.Entry<FluidKey, Long> entry : SharedStorageManager.getStorage()
-            .snapshotFluids()) {
+            .snapshotFluidsCached()) {
             FluidKey key = entry.getKey();
-            if (entry.getValue() > 0L && (fluid == null || fluid == key.getFluid())
-                && allowsOutput(from, key.prototype())) return true;
+            if (entry.getValue() > 0L && (fluid == null || fluid == key.getFluid()) && allowsOutput(from, key))
+                return true;
         }
         return false;
     }
@@ -189,9 +213,9 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         List<FluidTankInfo> tanks = new ArrayList<>();
         if (io.getMode(from, true) == TerminalIoConfig.Mode.PUSH) {
             for (Map.Entry<FluidKey, Long> entry : SharedStorageManager.getStorage()
-                .snapshotFluids()) {
+                .snapshotFluidsCached()) {
                 FluidKey key = entry.getKey();
-                if (entry.getValue() > 0L && allowsOutput(from, key.prototype())) {
+                if (entry.getValue() > 0L && allowsOutput(from, key)) {
                     tanks.add(new FluidTankInfo(key.prototype(entry.getValue()), Integer.MAX_VALUE));
                 }
             }
@@ -219,11 +243,12 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
             }
         }
         if (hasItemOutput) {
-            for (Map.Entry<ItemKey, Long> entry : storage.snapshotItems()) {
+            for (Map.Entry<ItemKey, Long> entry : storage.snapshotItemsCached()) {
                 ItemKey key = entry.getKey();
-                if (outputIndices.containsKey(key)) continue;
+                if (entry.getValue() == null || entry.getValue()
+                    .longValue() <= 0L || outputIndices.containsKey(key)) continue;
                 for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
-                    if (allowsOutput(face, key.prototype())) {
+                    if (allowsOutput(face, key)) {
                         outputIndices.put(key, outputKeys.size());
                         outputKeys.add(key);
                         break;
@@ -250,8 +275,19 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         return (int) Math.min(
             SharedStorageManager.getStorage()
                 .getItemAmount(key),
+            maxStackSizeOf(key));
+    }
+
+    /** 这个条目的堆叠上限（缓存，见 {@link #maxStackSizes} 的说明）。 */
+    private int maxStackSizeOf(ItemKey key) {
+        Integer cached = maxStackSizes.get(key);
+        if (cached != null) return cached.intValue();
+        int limit = Math.max(
+            1,
             key.prototype()
                 .getMaxStackSize());
+        maxStackSizes.put(key, Integer.valueOf(limit));
+        return limit;
     }
 
     @Override
@@ -259,16 +295,19 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         ForgeDirection face = ForgeDirection.getOrientation(side);
         if (io.getMode(face, false) != TerminalIoConfig.Mode.PUSH) return INPUT_ONLY.clone();
         refreshOutputKeys();
-        List<Integer> slots = new ArrayList<>();
-        slots.add(INPUT_SLOT);
+        int visibleCount = 0;
+        for (int i = 0; i < outputKeys.size(); i++) {
+            if (visibleAmount(outputKeys.get(i)) > 0 && allowsOutput(face, outputKeys.get(i))) visibleCount++;
+        }
+        int[] result = new int[1 + visibleCount];
+        result[0] = INPUT_SLOT;
+        int index = 1;
         for (int i = 0; i < outputKeys.size(); i++) {
             ItemKey key = outputKeys.get(i);
-            if (visibleAmount(key) > 0 && allowsOutput(face, key.prototype())) {
-                slots.add(1 + i * TerminalIoConfig.FACES + face.ordinal());
+            if (visibleAmount(key) > 0 && allowsOutput(face, key)) {
+                result[index++] = 1 + i * TerminalIoConfig.FACES + face.ordinal();
             }
         }
-        int[] result = new int[slots.size()];
-        for (int i = 0; i < result.length; i++) result[i] = slots.get(i);
         return result;
     }
 

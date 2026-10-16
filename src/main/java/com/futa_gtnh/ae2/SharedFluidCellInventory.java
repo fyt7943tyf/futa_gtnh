@@ -64,6 +64,11 @@ final class SharedFluidCellInventory extends AbstractSharedCellInventory<IAEFlui
     }
 
     @Override
+    protected void noteOwnWrite(FluidKey key) {
+        AeCellBridge.noteOwnFluidWrite(key);
+    }
+
+    @Override
     public IItemList<IAEFluidStack> getAvailableItems(IItemList<IAEFluidStack> out, int iteration) {
         if (AeCellBridge.serveContent(this)) AeCellBridge.addFluidMirror(out);
         return out;

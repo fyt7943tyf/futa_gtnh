@@ -67,7 +67,10 @@ final class SharedCellHandler implements ICellHandler {
         boolean matches = fluid ? type == AEFluidStackType.FLUID_STACK_TYPE : type == AEItemStackType.ITEM_STACK_TYPE;
         if (!matches) return null;
         if (host == null) AeCellBridge.markNullHostQuery(is);
-        return fluid ? new SharedFluidCellInventory(is, null) : new SharedItemCellInventory(is, host);
+        // 两个通道都带上真实宿主：注册表靠 host 解析网格、做同网络去重；
+        // 流体元件以前硬编码 null，导致它永远不进注册表 —— 只有流体元件的网络
+        // 收不到任何增量推送，同网络多枚流体元件也不去重（显示翻倍）。
+        return fluid ? new SharedFluidCellInventory(is, host) : new SharedItemCellInventory(is, host);
     }
 
     // ------------------------------------------------------------------

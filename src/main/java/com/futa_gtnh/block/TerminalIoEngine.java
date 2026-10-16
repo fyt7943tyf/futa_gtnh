@@ -12,6 +12,7 @@ import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.IFluidHandler;
 
+import com.futa_gtnh.Config;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -45,6 +46,34 @@ final class TerminalIoEngine {
 
     private TerminalIoEngine() {}
 
+    // ==================================================================
+    // 空闲退避（共享终端和 IO 节点共用）
+    // ==================================================================
+
+    /**
+     * 连续空轮后的等待档位（tick）：4 → 8 → 16 → 32 → 64 → 128 封顶。
+     *
+     * <p>
+     * 「空轮」= 这一轮没有任何东西真的被搬动（目标满了、源是空的、没有条目
+     * 过白名单……即「无需 IO」）。空闲的节点每个周期都全量扫一遍仓库是服务器
+     * 重 tick 的主因之一，退避把它压到最多每 128 tick（6.4 秒）扫一次；
+     * 一旦搬动了东西立刻回到配置的节奏。{@link Config#ioIdleBackoff}
+     * 关掉时恢复成恒定轮询（旧行为），代价是空闲节点回到每周期全量扫描。
+     */
+    static final int[] IDLE_BACKOFF_STEPS = { 4, 8, 16, 32, 64, 128 };
+
+    /**
+     * @param interval   配置的基准间隔（每 N tick 一轮）
+     * @param idleRounds 连续空轮数（0 = 上一轮有活干）
+     * @return 这一轮之前应该等多少 tick
+     */
+    static int idleWaitTicks(int interval, int idleRounds) {
+        int base = Math.max(1, interval);
+        if (idleRounds <= 0 || !Config.ioIdleBackoff) return base;
+        int step = IDLE_BACKOFF_STEPS[Math.min(idleRounds, IDLE_BACKOFF_STEPS.length) - 1];
+        return Math.max(base, step);
+    }
+
     /**
      * 六个面里，哪几个面挨着能搬东西的方块。
      *
@@ -69,8 +98,15 @@ final class TerminalIoEngine {
         return mask;
     }
 
-    /** 把六个面各走一遍。调用方保证这是服务端、而且配置里至少有一个面需要动。 */
-    static void tick(World world, int x, int y, int z, TerminalIoConfig config) {
+    /**
+     * 把六个面各走一遍。调用方保证这是服务端、而且配置里至少有一个面需要动。
+     *
+     * @return 这一轮是否真的搬动了东西（物品或流体任一面有实际转移）。
+     *         调用方用它做空闲退避：搬不动（目标满 / 没有匹配条目 / 源是空的）
+     *         时逐步拉长下一轮的间隔，别让一堆空闲节点每个周期都全量扫仓库。
+     */
+    static boolean tick(World world, int x, int y, int z, TerminalIoConfig config) {
+        boolean moved = false;
         for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
             TerminalIoConfig.Mode itemMode = config.getMode(face, false);
             TerminalIoConfig.Mode fluidMode = config.getMode(face, true);
@@ -86,26 +122,32 @@ final class TerminalIoEngine {
 
             if (itemMode != TerminalIoConfig.Mode.OFF && neighbour instanceof IInventory) {
                 IInventory inventory = (IInventory) neighbour;
-                if (itemMode.pulls()) pullItems(inventory, side, config);
-                if (itemMode.pushes()) pushItems(inventory, side, config, face);
+                if (itemMode.pulls()) moved |= pullItems(inventory, side, config);
+                if (itemMode.pushes()) moved |= pushItems(inventory, side, config, face);
             }
 
             if (fluidMode != TerminalIoConfig.Mode.OFF && neighbour instanceof IFluidHandler) {
                 IFluidHandler handler = (IFluidHandler) neighbour;
-                if (fluidMode.pulls()) pullFluid(handler, side, config);
-                if (fluidMode.pushes()) pushFluid(handler, side, config, face);
+                if (fluidMode.pulls()) moved |= pullFluid(handler, side, config);
+                if (fluidMode.pushes()) moved |= pushFluid(handler, side, config, face);
             }
         }
+        return moved;
     }
 
     // ==================================================================
     // 物品
     // ==================================================================
 
-    /** 从相邻容器里把东西抽进共享存储。 */
-    private static void pullItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
+    /**
+     * 从相邻容器里把东西抽进共享存储。
+     *
+     * @return 这一轮是否真的搬动了东西（供空闲退避判断）
+     */
+    private static boolean pullItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
+        boolean moved = false;
 
         for (int slot = 0; slot < inventory.getSizeInventory() && budget > 0; slot++) {
             ItemStack stack = inventory.getStackInSlot(slot);
@@ -135,7 +177,9 @@ final class TerminalIoEngine {
 
             SharedStorageManager.broadcastItemChange(key);
             budget -= (int) stored;
+            moved = true;
         }
+        return moved;
     }
 
     /** @return 源那一格是不是真的少了 {@code moved} 个 */
@@ -153,27 +197,36 @@ final class TerminalIoEngine {
      * 而一次提取最多一叠（原版堆叠上限 64）—— 不循环的话，「1024 个/轮」这种档位
      * 在只筛了一种物品时会被卡在 64 个，档位就成了摆设。
      * 循环的终止条件是目标收不下了或者额度用完，两件事都是当场问出来的。
+     *
+     * <p>
+     * <b>热路径顺序</b>：先用仓库快照里现成的规范化键过白名单（命中缓存时零分配、
+     * 零 NBT 拷贝），通过而且额度没花完的条目才构造原型栈去问目标容器。仓库里
+     * 几千个条目、白名单只筛几种东西时，绝大多数条目在第一步就被跳过 ——
+     * 这正是以前每个重 tick 都在做 prototype + ItemKey.of 深拷贝的地方。
+     *
+     * @return 这一轮是否真的搬动了东西（供空闲退避判断）
      */
-    private static void pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config,
+    private static boolean pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config,
         ForgeDirection face) {
         if (config.getOutputFilter(face)
-            .isEmpty(false)) return;
+            .isEmpty(false)) return false;
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
+        boolean moved = false;
 
-        List<Map.Entry<ItemKey, Long>> snapshot = storage.snapshotItems();
+        List<Map.Entry<ItemKey, Long>> snapshot = storage.snapshotItemsCached();
         for (Map.Entry<ItemKey, Long> entry : snapshot) {
-            if (budget <= 0) return;
+            if (budget <= 0) return moved;
 
             ItemKey key = entry.getKey();
             long available = entry.getValue() == null ? 0L
                 : entry.getValue()
                     .longValue();
             if (available <= 0L) continue;
+            if (!config.matchesOutput(face, key)) continue;
 
             ItemStack prototype = key.prototype();
             if (prototype == null || prototype.getItem() == null) continue;
-            if (!config.matchesOutput(face, prototype)) continue;
 
             int maxSize = Math.max(1, prototype.getMaxStackSize());
 
@@ -198,9 +251,11 @@ final class TerminalIoEngine {
 
                 budget -= accepted;
                 available -= taken;
+                if (accepted > 0) moved = true;
                 if (accepted < taken) break;
             }
         }
+        return moved;
     }
 
     /**
@@ -315,15 +370,19 @@ final class TerminalIoEngine {
     // 流体
     // ==================================================================
 
-    /** 从相邻容器里把流体抽进共享存储。 */
-    private static void pullFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config) {
+    /**
+     * 从相邻容器里把流体抽进共享存储。
+     *
+     * @return 这一轮是否真的搬动了东西（供空闲退避判断）
+     */
+    private static boolean pullFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config) {
         int budget = Math.max(1, config.getFluidPerOperation());
 
         FluidStack preview = handler.drain(side, budget, false);
-        if (preview == null || preview.getFluid() == null || preview.amount <= 0) return;
+        if (preview == null || preview.getFluid() == null || preview.amount <= 0) return false;
 
         FluidStack drained = handler.drain(side, preview.amount, true);
-        if (drained == null || drained.getFluid() == null || drained.amount <= 0) return;
+        if (drained == null || drained.getFluid() == null || drained.amount <= 0) return false;
 
         SharedStorage storage = SharedStorageManager.getStorage();
         long stored = storage.insertFluid(drained, drained.amount);
@@ -331,11 +390,12 @@ final class TerminalIoEngine {
             // 存储顶到上限了（理论上不可能）：没存进去的那部分原样灌回去
             int back = (int) (drained.amount - stored);
             handler.fill(side, new FluidStack(drained.getFluid(), back), true);
-            if (stored <= 0L) return;
+            if (stored <= 0L) return false;
         }
 
         FluidKey key = FluidKey.of(drained);
         if (key != null) SharedStorageManager.broadcastFluidChange(key);
+        return true;
     }
 
     /**
@@ -347,25 +407,28 @@ final class TerminalIoEngine {
      * （机器内部的小缓冲罐往往一次只收一点点）。不循环的话，
      * 「2000 万 mB/轮」在只筛了一种流体时会被卡在一次 fill 的量上。
      * 每轮循环至少推进 1 mB，所以额度用完一定停得下来。
+     *
+     * @return 这一轮是否真的搬动了东西（供空闲退避判断）
      */
-    private static void pushFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config,
+    private static boolean pushFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config,
         ForgeDirection face) {
         if (config.getOutputFilter(face)
-            .isEmpty(true)) return;
+            .isEmpty(true)) return false;
         int budget = Math.max(1, config.getFluidPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
+        boolean moved = false;
 
-        List<Map.Entry<FluidKey, Long>> snapshot = storage.snapshotFluids();
+        List<Map.Entry<FluidKey, Long>> snapshot = storage.snapshotFluidsCached();
         for (Map.Entry<FluidKey, Long> entry : snapshot) {
             FluidKey key = entry.getKey();
             long available = entry.getValue() == null ? 0L
                 : entry.getValue()
                     .longValue();
             if (available <= 0L) continue;
+            if (!config.matchesOutput(face, key)) continue;
 
             FluidStack prototype = key.prototype();
             if (prototype == null || prototype.getFluid() == null) continue;
-            if (!config.matchesOutput(face, prototype)) continue;
 
             while (budget > 0 && available > 0L) {
                 int want = (int) Math.min((long) budget, available);
@@ -382,14 +445,18 @@ final class TerminalIoEngine {
                     // 同样是回滚，不受上限约束
                     storage.insertFluidManual(key, taken - filled);
                 }
-                if (filled > 0) SharedStorageManager.broadcastFluidChange(key);
+                if (filled > 0) {
+                    SharedStorageManager.broadcastFluidChange(key);
+                    moved = true;
+                }
 
                 budget -= filled;
                 available -= taken;
                 if (filled <= 0 || filled < taken) break;
             }
 
-            if (budget <= 0) return;
+            if (budget <= 0) return moved;
         }
+        return moved;
     }
 }

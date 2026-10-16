@@ -154,10 +154,22 @@ public final class TerminalOutputFilter {
 
     /** @return 这个物品能不能搬（白名单为空 = 禁止输出） */
     public boolean matches(ItemStack stack) {
-        if (stack == null || stack.getItem() == null || isEmpty(false)) return false;
+        if (stack == null || stack.getItem() == null) return false;
+        return matches(ItemKey.of(stack));
+    }
 
-        ItemKey key = ItemKey.of(stack);
-        if (key == null) return false;
+    /**
+     * 规范化键直查版 {@link #matches(ItemStack)}。
+     *
+     * <p>
+     * 主动搬运每轮要把<b>整个仓库</b>的每个条目都问一遍 —— 走 ItemStack 版本
+     * 的话每次都要重新构造键（NBT 深拷贝 + 重算 hash），这是服务器重 tick 的
+     * 头号热点。仓库快照里的键本来就是规范化的，直接拿来用：命中缓存的路径
+     * 上零分配、零 NBT 拷贝；只有缓存未命中（新条目 / 筛选刚改过）才造一次
+     * 原型栈去查矿辞。
+     */
+    public boolean matches(ItemKey key) {
+        if (key == null || isEmpty(false)) return false;
         if (excludedItems.contains(key)) return false;
         if (items.contains(key)) return true;
 
@@ -179,6 +191,11 @@ public final class TerminalOutputFilter {
 
         FluidKey key = FluidKey.of(stack);
         // 流体没有矿辞，只能按条目选
+        return key != null && fluids.contains(key);
+    }
+
+    /** 规范化键直查版 {@link #matches(FluidStack)}（流体没有矿辞，纯集合查询）。 */
+    public boolean matches(FluidKey key) {
         return key != null && fluids.contains(key);
     }
 

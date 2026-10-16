@@ -52,7 +52,8 @@ import appeng.util.item.AEItemStackType;
  * <li>外部路径（终端界面、GT 管道、拾取自动入库……）改动共享背包时，
  * {@link SharedStorageListener} 只把<b>条目键</b>塞进并发集合（存储锁内零 AE 调用），
  * 由 {@link #onServerTickEnd} 每 tick 末批量对活跃网络
- * {@code postAlterationOfStoredItems}。没有元件在场时监听器第一步就返回，
+ * {@code postAlterationOfStoredItems}。变更键<b>不因注册表暂时为空而被丢弃</b>
+ * —— 元件回来后的第一批推送会把积压补发出去。没有 AE2 时监听器不安装，
  * 全链路开销是「一次 volatile 读」。</li>
  * <li>本元件自己的写入触发的监听回调用 {@link ThreadLocal} 抑制掉 ——
  * AE 的 NetworkMonitor 已经为这次操作发过差量，再推就是重复。</li>
@@ -77,6 +78,10 @@ import appeng.util.item.AEItemStackType;
  * <li>淘汰信号：{@code Platform.postChanges} 在元件被拔出/插入时会以
  * {@code host == null} 新建 handler 问一遍内容。同一 tick 内「被 null-host 查过
  * 但没有发生过注册」= 这个元件已经离开它的驱动器 → 淘汰。
+ * 宿主方块实体失效（区块卸载 / 被破坏，这两种<b>不会</b>产生库存变更事件）
+ * 是第二个淘汰信号。每个 tick 末还会把幸存条目的网格引用从宿主节点<b>重新解析</b>
+ * —— 网络拆分 / 合并后老引用指向死网格，继续往死网格推增量会让真实网络的
+ * 终端冻结在旧状态。
  * （插入路径里驱动器先 updateState → cellUpdate 差分必然先对它做一次内容查询，
  * 也就是先注册，所以插入不会被误杀 —— 见类尾时序注释。）</li>
  * <li>被淘汰的是 primary 时，向该网络补发一次 {@link MENetworkCellArrayUpdate}，
@@ -142,8 +147,13 @@ final class AeCellBridge {
 
         @Override
         public void onItemChanged(ItemKey key) {
+            // 注意这里<b>不检查</b> anyActiveCells：注册表暂时为空（元件都在换网格 /
+            // 刚被错误淘汰 / 尚未注册）期间发生的变更也必须排队。键在集合里有幂等性，
+            // 最多攒「每种条目一个」，等元件回来后第一批推送就能把它们补发给 AE。
+            // 以前这里会直接丢掉 —— 丢掉的变更没有任何补救路径，AE 终端从此冻结在
+            // 旧状态（幽灵材料 / 产物失踪），直到玩家手动对 AE 做一次操作。
             if (!installed || SUPPRESS.get()
-                .booleanValue() || !anyActiveCells || key == null) return;
+                .booleanValue() || key == null) return;
             synchronized (PENDING_LOCK) {
                 pendingItems.add(key);
             }
@@ -152,7 +162,7 @@ final class AeCellBridge {
         @Override
         public void onFluidChanged(FluidKey key) {
             if (!installed || SUPPRESS.get()
-                .booleanValue() || !anyActiveCells || key == null) return;
+                .booleanValue() || key == null) return;
             synchronized (PENDING_LOCK) {
                 pendingFluids.add(key);
             }
@@ -160,7 +170,7 @@ final class AeCellBridge {
 
         @Override
         public void onStorageReplaced() {
-            if (!installed || !anyActiveCells) return;
+            if (!installed) return;
             storageReplaced = true;
         }
     };
@@ -172,8 +182,10 @@ final class AeCellBridge {
     private static final class CellEntry {
 
         final ItemStack stack;
-        final AbstractSharedCellInventory<?, ?> handler;
-        final IGrid grid;
+        /** 现在正代表这颗元件回答查询的 handler（驱动器重建 handler 时会换实例）。 */
+        AbstractSharedCellInventory<?, ?> handler;
+        /** 最近一次解析出的网格；每 tick 末从宿主节点重新解析（见 flushGrids）。 */
+        IGrid grid;
         /** 本 tick 内发生过 null-host 差量查询（Platform.postChanges 的拔/插信号）。 */
         boolean nullHostQuery;
         /** 本 tick 内发生过（重新）注册 = 插入侧的「在场证明」。 */
@@ -214,7 +226,7 @@ final class AeCellBridge {
             .addListener(LISTENER);
     }
 
-    /** 服务端停止时清空全部运行时状态（注册表、镜像、待推送集合）。 */
+    /** 服务端停止时清空全部运行时状态（注册表、镜像、待推送集合、差量基准）。 */
     static synchronized void reset() {
         cells.clear();
         pendingItems.clear();
@@ -223,6 +235,8 @@ final class AeCellBridge {
         fluidMirror = null;
         itemRevisionWatermark = -1;
         fluidRevisionWatermark = -1;
+        lastPostedItems.clear();
+        lastPostedFluids.clear();
         storageReplaced = false;
         anyActiveCells = false;
     }
@@ -247,10 +261,19 @@ final class AeCellBridge {
         CellEntry entry = cells.get(identity);
         if (entry == null) {
             if (handler.host == null) return true;
-            cells.put(identity, new CellEntry(handler.cellItem, handler, handler.grid()));
+            cells.put(identity, new CellEntry(handler.cellItem, handler, handler.currentGrid()));
             cells.get(identity).registeredThisTick = true;
             anyActiveCells = true;
             entry = cells.get(identity);
+        } else if (handler.host != null && entry.handler != handler) {
+            // 同一元件身份（驱动器缓存的 ItemStack 实例）换了 handler 实例：
+            // 要么驱动器 updateState 重建了 handler，要么新元件撞上了被淘汰元件
+            // 留下的 identityHashCode。以「现在来服务的这个」为准 —— 旧 handler
+            // 挂着死网格继续当家的话，这颗元件可能被判成非 primary 而拒绝服务。
+            entry.handler = handler;
+            entry.grid = handler.currentGrid();
+            entry.registeredThisTick = true;
+            anyActiveCells = true;
         }
         return isPrimary(entry);
     }
@@ -283,6 +306,34 @@ final class AeCellBridge {
         } finally {
             SUPPRESS.set(previous);
         }
+    }
+
+    /**
+     * 元件自己的写入落账后同步差量基准（见 {@code lastPostedItems} 的说明）。
+     * AE 网络已经通过 {@code injectItems/extractItems} 的返回值知道了这笔写入，
+     * 这里只是把「上次推送量」对齐到写入后的实际数量，让后续外部变更的差量保持精确。
+     */
+    static synchronized void noteOwnItemWrite(ItemKey key) {
+        if (!installed || key == null) return;
+        lastPostedItems.put(
+            key,
+            Long.valueOf(
+                Math.min(
+                    SharedStorageManager.getStorage()
+                        .getItemAmount(key),
+                    REPORT_CAP)));
+    }
+
+    /** 流体侧的 {@link #noteOwnItemWrite(ItemKey)}。 */
+    static synchronized void noteOwnFluidWrite(FluidKey key) {
+        if (!installed || key == null) return;
+        lastPostedFluids.put(
+            key,
+            Long.valueOf(
+                Math.min(
+                    SharedStorageManager.getStorage()
+                        .getFluidAmount(key),
+                    REPORT_CAP)));
     }
 
     // ==================================================================
@@ -363,8 +414,17 @@ final class AeCellBridge {
     }
 
     // ==================================================================
-    // 每 tick 末冲洗（注册表淘汰 + 合成投递 + 增量推送）
+    // 每 tick 末冲洗（注册表保鲜 + 合成投递 + 增量推送）
     // ==================================================================
+
+    /**
+     * 上一次推送给 AE 的各条目数量。{@code postAlterationOfStoredItems} 在 AE2 里是
+     * <b>差量</b>语义（{@code postChange(true, ...)} 原样把数量当增量发给监听者），
+     * 以前直接把「当前全量」当增量发 —— 终端恰好会重新读绝对值所以没炸，但对任何
+     * 按差量累加的监听者都是污染。现在记住上一笔发到多少，只发真正的变化。
+     */
+    private static final java.util.HashMap<ItemKey, Long> lastPostedItems = new java.util.HashMap<>();
+    private static final java.util.HashMap<FluidKey, Long> lastPostedFluids = new java.util.HashMap<>();
 
     static synchronized void onServerTickEnd() {
         if (!installed || MinecraftServer.getServer() == null) return;
@@ -372,9 +432,9 @@ final class AeCellBridge {
         List<IGrid> gridsNeedingResync = evictStaleCells();
 
         if (!anyActiveCells) {
-            pendingItems.clear();
-            pendingFluids.clear();
-            storageReplaced = false;
+            // 注册表暂时为空：变更<b>留在队列里</b>（不丢），等元件回来后第一批
+            // 推送就会补发。storageReplaced 也一样留着 —— 元件回来时的全量重同步
+            // 仍然要以它为准作废镜像。
             return;
         }
 
@@ -387,6 +447,8 @@ final class AeCellBridge {
             fluidMirror = null;
             itemRevisionWatermark = -1;
             fluidRevisionWatermark = -1;
+            lastPostedItems.clear();
+            lastPostedFluids.clear();
             pendingItems.clear();
             pendingFluids.clear();
             for (IGrid grid : collectLiveGrids()) {
@@ -407,25 +469,54 @@ final class AeCellBridge {
         if (items.isEmpty() && fluids.isEmpty()) return;
 
         List<IGrid> liveGrids = collectLiveGrids();
+        if (liveGrids.isEmpty()) {
+            // 一个可用网络都没有（条目都在换网格）：把键塞回队列，别丢 ——
+            // 下一 tick 网格解析出来了照常补发。
+            requeueChanges(items, fluids);
+            return;
+        }
+
         // ★ 顺序有意义：先向等待的 CPU 投递实物，再广播结算后的共享库存。
         // 中间产物进入 CPU；最终产物被确认后退回共享库。
         feedWaitingCraftingCpus(liveGrids, items, fluids);
+
+        // 差量只算一次：基准（lastPosted）在计算时就会前移，
+        // 每个网络各自算一遍的话，第二个网络起拿到的永远是空集。
+        List<IAEStack<?>> itemDeltaList = items.isEmpty() ? java.util.Collections.<IAEStack<?>>emptyList()
+            : itemDeltas(items);
+        List<IAEStack<?>> fluidDeltaList = fluids.isEmpty() ? java.util.Collections.<IAEStack<?>>emptyList()
+            : fluidDeltas(fluids);
+        if (itemDeltaList.isEmpty() && fluidDeltaList.isEmpty()) return;
 
         for (IGrid grid : liveGrids) {
             try {
                 IStorageGrid storageGrid = grid.getCache(IStorageGrid.class);
                 MachineSource source = machineSourceOf(grid);
-                if (source == null) continue;
-                if (!items.isEmpty()) {
-                    storageGrid.postAlterationOfStoredItems(AEItemStackType.ITEM_STACK_TYPE, itemDeltas(items), source);
+                if (source == null) {
+                    // 拿不到动作来源（宿主不是 IActionHost / 网格刚重组完）：
+                    // 退回一次全量重同步。静默跳过的话这批变更就没了 ——
+                    // 那正是「AE 冻结在旧状态」的来源之一。
+                    postCellArrayUpdate(grid);
+                    continue;
                 }
-                if (!fluids.isEmpty()) {
-                    storageGrid
-                        .postAlterationOfStoredItems(AEFluidStackType.FLUID_STACK_TYPE, fluidDeltas(fluids), source);
+                if (!itemDeltaList.isEmpty()) {
+                    storageGrid.postAlterationOfStoredItems(AEItemStackType.ITEM_STACK_TYPE, itemDeltaList, source);
+                }
+                if (!fluidDeltaList.isEmpty()) {
+                    storageGrid.postAlterationOfStoredItems(AEFluidStackType.FLUID_STACK_TYPE, fluidDeltaList, source);
                 }
             } catch (Throwable t) {
-                FutaGtnhMod.LOG.warn("AE2 共享背包元件：向网络推送增量失败（本 tick 跳过）", t);
+                FutaGtnhMod.LOG.warn("AE2 共享背包元件：向网络推送增量失败，改为触发该网络全量重同步", t);
+                postCellArrayUpdate(grid);
             }
+        }
+    }
+
+    /** flush 中途发现没有可用的网络时，把刚取出的键塞回待推送集合（合并，不覆盖后来新增的）。 */
+    private static void requeueChanges(Set<ItemKey> items, Set<FluidKey> fluids) {
+        synchronized (PENDING_LOCK) {
+            pendingItems.addAll(items);
+            pendingFluids.addAll(fluids);
         }
     }
 
@@ -496,16 +587,37 @@ final class AeCellBridge {
     }
 
     /**
-     * 淘汰「本 tick 被 null-host 差量查询过、且本 tick 没发生过注册」的条目
-     * （= 元件已离开驱动器），并把因此失去 primary 的网络记下来待重同步。
+     * 淘汰已经离开驱动器的元件条目，并把幸存条目的网格引用刷新到「现在」。
+     *
+     * <p>
+     * 淘汰信号有两个，满足其一即淘汰（都受 {@code registeredThisTick} 保护，
+     * 刚注册的条目本 tick 不杀）：
+     * <ol>
+     * <li>原有信号：本 tick 被 null-host 差量查询过且没有发生过注册
+     * （= Platform.postChanges 报告的「拔出 / 插入又拔出」）；</li>
+     * <li>新增信号：宿主方块实体已失效（区块卸载 / 方块被破坏走的是这条 ——
+     * 这两种情况<b>不会</b>触发驱动器的库存变更事件，原有信号收不到，
+     * 条目会带着死网格一直留在表里）。</li>
+     * </ol>
+     *
+     * <p>
+     * 网格刷新在淘汰之前做：AE 网络拆分 / 合并后，驱动器节点会被迁移到新的
+     * {@code IGrid}，老引用指向的网格虽然对象还在、却已经没有任何节点在 tick 它 ——
+     * 继续往死网格推增量，真实网络的监视器就永远收不到通知（AE 终端冻结在旧状态，
+     * 也就是「材料还在、产物没有、从 AE 塞一次就好」的那种不一致）。
      */
     private static List<IGrid> evictStaleCells() {
+        for (CellEntry entry : cells.values()) {
+            IGrid fresh = entry.handler.currentGrid();
+            if (fresh != entry.grid) entry.grid = fresh;
+        }
+
         List<IGrid> resync = null;
         Iterator<CellEntry> iterator = cells.values()
             .iterator();
         while (iterator.hasNext()) {
             CellEntry entry = iterator.next();
-            if (entry.nullHostQuery && !entry.registeredThisTick) {
+            if (!entry.registeredThisTick && isHostGone(entry)) {
                 iterator.remove();
                 if (isPrimaryOfGrid(entry)) {
                     if (resync == null) resync = new ArrayList<>();
@@ -520,6 +632,14 @@ final class AeCellBridge {
         return resync;
     }
 
+    /** 既有淘汰信号（null-host 差量查询且本 tick 无注册），或宿主已经失效。 */
+    private static boolean isHostGone(CellEntry entry) {
+        if (entry.nullHostQuery && !entry.registeredThisTick) return true;
+        Object host = entry.handler.host;
+        if (host instanceof net.minecraft.tileentity.TileEntity tileEntity) return tileEntity.isInvalid();
+        return false;
+    }
+
     private static boolean isPrimaryOfGrid(CellEntry entry) {
         for (CellEntry other : cells.values()) {
             if (other.grid == entry.grid) return other == entry;
@@ -527,11 +647,11 @@ final class AeCellBridge {
         return true;
     }
 
-    /** 当前仍有登记条目的网络（去重）。 */
+    /** 当前仍有登记条目的网络（去重；网格解析不出的条目跳过）。 */
     private static List<IGrid> collectLiveGrids() {
         List<IGrid> result = new ArrayList<>(4);
         for (CellEntry entry : cells.values()) {
-            if (!result.contains(entry.grid)) result.add(entry.grid);
+            if (entry.grid != null && !result.contains(entry.grid)) result.add(entry.grid);
         }
         return result;
     }
@@ -554,17 +674,26 @@ final class AeCellBridge {
         }
     }
 
-    /** 把一批变更键做成「当前全量」的 AE 物品栈（postAlteration 是绝对量语义，0 = 条目消失）。 */
+    /**
+     * 把一批变更键做成真正的<b>差量</b>（当前量 − 上次推送量；0 = 条目消失时为负数）。
+     * {@code postAlterationOfStoredItems} 的消费方按差量理解这些数字，
+     * 没变化的条目直接跳过。构造失败（物品已注销）的条目保持旧基准，下个 tick 重试。
+     */
     private static List<IAEStack<?>> itemDeltas(Set<ItemKey> keys) {
         SharedStorage storage = SharedStorageManager.getStorage();
         List<IAEStack<?>> result = new ArrayList<>(keys.size());
         for (ItemKey key : keys) {
+            long current = Math.min(storage.getItemAmount(key), REPORT_CAP);
+            long previous = lastPostedItems.containsKey(key) ? lastPostedItems.get(key)
+                .longValue() : 0L;
+            if (current == previous) continue;
             IAEItemStack stack = AEApi.instance()
                 .storage()
                 .createItemStack(key.prototype());
             if (stack == null) continue;
-            stack.setStackSize(Math.min(storage.getItemAmount(key), REPORT_CAP));
+            stack.setStackSize(current - previous);
             result.add(stack);
+            lastPostedItems.put(key, Long.valueOf(current));
         }
         return result;
     }
@@ -573,12 +702,17 @@ final class AeCellBridge {
         SharedStorage storage = SharedStorageManager.getStorage();
         List<IAEStack<?>> result = new ArrayList<>(keys.size());
         for (FluidKey key : keys) {
+            long current = Math.min(storage.getFluidAmount(key), REPORT_CAP);
+            long previous = lastPostedFluids.containsKey(key) ? lastPostedFluids.get(key)
+                .longValue() : 0L;
+            if (current == previous) continue;
             IAEFluidStack stack = AEApi.instance()
                 .storage()
                 .createFluidStack(key.prototype());
             if (stack == null) continue;
-            stack.setStackSize(Math.min(storage.getFluidAmount(key), REPORT_CAP));
+            stack.setStackSize(current - previous);
             result.add(stack);
+            lastPostedFluids.put(key, Long.valueOf(current));
         }
         return result;
     }
