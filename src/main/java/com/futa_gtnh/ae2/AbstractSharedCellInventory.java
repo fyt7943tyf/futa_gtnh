@@ -50,18 +50,24 @@ abstract class AbstractSharedCellInventory<StackType extends IAEStack<StackType>
      */
     final ISaveProvider host;
 
-    private final IGrid grid;
-
     protected AbstractSharedCellInventory(ItemStack cellItem, ISaveProvider host) {
         this.cellItem = cellItem;
         this.host = host;
-        this.grid = resolveGrid(host);
     }
 
-    /** 注册表用：这个元件挂在哪个网络上（无宿主或拿不到时为 null）。 */
+    /**
+     * <b>现场</b>解析这个元件当前挂的网络（无宿主或拿不到时为 null）。
+     *
+     * <p>
+     * 刻意不缓存：AE 网络重组（拆分 / 合并 / 区块卸载重载）之后，驱动器节点会被
+     * 迁移到新的 {@code IGrid}，构造期捕获的快照就成了指向死网格的引用。
+     * 注册表如果继续拿旧快照推送增量，真实网络的监视器永远收不到通知，
+     * AE 终端就会冻结在旧状态（幽灵材料 / 产物失踪）。所以凡是要「用」网格的场合
+     * （tick 末推送、primary 选举）都现场解析；解析本身只是两次引用读取，很便宜。
+     */
     @Nullable
-    final IGrid grid() {
-        return grid;
+    final IGrid currentGrid() {
+        return resolveGrid(host);
     }
 
     private static IGrid resolveGrid(ISaveProvider host) {
@@ -102,6 +108,13 @@ abstract class AbstractSharedCellInventory<StackType extends IAEStack<StackType>
     /** 通知共享终端 GUI 这一条变了（没有观众时是空操作）。 */
     protected abstract void broadcastChange(Key key);
 
+    /**
+     * 元件自己的写入落账后，把差量基准同步到新数量。
+     * AE 网络已经通过返回值知道了这笔写入，基准不同步的话，
+     * 下一笔外部变更的差量会把这笔一起重复计入。
+     */
+    protected abstract void noteOwnWrite(Key key);
+
     // ==================================================================
     // IMEInventory
     // ==================================================================
@@ -117,6 +130,7 @@ abstract class AbstractSharedCellInventory<StackType extends IAEStack<StackType>
             long accepted = AeCellBridge.suppressed(() -> insertStorage(key, input.getStackSize()));
             if (accepted <= 0) return input;
             broadcastChange(key);
+            noteOwnWrite(key);
             if (accepted >= input.getStackSize()) return null;
             return copyWithSize(input, input.getStackSize() - accepted);
         }
@@ -137,6 +151,7 @@ abstract class AbstractSharedCellInventory<StackType extends IAEStack<StackType>
             long taken = AeCellBridge.suppressed(() -> extractStorage(key, request.getStackSize()));
             if (taken <= 0) return null;
             broadcastChange(key);
+            noteOwnWrite(key);
             return copyWithSize(request, taken);
         }
 

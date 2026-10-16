@@ -65,6 +65,11 @@ final class SharedItemCellInventory extends AbstractSharedCellInventory<IAEItemS
     }
 
     @Override
+    protected void noteOwnWrite(ItemKey key) {
+        AeCellBridge.noteOwnItemWrite(key);
+    }
+
+    @Override
     public IItemList<IAEItemStack> getAvailableItems(IItemList<IAEItemStack> out, int iteration) {
         if (AeCellBridge.serveContent(this)) AeCellBridge.addItemMirror(out);
         return out;
