@@ -66,7 +66,8 @@ import appeng.util.item.AEItemStackType;
  * <p>
  * <b>同网络去重</b>：所有元件包装的是<b>同一个</b>共享存储单例，同一网络装两个
  * 的话聚合列表会把每个条目算两遍（显示翻倍、合成快照翻倍）。规则：
- * 每个网络只有最早注册的元件（primary）提供内容，其余惰性（拒收、不吐、列表为空）；
+ * 每个网络的每种存储通道各由最早注册的元件（primary）提供内容，
+ * 同通道的其余元件惰性（拒收、不吐、列表为空）；物品和流体元件互不竞争。
  * 跨网络的多个元件各自正常服务 —— 和「多个共享终端方块」同一语义。
  *
  * <p>
@@ -288,11 +289,15 @@ final class AeCellBridge {
         if (entry != null) entry.nullHostQuery = true;
     }
 
-    /** 同一网络里最早登记的条目是 primary；没有同网络竞争者时自己就是。 */
+    /** 同一网络、同一存储通道里最早登记的条目是 primary。 */
     private static boolean isPrimary(CellEntry entry) {
         if (entry == null) return true;
         for (CellEntry other : cells.values()) {
-            if (other.grid == entry.grid) return other == entry;
+            // 两种通道分别由 final 的 SharedItem/SharedFluidCellInventory 实现。
+            // 按 handler 类型分组，也避免选主时触发 AE stack type 注册表的静态初始化。
+            if (other.grid == entry.grid && other.handler.getClass() == entry.handler.getClass()) {
+                return other == entry;
+            }
         }
         return true;
     }
@@ -618,8 +623,10 @@ final class AeCellBridge {
         while (iterator.hasNext()) {
             CellEntry entry = iterator.next();
             if (!entry.registeredThisTick && isHostGone(entry)) {
+                // 必须在移除前判定；移除后表里只剩次要元件，会漏掉接管所需的重同步。
+                boolean wasPrimary = isPrimary(entry);
                 iterator.remove();
-                if (isPrimaryOfGrid(entry)) {
+                if (wasPrimary && entry.grid != null) {
                     if (resync == null) resync = new ArrayList<>();
                     resync.add(entry.grid);
                 }
@@ -638,13 +645,6 @@ final class AeCellBridge {
         Object host = entry.handler.host;
         if (host instanceof net.minecraft.tileentity.TileEntity tileEntity) return tileEntity.isInvalid();
         return false;
-    }
-
-    private static boolean isPrimaryOfGrid(CellEntry entry) {
-        for (CellEntry other : cells.values()) {
-            if (other.grid == entry.grid) return other == entry;
-        }
-        return true;
     }
 
     /** 当前仍有登记条目的网络（去重；网格解析不出的条目跳过）。 */

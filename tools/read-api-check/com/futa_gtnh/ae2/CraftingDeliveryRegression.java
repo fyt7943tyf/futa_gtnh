@@ -2,6 +2,7 @@ package com.futa_gtnh.ae2;
 
 import java.io.File;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.Collections;
 import java.util.HashSet;
@@ -22,9 +23,14 @@ import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageListener;
+import com.futa_gtnh.shared.SharedStorageManager;
 
 import appeng.api.config.Actionable;
+import appeng.api.networking.IGrid;
+import appeng.api.networking.IGridNode;
+import appeng.api.networking.security.IActionHost;
 import appeng.api.storage.IMEInventory;
+import appeng.api.storage.ISaveProvider;
 import appeng.api.storage.data.IAEFluidStack;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IAEStack;
@@ -52,6 +58,7 @@ public final class CraftingDeliveryRegression {
         exercise(new FluidChannel(FluidKey.of(fluid)));
         nestedSuppression();
         concurrentChangeQueue();
+        cellChannels();
         System.out.println("AE crafting delivery regression: " + assertions + " assertions passed");
     }
 
@@ -281,6 +288,71 @@ public final class CraftingDeliveryRegression {
         boolean failed = false;
         try { action.run(); } catch (IllegalStateException expected) { failed = true; }
         check(failed, "expected guarded failure");
+    }
+
+    /** Real cell inventories must expose both channels, regardless of registration order. */
+    private static void cellChannels() throws Exception {
+        Field installed = AeCellBridge.class.getDeclaredField("installed"); installed.setAccessible(true);
+        Field storageField = SharedStorageManager.class.getDeclaredField("storage"); storageField.setAccessible(true);
+        Method evict = AeCellBridge.class.getDeclaredMethod("evictStaleCells"); evict.setAccessible(true);
+        SharedStorage previous = SharedStorageManager.getStorage();
+        try {
+            for (boolean fluidFirst : new boolean[] { false, true }) {
+                AeCellBridge.reset(); installed.setBoolean(null, true);
+                SharedStorage storage = new SharedStorage(); storageField.set(null, storage);
+                ItemKey itemKey = ItemKey.of(new ItemStack(Items.diamond));
+                FluidKey fluidKey = FluidKey.of(new FluidStack(FluidRegistry.WATER, 1));
+                storage.insertItemManual(itemKey, 64);
+                storage.insertFluidManual(fluidKey, 64000);
+                IAEItemStack item = fixture(IAEItemStack.class, itemKey.prototype(), null, 1);
+                IAEFluidStack fluid = fixture(IAEFluidStack.class, null, fluidKey.prototype(), 1000);
+                IGrid grid = grid();
+                ISaveProvider host = host(grid);
+                SharedItemCellInventory items = new SharedItemCellInventory(new ItemStack(Items.paper), host);
+                SharedFluidCellInventory fluids = new SharedFluidCellInventory(new ItemStack(Items.paper), host);
+                check(AeCellBridge.serveContent(fluidFirst ? fluids : items), "first cell serves its channel");
+                check(items.getAvailableItem(item, 0) != null, "item channel stays visible beside fluid cell");
+                IAEFluidStack available = fluids.getAvailableItem(fluid, 0);
+                check(available != null && available.getStackSize() == 64000, "fluid channel reports real warehouse amount beside item cell");
+                check(fluids.extractItems(fluid, Actionable.SIMULATE, null).getStackSize() == 1000, "mixed network can extract fluid");
+                check(fluids.canAccept(fluid) && items.canAccept(item), "both channels accept independently");
+                check(storage.getFluidAmount(fluidKey) == 64000, "simulated fluid extraction preserves stock");
+                SharedFluidCellInventory duplicate = new SharedFluidCellInventory(new ItemStack(Items.paper), host);
+                SharedItemCellInventory duplicateItem = new SharedItemCellInventory(new ItemStack(Items.paper), host);
+                check(duplicate.getAvailableItem(fluid, 0) == null && !duplicate.canAccept(fluid), "same-network fluid cells do not double count");
+                check(duplicateItem.getAvailableItem(item, 0) == null, "same-network item cells still deduplicate");
+                SharedFluidCellInventory remote = new SharedFluidCellInventory(new ItemStack(Items.paper), host(grid()));
+                check(remote.getAvailableItem(fluid, 0).getStackSize() == 64000, "separate AE networks each expose fluid stock");
+
+                evict.invoke(null); // End the registration tick, then simulate the primary fluid cell being removed.
+                AeCellBridge.markNullHostQuery(fluids.cellItem);
+                Object resync = evict.invoke(null);
+                check(resync instanceof java.util.List<?> && ((java.util.List<?>) resync).contains(grid), "removing fluid primary requests a network rescan even beside item cells");
+                check(duplicate.getAvailableItem(fluid, 0).getStackSize() == 64000, "remaining fluid cell takes over");
+                check(items.getAvailableItem(item, 0).getStackSize() == 64, "fluid takeover does not disturb item primary");
+            }
+        } finally {
+            AeCellBridge.reset(); storageField.set(null, previous);
+        }
+    }
+
+    private static IGrid grid() {
+        return (IGrid) Proxy.newProxyInstance(IGrid.class.getClassLoader(), new Class<?>[] { IGrid.class }, (proxy, method, args) -> {
+            if (method.getName().equals("equals")) return proxy == args[0];
+            if (method.getName().equals("hashCode")) return System.identityHashCode(proxy);
+            throw new AssertionError("Unexpected grid operation: " + method.getName());
+        });
+    }
+
+    private static ISaveProvider host(IGrid grid) {
+        IGridNode node = (IGridNode) Proxy.newProxyInstance(IGridNode.class.getClassLoader(), new Class<?>[] { IGridNode.class }, (proxy, method, args) -> {
+            if (method.getName().equals("getGrid")) return grid;
+            throw new AssertionError("Unexpected node operation: " + method.getName());
+        });
+        return (ISaveProvider) Proxy.newProxyInstance(ISaveProvider.class.getClassLoader(), new Class<?>[] { ISaveProvider.class, IActionHost.class }, (proxy, method, args) -> {
+            if (method.getName().equals("getActionableNode")) return node;
+            throw new AssertionError("Unexpected host operation: " + method.getName());
+        });
     }
 
     private static synchronized void check(boolean condition, String message) {
