@@ -32,16 +32,13 @@ import com.futa_gtnh.shared.ItemKey;
  * <ol>
  * <li>具体的物品 / 流体条目（可以选多个）；</li>
  * <li>{@link Preset 矿辞预设}（原矿、粉碎的矿、洗净的矿、含杂的矿、热力离心后的矿）；</li>
- * <li>自己敲的矿辞前缀（例如 {@code ingot}、{@code plate}）。</li>
+ * <li>AE2 矿典过滤卡表达式（例如 {@code ingot*}、{@code crushed*&!crushedPurified*}）。</li>
  * </ol>
  *
  * <p>
- * <b>矿辞是「按最具体的前缀归类」的。</b>这一点必须说清楚，因为 GT 的前缀天生重叠：
- * {@code crushedIron}（粉碎的矿）是 {@code crushedPurifiedIron}（洗净的矿）的<b>前缀</b>。
- * 如果直接 {@code startsWith} 判断，勾了「粉碎的矿」就会把洗净的、离心的也一起放进来。
- * 所以这里先在所有已知前缀（5 个预设的前缀 + 自己敲的）里找出<b>最长</b>的那个匹配，
- * 再问「那一个是不是被勾上了」—— {@code crushedPurifiedIron} 归到
- * {@code crushedPurified}，于是勾「粉碎的矿」不会误伤它。
+ * 矿辞匹配直接使用 AE2 的 {@code OreFilteredList}，包括大小写、通配符、逻辑组合、
+ * 正则表达式、无效表达式处理和缓存语义。预设也是普通表达式，
+ * 例如「粉碎」对应 {@code crushed*}，会同时匹配洗净和离心矿；需要排除时使用自定义表达式。
  */
 public final class TerminalIoConfig {
 
@@ -112,6 +109,16 @@ public final class TerminalIoConfig {
 
         public String[] getPrefixes() {
             return prefixes;
+        }
+
+        public String getExpression() {
+            StringBuilder expression = new StringBuilder();
+            for (String prefix : prefixes) {
+                if (expression.length() > 0) expression.append('|');
+                expression.append(prefix)
+                    .append('*');
+            }
+            return expression.toString();
         }
     }
 

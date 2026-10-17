@@ -45,6 +45,7 @@ tasks.register<JavaExec>("verifySharedStorageReadApi") {
 }
 
 tasks.named("check") {
+    dependsOn(tasks.named("verifyTerminalIo"))
     dependsOn(tasks.named("verifyProspectorChineseNames"))
     dependsOn(tasks.named("verifySharedStorageReadApi"))
     dependsOn(tasks.named("verifyDisassembler"))
@@ -225,3 +226,24 @@ tasks.register<JavaExec>("verifyAeCraftingDelivery") {
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 tasks.named("check") { dependsOn("verifyAeCraftingDelivery") }
+
+val compileTerminalIoChecks = tasks.register<JavaCompile>("compileTerminalIoChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/terminal-io-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output +
+        sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("terminal-io-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifyTerminalIo") {
+    group = "verification"
+    description = "Checks terminal IO, AE2 ore card parity, legacy filter migration and quantity conservation"
+    dependsOn(compileTerminalIoChecks)
+    mainClass.set("com.futa_gtnh.block.TerminalIoCheckLauncher")
+    classpath = files(compileTerminalIoChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}

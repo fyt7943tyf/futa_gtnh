@@ -137,8 +137,8 @@ futa_gtnh.gui.ionode.syncing=同步中…（正在向服务端要这个节点的
 futa_gtnh.gui.terminal.io.kind.item=筛选：物品
 futa_gtnh.gui.terminal.io.kind.fluid=筛选：流体
 futa_gtnh.gui.terminal.io.search=搜索（拼音 / @模组 / *矿辞）
-futa_gtnh.gui.terminal.io.prefix=矿辞前缀（回车生效）
-futa_gtnh.gui.terminal.io.prefix.title=矿辞前缀
+futa_gtnh.gui.terminal.io.prefix=表达式（回车生效）
+futa_gtnh.gui.terminal.io.prefix.title=矿典表达式
 futa_gtnh.gui.terminal.io.preset.title=矿辞预设
 futa_gtnh.gui.terminal.io.clear=清空白名单
 futa_gtnh.gui.terminal.io.done=完成
@@ -487,3 +487,7 @@ futa_gtnh.medock.chest_info=%s：%s / %s
 futa_gtnh.medock.tank_empty=储罐：空（容量 %s mB）
 futa_gtnh.medock.tank_info=%s：%s / %s mB
 futa_gtnh.medock.hint=内容随容器物品 NBT 走，随时取出原样可用；接 AE 线缆供通道。
+
+futa_gtnh.gui.terminal.io.ore.syntax=同 AE2 矿典过滤卡：区分大小写；* 通配；| 或；& 且；! 非
+futa_gtnh.gui.terminal.io.ore.example=例：crushed*&!crushedPurified*&!crushedCentrifuged*
+futa_gtnh.gui.terminal.io.ore.regex=支持 AE2 正则模式；预设「粉碎」= crushed*（含洗净/离心矿）

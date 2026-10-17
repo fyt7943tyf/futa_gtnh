@@ -140,8 +140,8 @@ futa_gtnh.gui.ionode.syncing=Syncing... (asking the server for this node's confi
 futa_gtnh.gui.terminal.io.kind.item=Filter: items
 futa_gtnh.gui.terminal.io.kind.fluid=Filter: fluids
 futa_gtnh.gui.terminal.io.search=Search (pinyin / @mod / *oredict)
-futa_gtnh.gui.terminal.io.prefix=Ore dict prefix (press Enter)
-futa_gtnh.gui.terminal.io.prefix.title=Ore dict prefixes
+futa_gtnh.gui.terminal.io.prefix=Expression (Enter)
+futa_gtnh.gui.terminal.io.prefix.title=Ore dict filter
 futa_gtnh.gui.terminal.io.preset.title=Ore dict presets
 futa_gtnh.gui.terminal.io.clear=Clear list
 futa_gtnh.gui.terminal.io.done=Done
@@ -490,3 +490,7 @@ futa_gtnh.medock.chest_info=%s: %s / %s
 futa_gtnh.medock.tank_empty=Tank: empty (capacity %s mB)
 futa_gtnh.medock.tank_info=%s: %s / %s mB
 futa_gtnh.medock.hint=Contents live in the item NBT; take it out anytime. Connect AE cable for a channel.
+
+futa_gtnh.gui.terminal.io.ore.syntax=AE2 Ore Dictionary Filter Card: case-sensitive; * wildcard; | OR; & AND; ! NOT
+futa_gtnh.gui.terminal.io.ore.example=Example: crushed*&!crushedPurified*&!crushedCentrifuged*
+futa_gtnh.gui.terminal.io.ore.regex=AE2 regex mode supported; Crushed preset = crushed* (includes purified/centrifuged)

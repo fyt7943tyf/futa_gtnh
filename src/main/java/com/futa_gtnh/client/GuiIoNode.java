@@ -34,7 +34,7 @@ import com.futa_gtnh.shared.ItemKey;
  * <li><b>面配置</b>：这一面（←/→ 在有连接的面之间切换）的物品 / 流体方向 ——
  * 关 / 抽入 / 输出 / 输入输出 四态（EnderIO 的语义），默认全部<b>关</b>；</li>
  * <li><b>输出筛选</b>：这一面的输出白名单，条目来自共享存储（和共享终端的筛选页同一套，
- * 但<b>默认按数量倒序</b>），外加矿辞预设和自定义前缀；</li>
+ * 但<b>默认按数量倒序</b>），外加矿辞预设和 AE2 矿典表达式；</li>
  * <li><b>节奏</b>：这台节点自己的间隔与每轮数量。</li>
  * </ul>
  *
@@ -85,7 +85,7 @@ public class GuiIoNode extends FutaGuiContainer {
     private int tab = TAB_MAIN;
 
     private FutaSearchField searchField;
-    private GuiTextField prefixField;
+    private GuiTextField oreFilterField;
 
     private boolean fluidTab;
     /**
@@ -143,7 +143,7 @@ public class GuiIoNode extends FutaGuiContainer {
 
         buttonList.clear();
         searchField = null;
-        prefixField = null;
+        oreFilterField = null;
 
         for (int i = 0; i < TAB_COUNT; i++) {
             buttonList.add(new FlatButton(BTN_TAB_BASE + i, guiLeft + 8 + i * 66, guiTop + 20, 64, 16, ""));
@@ -212,14 +212,18 @@ public class GuiIoNode extends FutaGuiContainer {
         }
 
         if (!fluidTab) {
-            prefixField = new com.futa_gtnh.client.widget.FutaSearchField(
+            oreFilterField = new com.futa_gtnh.client.widget.FutaSearchField(
                 fontRendererObj,
                 guiLeft + 200,
                 guiTop + 146,
                 92,
                 16);
-            prefixField.setMaxStringLength(64);
-            prefixField.setText(joinPrefixes());
+            oreFilterField.setMaxStringLength(
+                Math.max(
+                    1024,
+                    currentFilter().getOreFilter()
+                        .length()));
+            oreFilterField.setText(currentFilter().getOreFilter());
         }
 
         buttonList.add(new FlatButton(BTN_CLEAR, guiLeft + 8, guiTop + 202, 60, 16, ""));
@@ -233,15 +237,6 @@ public class GuiIoNode extends FutaGuiContainer {
             buttonList
                 .add(new FlatButton(BTN_RATE_BASE + row * 2 + 1, guiLeft + 232, guiTop + 78 + row * 28, 18, 18, "+"));
         }
-    }
-
-    private String joinPrefixes() {
-        StringBuilder builder = new StringBuilder();
-        for (String prefix : currentFilter().getCustomPrefixes()) {
-            if (builder.length() > 0) builder.append(' ');
-            builder.append(prefix);
-        }
-        return builder.toString();
     }
 
     private TerminalOutputFilter currentFilter() {
@@ -381,7 +376,7 @@ public class GuiIoNode extends FutaGuiContainer {
     public void updateScreen() {
         super.updateScreen();
         if (searchField != null) searchField.updateCursorCounter();
-        if (prefixField != null) prefixField.updateCursorCounter();
+        if (oreFilterField != null) oreFilterField.updateCursorCounter();
         if (!configReady() && ++requestTimer >= 10) {
             requestTimer = 0;
             requestConfig();
@@ -433,9 +428,9 @@ public class GuiIoNode extends FutaGuiContainer {
             searchField.setVisible(tab == TAB_FILTER);
             searchField.setEnabled(filter);
         }
-        if (prefixField != null) {
-            prefixField.setVisible(tab == TAB_FILTER && !fluidTab);
-            prefixField.setEnabled(filter && !fluidTab);
+        if (oreFilterField != null) {
+            oreFilterField.setVisible(tab == TAB_FILTER && !fluidTab);
+            oreFilterField.setEnabled(filter && !fluidTab);
         }
 
         TerminalIoConfig.Preset[] presets = TerminalIoConfig.Preset.values();
@@ -603,17 +598,21 @@ public class GuiIoNode extends FutaGuiContainer {
             drawRect(guiLeft + 90, guiTop + 40, guiLeft + 232, guiTop + 56, 0xFF000000);
         }
         if (searchField != null) searchField.drawTextBox();
-        if (prefixField != null) prefixField.drawTextBox();
+        if (oreFilterField != null) oreFilterField.drawTextBox();
 
         if (searchField != null && searchField.getVisible()
             && searchField.getText()
                 .isEmpty()) {
             fontRendererObj.drawString(tr("futa_gtnh.gui.terminal.io.search"), guiLeft + 93, guiTop + 44, 0x707070);
         }
-        if (prefixField != null && prefixField.getVisible()
-            && prefixField.getText()
+        if (oreFilterField != null && oreFilterField.getVisible()
+            && oreFilterField.getText()
                 .isEmpty()) {
-            fontRendererObj.drawString(tr("futa_gtnh.gui.terminal.io.prefix"), guiLeft + 203, guiTop + 150, 0x707070);
+            fontRendererObj.drawString(
+                fontRendererObj.trimStringToWidth(tr("futa_gtnh.gui.terminal.io.prefix"), 86),
+                guiLeft + 203,
+                guiTop + 150,
+                0x707070);
         }
 
         if (!fluidTab) {
@@ -692,8 +691,9 @@ public class GuiIoNode extends FutaGuiContainer {
                 .size()
                 + filter.getPresets()
                     .size()
-                + filter.getCustomPrefixes()
-                    .size();
+                + (filter.getOreFilter()
+                    .trim()
+                    .isEmpty() ? 0 : 1);
     }
 
     // ---- 节奏页（与共享终端的节奏页同一套） ----
@@ -719,6 +719,23 @@ public class GuiIoNode extends FutaGuiContainer {
     }
 
     private void drawTooltips(int mouseX, int mouseY) {
+
+        if (tab == TAB_FILTER && !fluidTab
+            && oreFilterField != null
+            && mouseX >= guiLeft + 200
+            && mouseX < guiLeft + 292
+            && mouseY >= guiTop + 134
+            && mouseY < guiTop + 162) {
+            drawHoveringText(
+                java.util.Arrays.asList(
+                    tr("futa_gtnh.gui.terminal.io.ore.syntax"),
+                    tr("futa_gtnh.gui.terminal.io.ore.example"),
+                    tr("futa_gtnh.gui.terminal.io.ore.regex")),
+                mouseX,
+                mouseY,
+                fontRendererObj);
+            return;
+        }
         if (tab != TAB_FILTER) return;
 
         StorageViewEntry selected = whitelist.entryAt(mouseX, mouseY, guiLeft + 8, guiTop + 158);
@@ -761,7 +778,7 @@ public class GuiIoNode extends FutaGuiContainer {
         TerminalIoConfig config = ClientIoNode.get();
 
         if (button.id >= BTN_TAB_BASE && button.id < BTN_TAB_BASE + TAB_COUNT) {
-            applyPrefixes();
+            applyOreFilter();
             tab = button.id - BTN_TAB_BASE;
             // 换页签要重建控件，不然几个页签的按钮会叠在一起
             initGui();
@@ -776,7 +793,7 @@ public class GuiIoNode extends FutaGuiContainer {
         }
 
         if (button.id == BTN_PREV_FACE || button.id == BTN_NEXT_FACE) {
-            applyPrefixes();
+            applyOreFilter();
             face = switchFace(button.id == BTN_NEXT_FACE ? 1 : -1);
             built = false;
             refreshLabels();
@@ -830,14 +847,14 @@ public class GuiIoNode extends FutaGuiContainer {
 
         switch (button.id) {
             case BTN_KIND:
-                applyPrefixes();
+                applyOreFilter();
                 fluidTab = !fluidTab;
                 shown.clear();
                 initGui();
                 break;
             case BTN_CLEAR:
                 currentFilter().clear(fluidTab);
-                if (prefixField != null && !fluidTab) prefixField.setText("");
+                if (oreFilterField != null && !fluidTab) oreFilterField.setText("");
                 refreshLabels();
                 pushConfig();
                 // 「已选」视图下清空白名单，网格要同步清空
@@ -860,7 +877,7 @@ public class GuiIoNode extends FutaGuiContainer {
 
         if (tab == TAB_FILTER) {
             if (searchField != null) searchField.mouseClicked(mouseX, mouseY, mouseButton);
-            if (prefixField != null) prefixField.mouseClicked(mouseX, mouseY, mouseButton);
+            if (oreFilterField != null) oreFilterField.mouseClicked(mouseX, mouseY, mouseButton);
         }
 
         if (tab != TAB_FILTER || mouseButton != 0 || !configReady()) return;
@@ -917,16 +934,16 @@ public class GuiIoNode extends FutaGuiContainer {
             return;
         }
 
-        if (tab == TAB_FILTER && prefixField != null && prefixField.isFocused()) {
+        if (tab == TAB_FILTER && oreFilterField != null && oreFilterField.isFocused()) {
             if (keyCode == Keyboard.KEY_ESCAPE) {
                 mc.displayGuiScreen(null);
                 return;
             }
             if (keyCode == Keyboard.KEY_RETURN) {
-                applyPrefixes();
+                applyOreFilter();
                 return;
             }
-            prefixField.textboxKeyTyped(typedChar, keyCode);
+            oreFilterField.textboxKeyTyped(typedChar, keyCode);
             return;
         }
 
@@ -935,19 +952,20 @@ public class GuiIoNode extends FutaGuiContainer {
         }
     }
 
-    /** 前缀是「回车才生效」的，切页签 / 关界面时补一次。 */
-    private void applyPrefixes() {
-        if (tab != TAB_FILTER || fluidTab || prefixField == null || !prefixField.getVisible() || !configReady()) return;
-        if (prefixField.getText()
-            .equals(joinPrefixes())) return;
-        currentFilter().setCustomPrefixes(prefixField.getText());
+    /** 表达式是「回车才生效」的，切页签 / 关界面时补一次。 */
+    private void applyOreFilter() {
+        if (tab != TAB_FILTER || fluidTab || oreFilterField == null || !oreFilterField.getVisible() || !configReady())
+            return;
+        if (oreFilterField.getText()
+            .equals(currentFilter().getOreFilter())) return;
+        currentFilter().setOreFilter(oreFilterField.getText());
         refreshLabels();
         pushConfig();
     }
 
     @Override
     public void onGuiClosed() {
-        applyPrefixes();
+        applyOreFilter();
         super.onGuiClosed();
     }
 }

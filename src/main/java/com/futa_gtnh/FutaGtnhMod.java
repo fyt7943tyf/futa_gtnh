@@ -55,10 +55,9 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // after:enhancedlootbags / after:vendingmachine 同理：自选抽奖机要复用
     // ELB 已加载完的战利品组配置；VendingMachine 的团队钱包数据也是初始化好
     // 之后再读更稳妥。都是软依赖，缺席时只是不注册/不可用。
-    // after:appliedenergistics2 也是软依赖排序：共享背包存储元件要往 AE2 的
-    // cell registry 里注册 ICellHandler（见 com.futa_gtnh.ae2 包），排在 AE2
-    // 之后能保证它的注册表已经就绪；缺席时那条功能整体不启用。
-    dependencies = "required-after:gregtech;required-after:modularui2;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure;after:appliedenergistics2")
+    // AE2 是矿典输出过滤的硬依赖；排在它之后也保证共享存储元件注册时
+    // cell registry 已经就绪（见 com.futa_gtnh.ae2 包）。
+    dependencies = "required-after:gregtech;required-after:modularui2;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure;required-after:appliedenergistics2")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";

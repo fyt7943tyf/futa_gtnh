@@ -8,42 +8,48 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraft.nbt.NBTTagString;
 import net.minecraftforge.fluids.FluidStack;
-import net.minecraftforge.oredict.OreDictionary;
 
 import com.futa_gtnh.block.TerminalIoConfig.Preset;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 
+import appeng.util.item.AEItemStack;
+import appeng.util.prioitylist.OreFilteredList;
+
 /** 一个面的输出白名单；物品和流体独立，空白名单禁止输出，输入不使用它。 */
 public final class TerminalOutputFilter {
 
     private final Set<ItemKey> items = new HashSet<>();
-    /** 已选区域里明确取消的条目，优先于矿辞规则；重新选中即可恢复。 */
+    /** 明确取消的条目优先于矿典表达式，重新选择条目后恢复。 */
     private final Set<ItemKey> excludedItems = new HashSet<>();
+    /** 保留主线规范化键热路径，避免每轮仓库扫描反复转换 AEItemStack。 */
+    private final Map<ItemKey, Boolean> itemCache = new HashMap<>();
+    private int itemCacheRevision = -1;
     private final Set<FluidKey> fluids = new HashSet<>();
     private final Set<Preset> presets = new HashSet<>();
-    /** 自己敲的矿辞前缀，一律转小写保存。 */
-    private final List<String> customPrefixes = new ArrayList<>();
+    /** 原样保存 AE2 矿典过滤卡表达式，大小写和空格都属于输入内容。 */
+    private String oreFilter = "";
 
     /** 筛选条件变一次加一；匹配结果的小缓存靠它失效。 */
     private int revision = 1;
 
-    /** 物品匹配结果缓存：一次搬运要问几百次同一个键，矿辞查表不值得反复做。 */
-    private final Map<ItemKey, Boolean> itemCache = new HashMap<>();
-    private int itemCacheRevision = -1;
+    /** 每份表达式使用 AE2 自己的物品匹配缓存。 */
+    private final List<OreFilteredList> oreMatchers = new ArrayList<>();
+    private int oreMatcherRevision = -1;
 
     public int getRevision() {
         return revision;
     }
 
     public boolean isEmpty() {
-        return items.isEmpty() && fluids.isEmpty() && presets.isEmpty() && customPrefixes.isEmpty();
+        return isEmpty(false) && isEmpty(true);
     }
 
     public Set<ItemKey> getItems() {
@@ -58,8 +64,8 @@ public final class TerminalOutputFilter {
         return Collections.unmodifiableSet(presets);
     }
 
-    public List<String> getCustomPrefixes() {
-        return Collections.unmodifiableList(customPrefixes);
+    public String getOreFilter() {
+        return oreFilter;
     }
 
     public boolean containsItem(ItemKey key) {
@@ -101,24 +107,9 @@ public final class TerminalOutputFilter {
         touch();
     }
 
-    /**
-     * 换掉自定义前缀（界面里的输入框按回车/失焦时调一次）。
-     *
-     * <p>
-     * 允许用空格、逗号、分号分隔，全部转小写 —— 矿辞名的前缀本身就是大小写混排
-     * （{@code crushedPurified}），但玩家不会记得住，匹配时也一律按小写比。
-     */
-    public void setCustomPrefixes(String text) {
-        customPrefixes.clear();
-        if (text != null) {
-            for (String piece : text.split("[\\s,;]+")) {
-                String trimmed = piece.trim()
-                    .toLowerCase(Locale.ROOT);
-                if (!trimmed.isEmpty() && !customPrefixes.contains(trimmed)) {
-                    customPrefixes.add(trimmed);
-                }
-            }
-        }
+    /** 不拆词、不改大小写；解析和错误处理全部交给 AE2。 */
+    public void setOreFilter(String text) {
+        oreFilter = text == null ? "" : text;
         touch();
     }
 
@@ -130,13 +121,16 @@ public final class TerminalOutputFilter {
             items.clear();
             excludedItems.clear();
             presets.clear();
-            customPrefixes.clear();
+            oreFilter = "";
         }
         touch();
     }
 
     public boolean isEmpty(boolean fluid) {
-        return fluid ? fluids.isEmpty() : items.isEmpty() && presets.isEmpty() && customPrefixes.isEmpty();
+        return fluid ? fluids.isEmpty()
+            : items.isEmpty() && presets.isEmpty()
+                && oreFilter.trim()
+                    .isEmpty();
     }
 
     public void clear() {
@@ -144,7 +138,7 @@ public final class TerminalOutputFilter {
         excludedItems.clear();
         fluids.clear();
         presets.clear();
-        customPrefixes.clear();
+        oreFilter = "";
         touch();
     }
 
@@ -194,76 +188,67 @@ public final class TerminalOutputFilter {
         return key != null && fluids.contains(key);
     }
 
-    /** 规范化键直查版 {@link #matches(FluidStack)}（流体没有矿辞，纯集合查询）。 */
+    /** 规范化流体键直接查询。 */
     public boolean matches(FluidKey key) {
         return key != null && fluids.contains(key);
     }
 
     private boolean matchesOreDict(ItemStack stack) {
-        String[] names = oreNames(stack);
-        for (String name : names) {
-            String classified = classify(name);
-            if (classified != null && isPrefixEnabled(classified)) return true;
+        if (oreMatcherRevision != revision) {
+            oreMatchers.clear();
+            if (!oreFilter.trim()
+                .isEmpty()) oreMatchers.add(new OreFilteredList(oreFilter));
+            for (Preset preset : Preset.values()) {
+                if (presets.contains(preset)) oreMatchers.add(new OreFilteredList(preset.getExpression()));
+            }
+            oreMatcherRevision = revision;
+        }
+        if (oreMatchers.isEmpty()) return false;
+        AEItemStack aeStack = AEItemStack.create(stack);
+        for (OreFilteredList matcher : oreMatchers) {
+            if (matcher.isListed(aeStack)) return true;
         }
         return false;
     }
 
     /**
-     * 找出这个名字归到哪个前缀。
-     *
-     * <p>
-     * 返回<b>最长</b>的那个匹配 —— 这就是「按最具体的前缀归类」，
-     * 也是 {@code crushedIron} 和 {@code crushedPurifiedIron} 能被分开的原因。
+     * 仅用于读取旧存档：把旧的忽略大小写、最长前缀归类转换成等价 AE2 正则。
+     * 已启用前缀排除所有更长的已知前缀，再将各分支取并集；以后只保存新表达式。
      */
-    private String classify(String lowerName) {
-        String best = null;
+    private void migrateLegacyPrefixes(NBTTagList prefixList) {
+        Set<String> known = new java.util.TreeSet<>();
+        Set<String> enabled = new java.util.TreeSet<>();
         for (Preset preset : Preset.values()) {
             for (String prefix : preset.getPrefixes()) {
                 String lower = prefix.toLowerCase(Locale.ROOT);
-                if (lowerName.startsWith(lower) && (best == null || lower.length() > best.length())) {
-                    best = lower;
-                }
+                known.add(lower);
+                if (presets.contains(preset)) enabled.add(lower);
             }
         }
-        for (String prefix : customPrefixes) {
-            if (lowerName.startsWith(prefix) && (best == null || prefix.length() > best.length())) {
-                best = prefix;
-            }
+        for (int i = 0; i < prefixList.tagCount(); i++) {
+            String prefix = prefixList.getStringTagAt(i)
+                .toLowerCase(Locale.ROOT);
+            if (prefix.isEmpty()) continue;
+            known.add(prefix);
+            enabled.add(prefix);
         }
-        return best;
+        StringBuilder expression = new StringBuilder();
+        for (String prefix : enabled) {
+            if (expression.length() > 0) expression.append('|');
+            expression.append(Pattern.quote(prefix));
+            StringBuilder excluded = new StringBuilder();
+            for (String longer : known) {
+                if (longer.length() <= prefix.length() || !longer.startsWith(prefix)) continue;
+                if (excluded.length() > 0) excluded.append('|');
+                excluded.append(Pattern.quote(longer.substring(prefix.length())));
+            }
+            if (excluded.length() > 0) expression.append("(?!")
+                .append(excluded)
+                .append(')');
+        }
+        oreFilter = expression.length() == 0 ? "" : "(?i)^(?:" + expression + ")";
+        presets.clear();
     }
-
-    private boolean isPrefixEnabled(String lowerPrefix) {
-        for (String prefix : customPrefixes) {
-            if (prefix.equals(lowerPrefix)) return true;
-        }
-        for (Preset preset : presets) {
-            for (String prefix : preset.getPrefixes()) {
-                if (prefix.toLowerCase(Locale.ROOT)
-                    .equals(lowerPrefix)) return true;
-            }
-        }
-        return false;
-    }
-
-    private static String[] oreNames(ItemStack stack) {
-        try {
-            int[] ids = OreDictionary.getOreIDs(stack);
-            if (ids == null || ids.length == 0) return EMPTY_NAMES;
-
-            String[] names = new String[ids.length];
-            for (int i = 0; i < ids.length; i++) {
-                String name = OreDictionary.getOreName(ids[i]);
-                names[i] = name == null ? "" : name.toLowerCase(Locale.ROOT);
-            }
-            return names;
-        } catch (Throwable t) {
-            // 矿辞是别的模组在填，条目本身可能有毛病；判断不出来就当不匹配
-            return EMPTY_NAMES;
-        }
-    }
-
-    private static final String[] EMPTY_NAMES = new String[0];
 
     public NBTTagCompound writeToNbt() {
         NBTTagCompound tag = new NBTTagCompound();
@@ -291,11 +276,7 @@ public final class TerminalOutputFilter {
         }
         tag.setTag("presets", presetList);
 
-        NBTTagList prefixList = new NBTTagList();
-        for (String prefix : customPrefixes) {
-            prefixList.appendTag(new NBTTagString(prefix));
-        }
-        tag.setTag("prefixes", prefixList);
+        tag.setString("oreFilter", oreFilter);
 
         return tag;
     }
@@ -333,13 +314,10 @@ public final class TerminalOutputFilter {
             }
         }
 
-        NBTTagList prefixList = tag.getTagList("prefixes", 8);
-        for (int i = 0; i < prefixList.tagCount(); i++) {
-            String prefix = prefixList.getStringTagAt(i)
-                .toLowerCase(Locale.ROOT);
-            if (!prefix.isEmpty() && !customPrefixes.contains(prefix)) {
-                customPrefixes.add(prefix);
-            }
+        if (tag.hasKey("oreFilter", 8)) {
+            oreFilter = tag.getString("oreFilter");
+        } else {
+            migrateLegacyPrefixes(tag.getTagList("prefixes", 8));
         }
 
         touch();

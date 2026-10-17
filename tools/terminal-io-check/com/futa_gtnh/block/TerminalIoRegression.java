@@ -12,6 +12,7 @@ import net.minecraft.inventory.InventoryBasic;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
+import net.minecraft.nbt.NBTTagString;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.Fluid;
@@ -29,6 +30,8 @@ import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageManager;
 
+import appeng.util.item.AEItemStack;
+import appeng.util.prioitylist.OreFilteredList;
 import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.relauncher.FMLRelaunchLog;
 import cpw.mods.fml.relauncher.Side;
@@ -48,8 +51,26 @@ public final class TerminalIoRegression {
         side.setAccessible(true);
         side.set(null, Side.SERVER);
         Bootstrap.func_151354_b();
+        Field namedMods = Loader.class.getDeclaredField("namedMods");
+        namedMods.setAccessible(true);
+        namedMods.set(Loader.instance(), Collections.emptyMap());
+        cpw.mods.fml.common.LoadController controller = new cpw.mods.fml.common.LoadController(Loader.instance());
+        Field activeContainer = cpw.mods.fml.common.LoadController.class.getDeclaredField("activeContainer");
+        activeContainer.setAccessible(true);
+        activeContainer.set(controller, new cpw.mods.fml.common.DummyModContainer(new cpw.mods.fml.common.ModMetadata()));
+        Field modController = Loader.class.getDeclaredField("modController");
+        modController.setAccessible(true);
+        modController.set(Loader.instance(), controller);
+        Field minecraftHome = cpw.mods.fml.relauncher.FMLInjectionData.class.getDeclaredField("minecraftHome");
+        minecraftHome.setAccessible(true);
+        minecraftHome.set(null, new File("build/terminal-io-check"));
+        File aeConfigDirectory = new File("build/terminal-io-check/ae-config");
+        aeConfigDirectory.mkdirs();
+        appeng.core.AEConfig.instance = new appeng.core.AEConfig(new File(aeConfigDirectory, "AE2.cfg"));
         TileEntity.addMapping(TileEntitySharedTerminal.class, "terminal-io-regression");
         checkConfig();
+        checkOreCardParity();
+        checkLegacyOreMigration();
         checkPassiveItems();
         checkPassiveFluids();
         checkActiveTransfers();
@@ -83,11 +104,11 @@ public final class TerminalIoRegression {
         OreDictionary.registerOre("crushedPurifiedTerminalIoCheck", new ItemStack(Items.carrot));
         config.getOutputFilter(EAST).togglePreset(Preset.CRUSHED);
         check(config.matchesOutput(EAST, new ItemStack(Items.apple)), "ore preset matches");
-        check(!config.matchesOutput(EAST, new ItemStack(Items.carrot)), "longest ore prefix wins");
+        check(config.matchesOutput(EAST, new ItemStack(Items.carrot)), "AE2 crushed wildcard includes purified ores");
         check(!config.matchesOutput(WEST, new ItemStack(Items.apple)), "ore cache isolated by face");
         config.getOutputFilter(EAST).clear(false);
         check(!config.matchesOutput(EAST, new ItemStack(Items.apple)), "clearing invalidates ore cache");
-        config.getOutputFilter(EAST).setCustomPrefixes("crushedPurified");
+        config.getOutputFilter(EAST).setOreFilter("crushedPurified*");
         check(config.matchesOutput(EAST, new ItemStack(Items.carrot)), "custom prefix matches");
         config.setMode(EAST, false, Mode.PUSH);
         TerminalIoConfig restored = new TerminalIoConfig();
@@ -108,6 +129,148 @@ public final class TerminalIoRegression {
         check(!restored.hasAnyFilter(), "malformed face cannot silently edit down face");
         restored.readFromNbt(null);
         check(!restored.hasAnyFilter() && !restored.hasAnyMode() && !restored.hasCustomRates(), "null read resets state");
+    }
+
+    private static void checkOreCardParity() {
+        OreDictionary.registerOre("ingotTerminalIoCheck", new ItemStack(Items.apple));
+        OreDictionary.registerOre("crushedCentrifugedTerminalIoCheck", new ItemStack(Items.potato));
+        OreDictionary.registerOre("ingotIron", new ItemStack(Items.iron_ingot));
+        OreDictionary.registerOre("ingotGold", new ItemStack(Items.gold_ingot));
+        OreDictionary.registerOre("dustTerminalIoCheck", new ItemStack(Items.diamond));
+        ItemStack tagged = new ItemStack(Items.apple);
+        tagged.setTagCompound(new NBTTagCompound());
+        tagged.getTagCompound().setString("ore-check", "variant");
+        ItemStack[] stacks = { new ItemStack(Items.apple), new ItemStack(Items.carrot), new ItemStack(Items.potato),
+            new ItemStack(Items.iron_ingot), new ItemStack(Items.gold_ingot), new ItemStack(Items.diamond),
+            new ItemStack(Items.stick), tagged, new ItemStack(Items.iron_pickaxe, 1, 0),
+            new ItemStack(Items.iron_pickaxe, 1, 20) };
+        String[] expressions = { "", "   ", "ingot", "ingotIron", "INGOTIRON", "ingot*", "*Iron", "*Iron*", "*",
+            "**", "crushed*", "crushed*&!crushedPurified*&!crushedCentrifuged*", "ingotIron|ingotGold",
+            "crushed*&ingot*", "!ingot*", "!ingotIron&ingotIron", "ingotIron|ingotIron", "ingotIron|ingotGold&dust*",
+            " ingotIron | ingotGold ", "ingotIron ingotGold", "ingotIron,ingotGold", "ingotIron;ingotGold", "*ot*Ir*",
+            "ingot?", "^ingot(Iron|Gold)$", "(?i)^INGOTIRON$", "Iron$", "^crushed(?!Purified|Centrifuged)",
+            "[", "(", "*Iron+", "!", "!!ingotIron", "|", "ingotIron||ingotGold", "ingotIron&", "!*" };
+        TerminalOutputFilter filter = new TerminalOutputFilter();
+        for (String expression : expressions) {
+            filter.setOreFilter(expression);
+            OreFilteredList card = new OreFilteredList(expression);
+            for (int repeat = 0; repeat < 2; repeat++) {
+                for (ItemStack stack : stacks) {
+                    check(filter.matches(stack) == card.isListed(AEItemStack.create(stack)),
+                        "AE2 card parity: " + expression + " / " + stack);
+                }
+            }
+            TerminalOutputFilter restored = new TerminalOutputFilter();
+            restored.readFromNbt(filter.writeToNbt());
+            check(expression.equals(restored.getOreFilter()), "expression preserves exact text in NBT");
+            for (ItemStack stack : stacks) {
+                check(restored.matches(stack) == card.isListed(AEItemStack.create(stack)), "restored AE2 card parity");
+            }
+        }
+        for (Preset preset : Preset.values()) {
+            filter.clear();
+            filter.togglePreset(preset);
+            OreFilteredList card = new OreFilteredList(preset.getExpression());
+            for (ItemStack stack : stacks) {
+                check(filter.matches(stack) == card.isListed(AEItemStack.create(stack)), "preset AE2 card parity");
+            }
+        }
+        filter.clear();
+        filter.setOreFilter("ingotIron");
+        check(filter.matches(new ItemStack(Items.iron_ingot)), "warm positive AE2 cache");
+        filter.setOreFilter("ingotGold");
+        check(!filter.matches(new ItemStack(Items.iron_ingot)) && filter.matches(new ItemStack(Items.gold_ingot)),
+            "editing expression invalidates AE2 cache");
+        filter.setOreFilter("[");
+        filter.toggleItem(ItemKey.of(new ItemStack(Items.iron_ingot)));
+        check(filter.matches(new ItemStack(Items.iron_ingot)) && !filter.matches(new ItemStack(Items.gold_ingot)),
+            "invalid ore expression does not disable explicit item selection");
+        check(!filter.matches((ItemStack) null), "null item denied");
+        filter.clear(false);
+        check(!filter.matches(new ItemStack(Items.iron_ingot)), "clearing expression and items invalidates cache");
+        String longExpression = String.join("|", Collections.nCopies(80, "ingotIron"));
+        filter.setOreFilter(longExpression);
+        io.netty.buffer.ByteBuf payload = io.netty.buffer.Unpooled.buffer();
+        try {
+            cpw.mods.fml.common.network.ByteBufUtils.writeTag(payload, filter.writeToNbt());
+            TerminalOutputFilter decoded = new TerminalOutputFilter();
+            decoded.readFromNbt(cpw.mods.fml.common.network.ByteBufUtils.readTag(payload));
+            check(longExpression.equals(decoded.getOreFilter()), "network NBT preserves expression longer than 64 chars");
+            check(decoded.matches(new ItemStack(Items.iron_ingot)) && !decoded.matches(new ItemStack(Items.gold_ingot)),
+                "network NBT preserves AE2 matching");
+        } finally {
+            payload.release();
+        }
+        ItemKey ironKey = ItemKey.of(new ItemStack(Items.iron_ingot));
+        filter.setOreFilter("ingotIron");
+        check(filter.matches(ironKey) && filter.matches(ironKey), "normalized key cache uses AE2 expression");
+        filter.toggleItem(ironKey);
+        filter.removeItem(ironKey);
+        check(!filter.matches(ironKey), "explicit cancellation overrides matching ore expression");
+        TerminalOutputFilter cancelled = new TerminalOutputFilter();
+        cancelled.readFromNbt(filter.writeToNbt());
+        check(!cancelled.matches(ironKey), "expression and cancellation survive NBT together");
+        cancelled.toggleItem(ironKey);
+        check(cancelled.matches(ironKey), "reselecting cancelled item restores output");
+    }
+
+    private static void checkLegacyOreMigration() {
+        String[][] prefixCases = { {}, { "crushed" }, { "crushedpurified" }, { "CRUSHED", "crushedpurifiedterminal" },
+            { "crushed", "crushedpurified" }, { "ingot", "dust" }, { "crushedpurifiedterminal", "crushedpurifiedt" } };
+        String[] names = { "crushedTerminalIoCheck", "crushedPurifiedTerminalIoCheck", "crushedCentrifugedTerminalIoCheck",
+            "ingotTerminalIoCheck", "dustTerminalIoCheck", "ORETerminalIoCheck", "rawOreTerminalIoCheck", "unmatched" };
+        net.minecraft.item.Item[] fixtures = new net.minecraft.item.Item[names.length];
+        for (int i = 0; i < names.length; i++) {
+            fixtures[i] = new net.minecraft.item.Item();
+            net.minecraft.item.Item.itemRegistry.addObject(30000 + i, "terminal-ore-migration-" + i, fixtures[i]);
+            OreDictionary.registerOre(names[i], new ItemStack(fixtures[i]));
+        }
+        for (int mask = 0; mask < (1 << Preset.values().length); mask++) {
+            for (String[] prefixes : prefixCases) {
+                NBTTagCompound legacy = new NBTTagCompound();
+                NBTTagList presetTags = new NBTTagList();
+                for (Preset preset : Preset.values()) {
+                    if ((mask & (1 << preset.ordinal())) != 0) presetTags.appendTag(new NBTTagString(preset.name()));
+                }
+                legacy.setTag("presets", presetTags);
+                NBTTagList prefixTags = new NBTTagList();
+                for (String prefix : prefixes) prefixTags.appendTag(new NBTTagString(prefix));
+                legacy.setTag("prefixes", prefixTags);
+                TerminalOutputFilter migrated = new TerminalOutputFilter();
+                migrated.readFromNbt(legacy);
+                TerminalOutputFilter restored = new TerminalOutputFilter();
+                restored.readFromNbt(migrated.writeToNbt());
+                for (int i = 0; i < names.length; i++) {
+                    boolean expected = legacyOreMatches(names[i], mask, prefixes);
+                    check(migrated.matches(new ItemStack(fixtures[i])) == expected, "legacy longest-prefix migration");
+                    check(restored.matches(new ItemStack(fixtures[i])) == expected, "legacy migration is idempotent");
+                }
+                check(!migrated.writeToNbt().hasKey("prefixes"), "new saves no longer contain legacy prefixes");
+            }
+        }
+    }
+
+    private static boolean legacyOreMatches(String name, int mask, String[] prefixes) {
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        String best = null;
+        boolean enabled = false;
+        for (Preset preset : Preset.values()) {
+            for (String prefix : preset.getPrefixes()) {
+                String candidate = prefix.toLowerCase(java.util.Locale.ROOT);
+                if (lower.startsWith(candidate) && (best == null || candidate.length() > best.length())) {
+                    best = candidate;
+                    enabled = (mask & (1 << preset.ordinal())) != 0;
+                }
+            }
+        }
+        for (String prefix : prefixes) {
+            String candidate = prefix.toLowerCase(java.util.Locale.ROOT);
+            if (lower.startsWith(candidate) && (best == null || candidate.length() >= best.length())) {
+                best = candidate;
+                enabled = true;
+            }
+        }
+        return best != null && enabled;
     }
 
     private static void checkPassiveItems() {
