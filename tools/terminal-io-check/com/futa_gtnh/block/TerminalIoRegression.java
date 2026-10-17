@@ -74,6 +74,7 @@ public final class TerminalIoRegression {
         checkPassiveItems();
         checkPassiveFluids();
         checkActiveTransfers();
+        checkOutputPriority();
         System.out.println("Terminal IO regression passed: " + checks + " checks");
     }
 
@@ -204,6 +205,8 @@ public final class TerminalIoRegression {
         ItemKey ironKey = ItemKey.of(new ItemStack(Items.iron_ingot));
         filter.setOreFilter("ingotIron");
         check(filter.matches(ironKey) && filter.matches(ironKey), "normalized key cache uses AE2 expression");
+        ItemKey goldKey = ItemKey.of(new ItemStack(Items.gold_ingot));
+        filter.toggleItem(goldKey);
         filter.toggleItem(ironKey);
         filter.removeItem(ironKey);
         check(!filter.matches(ironKey), "explicit cancellation overrides matching ore expression");
@@ -212,6 +215,27 @@ public final class TerminalIoRegression {
         check(!cancelled.matches(ironKey), "expression and cancellation survive NBT together");
         cancelled.toggleItem(ironKey);
         check(cancelled.matches(ironKey), "reselecting cancelled item restores output");
+        cancelled.removeItem(ironKey);
+        cancelled.removeItem(goldKey);
+        check(cancelled.getItems().isEmpty() && cancelled.matches(ironKey), "removing final manual entry restores pure ore matching");
+        cancelled.toggleItem(goldKey);
+        check(cancelled.matches(ironKey), "reselecting another item does not restore stale exclusions");
+        cancelled.toggleItem(ironKey);
+        cancelled.removeItem(ironKey);
+        cancelled.toggleItem(goldKey);
+        check(cancelled.matches(ironKey), "toggling off final manual entry clears exclusions");
+        NBTTagCompound oldEmpty = filter.writeToNbt();
+        oldEmpty.setTag("items", new NBTTagList());
+        TerminalOutputFilter oldRestored = new TerminalOutputFilter();
+        oldRestored.readFromNbt(oldEmpty);
+        for (String expression : expressions) {
+            oldRestored.setOreFilter(expression);
+            OreFilteredList card = new OreFilteredList(expression);
+            for (ItemStack stack : stacks) {
+                check(oldRestored.matches(stack) == card.isListed(AEItemStack.create(stack)), "old empty manual list ignores persisted exclusions: " + expression);
+            }
+        }
+        check(oldRestored.writeToNbt().getTagList("excludedItems", 10).tagCount() == 0, "empty manual list drops old exclusions on save");
     }
 
     private static void checkLegacyOreMigration() {
@@ -414,6 +438,63 @@ public final class TerminalIoRegression {
         before = storage.getFluidAmount(lava);
         invoke("pullFluid", new Class<?>[] { IFluidHandler.class, ForgeDirection.class, TerminalIoConfig.class }, tank, WEST, config);
         check(tank.tank.getFluid() == null && storage.getFluidAmount(lava) == before + 900, "active fluid input ignores output filter");
+    }
+
+    private static void checkOutputPriority() throws Exception {
+        SharedStorage storage = SharedStorageManager.getStorage();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        ItemKey gold = ItemKey.of(new ItemStack(Items.gold_ingot));
+        Class<?>[] pushTypes = { IInventory.class, ForgeDirection.class, TerminalIoConfig.class, ForgeDirection.class };
+        for (int selection = 0; selection < 2; selection++) {
+            ItemKey manual = selection == 0 ? gold : iron;
+            ItemKey ore = selection == 0 ? iron : gold;
+            TerminalIoConfig config = new TerminalIoConfig();
+            TerminalOutputFilter filter = config.getOutputFilter(EAST);
+            filter.toggleItem(manual);
+            filter.setOreFilter("ingot*");
+            long manualBefore = storage.getItemAmount(manual);
+            long oreBefore = storage.getItemAmount(ore);
+            InventoryBasic target = new InventoryBasic("priority", true, 2);
+            invoke("pushItems", pushTypes, target, WEST, config, EAST);
+            check(manual.equals(ItemKey.of(target.getStackInSlot(0))) && target.getStackInSlot(0).stackSize == 16 && target.getStackInSlot(1) == null, "manual entries consume budget before ore entries in either warehouse order");
+            check(storage.getItemAmount(manual) == manualBefore - 16 && storage.getItemAmount(ore) == oreBefore, "priority transfer conserves exact budget");
+
+            TileEntitySharedTerminal terminal = new TileEntitySharedTerminal();
+            TerminalIoConfig passive = terminal.getIo();
+            passive.setMode(EAST, false, Mode.PUSH);
+            passive.getOutputFilter(EAST).setOreFilter("ingot*");
+            int oldManualSlot = itemSlot(terminal, EAST, manual);
+            int oldOreSlot = itemSlot(terminal, EAST, ore);
+            passive.getOutputFilter(EAST).toggleItem(manual);
+            int[] slots = terminal.getAccessibleSlotsFromSide(EAST.ordinal());
+            check(slots.length == 3 && slots[1] == oldManualSlot && slots[2] == oldOreSlot, "passive manual priority preserves stable slot identities");
+            passive.getOutputFilter(EAST).removeItem(manual);
+            check(itemSlot(terminal, EAST, manual) == oldManualSlot && itemSlot(terminal, EAST, ore) == oldOreSlot, "empty passive manual list exposes both ore matches with unchanged slots");
+        }
+
+        TerminalIoConfig config = new TerminalIoConfig();
+        config.getOutputFilter(EAST).toggleItem(gold);
+        config.getOutputFilter(EAST).setOreFilter("ingotIron");
+        storage.extractItem(gold, storage.getItemAmount(gold));
+        storage.insertItem(gold, 3);
+        long ironBefore = storage.getItemAmount(iron);
+        InventoryBasic target = new InventoryBasic("partial", true, 2);
+        invoke("pushItems", pushTypes, target, WEST, config, EAST);
+        check(gold.equals(ItemKey.of(target.getStackInSlot(0))) && target.getStackInSlot(0).stackSize == 3 && iron.equals(ItemKey.of(target.getStackInSlot(1))) && target.getStackInSlot(1).stackSize == 13, "manual shortage falls back to ore within remaining budget");
+        check(storage.getItemAmount(gold) == 0 && storage.getItemAmount(iron) == ironBefore - 13, "partial priority transfer conserves storage");
+        target = new InventoryBasic("missing", true, 1);
+        invoke("pushItems", pushTypes, target, WEST, config, EAST);
+        check(iron.equals(ItemKey.of(target.getStackInSlot(0))) && target.getStackInSlot(0).stackSize == 16, "missing manual stock does not block ore output");
+        storage.insertItem(gold, 50);
+        target = new InventoryBasic("reject-manual", true, 1);
+        target.setInventorySlotContents(0, iron.prototype(63));
+        ironBefore = storage.getItemAmount(iron);
+        invoke("pushItems", pushTypes, target, WEST, config, EAST);
+        check(target.getStackInSlot(0).stackSize == 64 && storage.getItemAmount(gold) == 50 && storage.getItemAmount(iron) == ironBefore - 1, "rejected manual item falls back without losing items or overspending budget");
+        config.getOutputFilter(EAST).removeItem(gold);
+        target = new InventoryBasic("pure-ore", true, 2);
+        invoke("pushItems", pushTypes, target, WEST, config, EAST);
+        check(iron.equals(ItemKey.of(target.getStackInSlot(0))) && target.getStackInSlot(1) == null && storage.getItemAmount(gold) == 50, "empty manual list outputs only expression matches");
     }
 
     private static int itemSlot(TileEntitySharedTerminal terminal, ForgeDirection face, ItemKey key) {

@@ -169,10 +169,10 @@ public final class StockControlsRegression {
         OreDictionary.registerOre("crushedStockControlIron", iron.prototype());
         north.togglePreset(TerminalIoConfig.Preset.CRUSHED);
         check(north.matches(iron.prototype()), "item is allowed by both exact whitelist and ore preset");
-        check(panel.removeAt(1, 1, 0, 0) && !north.matches(iron.prototype()), "cancel overrides overlapping ore preset");
+        check(panel.removeAt(1, 1, 0, 0) && north.getItems().isEmpty() && north.writeToNbt().getTagList("excludedItems", 10).tagCount() == 0, "removing final manual selection clears ore exclusions");
         TerminalOutputFilter reloaded = new TerminalOutputFilter();
         reloaded.readFromNbt(north.writeToNbt());
-        check(!reloaded.matches(iron.prototype()), "cancel remains effective after restart");
+        check(reloaded.getItems().isEmpty() && reloaded.getPresets().contains(TerminalIoConfig.Preset.CRUSHED) && reloaded.writeToNbt().getTagList("excludedItems", 10).tagCount() == 0, "empty manual list retains ore rules without exclusions after restart");
         reloaded.toggleItem(iron);
         check(reloaded.matches(iron.prototype()), "selecting cancelled entry again restores output");
     }

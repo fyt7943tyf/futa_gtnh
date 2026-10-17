@@ -58,6 +58,8 @@ public final class SwiftStepGrowthAura {
         ItemStack charm = ItemSwiftStep.findEquipped(player);
         if (charm == null) return;
 
+        SwiftStepBotaniaAura.tick(player, charm);
+
         boolean cropAuraEnabled = ItemSwiftStep.isGrowthAuraEnabled(charm);
         boolean animalAuraEnabled = ItemSwiftStep.isAnimalAuraEnabled(charm);
         if (!cropAuraEnabled && !animalAuraEnabled) return;

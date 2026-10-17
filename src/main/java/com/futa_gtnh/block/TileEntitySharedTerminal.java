@@ -295,17 +295,26 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         ForgeDirection face = ForgeDirection.getOrientation(side);
         if (io.getMode(face, false) != TerminalIoConfig.Mode.PUSH) return INPUT_ONLY.clone();
         refreshOutputKeys();
+        TerminalOutputFilter filter = io.getOutputFilter(face);
         int visibleCount = 0;
-        for (int i = 0; i < outputKeys.size(); i++) {
-            if (visibleAmount(outputKeys.get(i)) > 0 && allowsOutput(face, outputKeys.get(i))) visibleCount++;
-        }
-        int[] result = new int[1 + visibleCount];
-        result[0] = INPUT_SLOT;
-        int index = 1;
+        int manualCount = 0;
         for (int i = 0; i < outputKeys.size(); i++) {
             ItemKey key = outputKeys.get(i);
             if (visibleAmount(key) > 0 && allowsOutput(face, key)) {
-                result[index++] = 1 + i * TerminalIoConfig.FACES + face.ordinal();
+                visibleCount++;
+                if (filter.containsItem(key)) manualCount++;
+            }
+        }
+        int[] result = new int[1 + visibleCount];
+        result[0] = INPUT_SLOT;
+        int manualIndex = 1;
+        int oreIndex = 1 + manualCount;
+        for (int i = 0; i < outputKeys.size(); i++) {
+            ItemKey key = outputKeys.get(i);
+            if (visibleAmount(key) > 0 && allowsOutput(face, key)) {
+                // 只改变枚举顺序，槽号仍绑定原条目，避免管道的旧槽引用指向其他物品。
+                result[filter.containsItem(key) ? manualIndex++ : oreIndex++] = 1 + i * TerminalIoConfig.FACES
+                    + face.ordinal();
             }
         }
         return result;

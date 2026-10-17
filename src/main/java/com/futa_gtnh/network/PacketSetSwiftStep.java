@@ -52,6 +52,13 @@ public class PacketSetSwiftStep implements IMessage {
     private int healthRecoveryEnabled;
     private int foodRecoveryEnabled;
     private int recoverySpeed;
+    private int botaniaAuraEnabled = GROWTH_AURA_UNCHANGED;
+
+    public static PacketSetSwiftStep botaniaAura(boolean enabled) {
+        PacketSetSwiftStep packet = new PacketSetSwiftStep(UNCHANGED, UNCHANGED);
+        packet.botaniaAuraEnabled = enabled ? 1 : 0;
+        return packet;
+    }
 
     public PacketSetSwiftStep() {}
 
@@ -122,6 +129,7 @@ public class PacketSetSwiftStep implements IMessage {
         healthRecoveryEnabled = buf.readInt();
         foodRecoveryEnabled = buf.readInt();
         recoverySpeed = buf.readInt();
+        botaniaAuraEnabled = buf.readableBytes() >= 4 ? buf.readInt() : GROWTH_AURA_UNCHANGED;
     }
 
     @Override
@@ -136,6 +144,7 @@ public class PacketSetSwiftStep implements IMessage {
         buf.writeInt(healthRecoveryEnabled);
         buf.writeInt(foodRecoveryEnabled);
         buf.writeInt(recoverySpeed);
+        buf.writeInt(botaniaAuraEnabled);
     }
 
     public static class Handler implements IMessageHandler<PacketSetSwiftStep, IMessage> {
@@ -177,6 +186,9 @@ public class PacketSetSwiftStep implements IMessage {
             }
             if (message.recoverySpeed != RECOVERY_UNCHANGED) {
                 ItemSwiftStep.setRecoverySpeed(held, message.recoverySpeed);
+            }
+            if (message.botaniaAuraEnabled != GROWTH_AURA_UNCHANGED) {
+                ItemSwiftStep.setBotaniaAuraEnabled(held, message.botaniaAuraEnabled == 1);
             }
             return null;
         }

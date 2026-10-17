@@ -247,3 +247,35 @@ tasks.register<JavaExec>("verifyTerminalIo") {
     classpath = files(compileTerminalIoChecks.flatMap { it.destinationDirectory }) +
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
+
+// Botania is optional at runtime; only these checks need its concrete classes.
+val botaniaAuraCheckDependencies = configurations.create("botaniaAuraCheckDependencies") {
+    isTransitive = false
+}
+dependencies.add(botaniaAuraCheckDependencies.name, "com.github.GTNewHorizons:Botania:1.13.36-GTNH:dev")
+
+val compileBotaniaAuraChecks = tasks.register<JavaCompile>("compileBotaniaAuraChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/botania-aura-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output + botaniaAuraCheckDependencies +
+        sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("botania-aura-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifyBotaniaAura") {
+    group = "verification"
+    description = "Checks Swift Step Botania ticks, pure daisy conversion, mana conservation and aura isolation"
+    // Standalone Forge enum registration needs Java 8 without lwjgl3ify's game bootstrap.
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(8)) })
+    dependsOn(compileBotaniaAuraChecks, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.common.SwiftStepBotaniaRegression")
+    classpath = files(compileBotaniaAuraChecks.flatMap { it.destinationDirectory }) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) + botaniaAuraCheckDependencies +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifyBotaniaAura") }

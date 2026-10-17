@@ -208,12 +208,19 @@ final class TerminalIoEngine {
      */
     private static boolean pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config,
         ForgeDirection face) {
-        if (config.getOutputFilter(face)
-            .isEmpty(false)) return false;
+        TerminalOutputFilter filter = config.getOutputFilter(face);
+        if (filter.isEmpty(false)) return false;
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
         boolean moved = false;
 
+        // 手动条目直接查库存，先使用本轮额度；缺货或目标不收时继续尝试矿典条目。
+        for (ItemKey key : filter.getItems()) {
+            int accepted = pushItem(inventory, side, storage, key, storage.getItemAmount(key), budget);
+            moved |= accepted > 0;
+            budget -= accepted;
+            if (budget <= 0) return moved;
+        }
         List<Map.Entry<ItemKey, Long>> snapshot = storage.snapshotItemsCached();
         for (Map.Entry<ItemKey, Long> entry : snapshot) {
             if (budget <= 0) return moved;
@@ -223,37 +230,45 @@ final class TerminalIoEngine {
                 : entry.getValue()
                     .longValue();
             if (available <= 0L) continue;
-            if (!config.matchesOutput(face, key)) continue;
+            if (filter.containsItem(key) || !filter.matches(key)) continue;
+            int accepted = pushItem(inventory, side, storage, key, available, budget);
+            moved |= accepted > 0;
+            budget -= accepted;
+        }
+        return moved;
+    }
 
-            ItemStack prototype = key.prototype();
-            if (prototype == null || prototype.getItem() == null) continue;
+    /** 搬运一个精确条目，返回实际消耗的额度；拒收时保留原有回滚路径。 */
+    private static int pushItem(IInventory inventory, ForgeDirection side, SharedStorage storage, ItemKey key,
+        long available, int budget) {
+        if (available <= 0L || budget <= 0) return 0;
+        ItemStack prototype = key.prototype();
+        if (prototype == null || prototype.getItem() == null) return 0;
+        int maxSize = Math.max(1, prototype.getMaxStackSize());
+        int moved = 0;
+        while (budget > 0 && available > 0L) {
+            int want = (int) Math.min(Math.min((long) budget, (long) maxSize), available);
+            // 目标装不下就别去扣仓库：先算清楚有多少空位（额度内够用就停）
+            want = Math.min(want, freeSpaceFor(inventory, side, prototype, budget));
+            if (want <= 0) break;
 
-            int maxSize = Math.max(1, prototype.getMaxStackSize());
+            long taken = storage.extractItem(key, want);
+            if (taken <= 0L) break;
 
-            while (budget > 0 && available > 0L) {
-                int want = (int) Math.min(Math.min((long) budget, (long) maxSize), available);
-                // 目标装不下就别去扣仓库：先算清楚有多少空位（额度内够用就停）
-                want = Math.min(want, freeSpaceFor(inventory, side, prototype, budget));
-                if (want <= 0) break;
-
-                long taken = storage.extractItem(key, want);
-                if (taken <= 0L) break;
-
-                int accepted = insertInto(inventory, side, key.prototype(taken));
-                if (accepted < taken) {
-                    // 目标中途不收（比如别的机器同时塞满了）：剩下的原样放回仓库。
-                    // 宁可退回去，也不能凭空多出来。
-                    // 这是回滚不是存款 —— 用不受上限的入口，否则上限一挡，东西就没了
-                    storage.insertItemManual(key, taken - accepted);
-                }
-                inventory.markDirty();
-                SharedStorageManager.broadcastItemChange(key);
-
-                budget -= accepted;
-                available -= taken;
-                if (accepted > 0) moved = true;
-                if (accepted < taken) break;
+            int accepted = insertInto(inventory, side, key.prototype(taken));
+            if (accepted < taken) {
+                // 目标中途不收（比如别的机器同时塞满了）：剩下的原样放回仓库。
+                // 宁可退回去，也不能凭空多出来。
+                // 这是回滚不是存款 —— 用不受上限的入口，否则上限一挡，东西就没了
+                storage.insertItemManual(key, taken - accepted);
             }
+            inventory.markDirty();
+            SharedStorageManager.broadcastItemChange(key);
+
+            budget -= accepted;
+            available -= taken;
+            moved += accepted;
+            if (accepted < taken) break;
         }
         return moved;
     }

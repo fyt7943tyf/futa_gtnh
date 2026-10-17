@@ -72,6 +72,7 @@ public class GuiSwiftStep extends FutaGuiScreen {
     private static final int BTN_RECOVERY_SPEED_UP_10 = 32;
     private static final int BTN_RECOVERY_SPEED_DOWN_100 = 33;
     private static final int BTN_RECOVERY_SPEED_UP_100 = 34;
+    private static final int BTN_BOTANIA_AURA_TOGGLE = 35;
 
     private static final float STEP = 0.25F;
     private static final float[] PRESETS = { 1.0F, 2.0F, 3.0F, 5.0F, 10.0F, 16.0F };
@@ -150,9 +151,11 @@ public class GuiSwiftStep extends FutaGuiScreen {
     }
 
     private void addGrowthControls(int left, int top) {
-        buttonList.add(new GuiSmallButton(BTN_CROP_AURA_TOGGLE, left + 8, top + 104, 90, 18, cropAuraToggleText()));
+        buttonList.add(new GuiSmallButton(BTN_CROP_AURA_TOGGLE, left + 8, top + 104, 60, 18, cropAuraToggleText()));
         buttonList
-            .add(new GuiSmallButton(BTN_ANIMAL_AURA_TOGGLE, left + 102, top + 104, 90, 18, animalAuraToggleText()));
+            .add(new GuiSmallButton(BTN_ANIMAL_AURA_TOGGLE, left + 70, top + 104, 60, 18, animalAuraToggleText()));
+        buttonList
+            .add(new GuiSmallButton(BTN_BOTANIA_AURA_TOGGLE, left + 132, top + 104, 60, 18, botaniaAuraToggleText()));
         buttonList.add(
             new GuiSmallButton(
                 BTN_GROWTH_RADIUS_DOWN,
@@ -338,7 +341,8 @@ public class GuiSwiftStep extends FutaGuiScreen {
     }
 
     private void drawGrowthPage(int top) {
-        boolean enabled = ItemSwiftStep.isGrowthAuraEnabled(charm) || ItemSwiftStep.isAnimalAuraEnabled(charm);
+        boolean enabled = ItemSwiftStep.isGrowthAuraEnabled(charm) || ItemSwiftStep.isAnimalAuraEnabled(charm)
+            || ItemSwiftStep.isBotaniaAuraEnabled(charm);
         drawCenteredFittedString(
             EnumChatFormatting.YELLOW + tr("futa_gtnh.swift_step.gui.growth_aura"),
             width / 2,
@@ -352,6 +356,13 @@ public class GuiSwiftStep extends FutaGuiScreen {
                 ItemSwiftStep.getGrowthAuraSpeed(charm)),
             width / 2,
             top + 80,
+            0xFFFFFF);
+        drawCenteredFittedString(
+            EnumChatFormatting.GRAY + tr(
+                "futa_gtnh.swift_step.gui.growth_aura.botania_status",
+                fixed(1 + ItemSwiftStep.getGrowthAuraSpeed(charm) / 100.0F, 2)),
+            width / 2,
+            top + 92,
             0xFFFFFF);
         boolean magnetEnabled = ItemSwiftStep.isItemMagnetEnabled(charm);
         drawCenteredFittedString(
@@ -460,6 +471,12 @@ public class GuiSwiftStep extends FutaGuiScreen {
                 : "futa_gtnh.swift_step.gui.growth_aura.animal_off");
     }
 
+    private String botaniaAuraToggleText() {
+        return tr(
+            ItemSwiftStep.isBotaniaAuraEnabled(charm) ? "futa_gtnh.swift_step.gui.growth_aura.botania_on"
+                : "futa_gtnh.swift_step.gui.growth_aura.botania_off");
+    }
+
     private String itemMagnetToggleText() {
         return tr(
             ItemSwiftStep.isItemMagnetEnabled(charm) ? "futa_gtnh.swift_step.gui.item_magnet.on"
@@ -483,6 +500,7 @@ public class GuiSwiftStep extends FutaGuiScreen {
             GuiButton button = (GuiButton) object;
             if (button.id == BTN_CROP_AURA_TOGGLE) button.displayString = cropAuraToggleText();
             if (button.id == BTN_ANIMAL_AURA_TOGGLE) button.displayString = animalAuraToggleText();
+            if (button.id == BTN_BOTANIA_AURA_TOGGLE) button.displayString = botaniaAuraToggleText();
         }
     }
 
@@ -587,6 +605,11 @@ public class GuiSwiftStep extends FutaGuiScreen {
             updateGrowthAuraToggleButtons();
         } else if (button.id == BTN_ANIMAL_AURA_TOGGLE) {
             applyAnimalAuraEnabled(!ItemSwiftStep.isAnimalAuraEnabled(charm));
+            updateGrowthAuraToggleButtons();
+        } else if (button.id == BTN_BOTANIA_AURA_TOGGLE) {
+            boolean enabled = !ItemSwiftStep.isBotaniaAuraEnabled(charm);
+            ItemSwiftStep.setBotaniaAuraEnabled(charm, enabled);
+            NetworkHandler.INSTANCE.sendToServer(PacketSetSwiftStep.botaniaAura(enabled));
             updateGrowthAuraToggleButtons();
         } else if (button.id == BTN_GROWTH_RADIUS_DOWN)
             applyGrowthAuraRadius(ItemSwiftStep.getGrowthAuraRadius(charm) - 1);

@@ -27,7 +27,7 @@ import appeng.util.prioitylist.OreFilteredList;
 public final class TerminalOutputFilter {
 
     private final Set<ItemKey> items = new HashSet<>();
-    /** 明确取消的条目优先于矿典表达式，重新选择条目后恢复。 */
+    /** 手动列表非空时，明确取消的条目优先于矿典表达式。列表清空即恢复纯矿典筛选。 */
     private final Set<ItemKey> excludedItems = new HashSet<>();
     /** 保留主线规范化键热路径，避免每轮仓库扫描反复转换 AEItemStack。 */
     private final Map<ItemKey, Boolean> itemCache = new HashMap<>();
@@ -80,6 +80,7 @@ public final class TerminalOutputFilter {
         if (key == null) return;
         if (!items.remove(key)) items.add(key);
         excludedItems.remove(key);
+        if (items.isEmpty()) excludedItems.clear();
         touch();
     }
 
@@ -92,7 +93,8 @@ public final class TerminalOutputFilter {
     /** 删除操作保持幂等，重复点击或回包不会把刚删掉的条目重新加入。 */
     public void removeItem(ItemKey key) {
         if (items.remove(key)) {
-            excludedItems.add(key);
+            if (items.isEmpty()) excludedItems.clear();
+            else excludedItems.add(key);
             touch();
         }
     }
@@ -293,7 +295,7 @@ public final class TerminalOutputFilter {
         NBTTagList excludedList = tag.getTagList("excludedItems", 10);
         for (int i = 0; i < excludedList.tagCount(); i++) {
             ItemKey key = ItemKey.readFromNbt(excludedList.getCompoundTagAt(i));
-            if (key != null && !items.contains(key)) excludedItems.add(key);
+            if (key != null && !items.isEmpty() && !items.contains(key)) excludedItems.add(key);
         }
 
         NBTTagList fluidList = tag.getTagList("fluids", 10);

@@ -27,7 +27,11 @@ futa_gtnh.swift_step.gui.tab.growth=Growth
 futa_gtnh.swift_step.gui.tab.recovery=Recovery
 futa_gtnh.swift_step.gui.flight=Flight speed (incl. vertical)
 futa_gtnh.swift_step.gui.walk=Movement speed
-futa_gtnh.swift_step.gui.growth_aura=Growth aura (crops / animals)
+futa_gtnh.swift_step.gui.growth_aura=Acceleration (crops / animals / Botania)
+futa_gtnh.swift_step.gui.growth_aura.botania_on=Botania: ON
+futa_gtnh.swift_step.gui.growth_aura.botania_off=Botania: OFF
+futa_gtnh.swift_step.gui.growth_aura.botania_status=Botania ~x%s; supply, costs, cooldowns and flower lifetime speed up
+item.futa_gtnh.swift_step.tooltip.botania_aura=Botania acceleration: %s (~x%s, shared aura radius and strength)
 futa_gtnh.swift_step.gui.growth_aura.status=Radius %s · crop ticks x%s · extra animal speed x%s (strength max 1000)
 futa_gtnh.swift_step.gui.growth_aura.crop_on=Crops: ON
 futa_gtnh.swift_step.gui.growth_aura.crop_off=Crops: OFF
@@ -150,7 +154,7 @@ futa_gtnh.gui.terminal.io.no_filter= (empty = no output)
 futa_gtnh.gui.terminal.io.filter.hint=Filters outputs only; inputs are unfiltered
 futa_gtnh.gui.terminal.io.view.all=All
 futa_gtnh.gui.terminal.io.view.selected=Selected
-futa_gtnh.gui.terminal.io.view.empty=Whitelist is empty (pick entries in the All view)
+futa_gtnh.gui.terminal.io.view.empty=No manual selections (items still follow ore rules)
 futa_gtnh.gui.terminal.io.view.hint=Selected view: click an entry to remove it from the whitelist
 futa_gtnh.gui.terminal.io.empty=Nothing matches
 futa_gtnh.gui.terminal.io.syncing=Syncing... (asking the server for this terminal's config)
@@ -442,8 +446,8 @@ futa_gtnh.gui.limits.accepting=Automation can deposit
 futa_gtnh.gui.limits.manual=Manual allowed; automation capped; excess stock kept.
 futa_gtnh.gui.limits.choose=Select an item or fluid, then enter its maximum stock. Leave blank to remove the limit.
 futa_gtnh.gui.limits.invalid=Enter a valid nonnegative integer
-futa_gtnh.gui.terminal.io.whitelist.title=Selected (click to remove)
-futa_gtnh.gui.terminal.io.whitelist.remove=Click to block this entry, including ore rules. Select it again to restore output.
+futa_gtnh.gui.terminal.io.whitelist.title=Manual priority (click to remove)
+futa_gtnh.gui.terminal.io.whitelist.remove=Click to remove. An empty manual item list restores pure ore filtering; reselect for priority output.
 
 
 # ===== AE wireless control (transmitter block + receiver cover) =====
