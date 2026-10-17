@@ -75,6 +75,8 @@ public final class TerminalIoRegression {
         checkPassiveFluids();
         checkActiveTransfers();
         checkOutputPriority();
+        checkManualSubtypeOutput();
+        checkManualIdleRetry();
         System.out.println("Terminal IO regression passed: " + checks + " checks");
     }
 
@@ -495,6 +497,174 @@ public final class TerminalIoRegression {
         target = new InventoryBasic("pure-ore", true, 2);
         invoke("pushItems", pushTypes, target, WEST, config, EAST);
         check(iron.equals(ItemKey.of(target.getStackInSlot(0))) && target.getStackInSlot(1) == null && storage.getItemAmount(gold) == 50, "empty manual list outputs only expression matches");
+    }
+
+    private static void checkManualSubtypeOutput() throws Exception {
+        net.minecraft.item.Item leaves = new net.minecraft.item.Item().setHasSubtypes(true);
+        net.minecraft.item.Item.itemRegistry.addObject(30100, "cropsnh:materialLeaf-check", leaves);
+        ItemStack[] selected = { new ItemStack(leaves, 1, 1), new ItemStack(leaves, 1, 9), new ItemStack(Items.coal, 1, 1) };
+        SharedStorage storage = SharedStorageManager.getStorage();
+        Class<?>[] pushTypes = { IInventory.class, ForgeDirection.class, TerminalIoConfig.class, ForgeDirection.class };
+        for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
+            TerminalIoConfig client = new TerminalIoConfig();
+            client.setMode(face, false, Mode.PUSH);
+            for (ItemStack stack : selected) {
+                ItemKey key = ItemKey.of(stack);
+                client.getOutputFilter(face).toggleItem(key);
+                storage.insertItemManual(key, 64);
+            }
+            com.futa_gtnh.network.PacketStorageAction outgoing = com.futa_gtnh.network.PacketStorageAction.nbt(
+                com.futa_gtnh.network.PacketStorageAction.SET_TERMINAL_IO, client.writeToNbt());
+            com.futa_gtnh.network.PacketStorageAction incoming = new com.futa_gtnh.network.PacketStorageAction();
+            io.netty.buffer.ByteBuf payload = io.netty.buffer.Unpooled.buffer();
+            try { outgoing.toBytes(payload); incoming.fromBytes(payload); } finally { payload.release(); }
+            TerminalIoConfig server = new TerminalIoConfig();
+            server.readFromNbt(incoming.getLayoutTag());
+            check(server.getOutputFilter(face).getOreFilter().isEmpty(), "manual-only packet has no ore expression");
+            for (ItemStack stack : selected) {
+                check(server.matchesOutput(face, stack), "manual subtype survives client packet and server read: " + stack.getItemDamage());
+            }
+            InventoryBasic target = new InventoryBasic("manual-subtype", true, 3);
+            long before = storage.getItemTotal();
+            invoke("pushItems", pushTypes, target, face.getOpposite(), server, face);
+            check(target.getStackInSlot(0) != null && target.getStackInSlot(0).stackSize == 16, "manual-only subtype output consumes budget after network round trip");
+            check(storage.getItemTotal() == before - 16, "manual-only subtype output conserves count");
+            for (ItemStack stack : selected) {
+                TerminalIoConfig one = new TerminalIoConfig();
+                one.getOutputFilter(face).toggleItem(ItemKey.of(stack));
+                TerminalIoConfig restored = new TerminalIoConfig();
+                restored.readFromNbt(one.writeToNbt());
+                IInventory bus = inputBus(face.getOpposite());
+                long available = storage.getItemAmount(stack);
+                invoke("pushItems", pushTypes, bus, face.getOpposite(), restored, face);
+                check(bus.getStackInSlot(0) != null && ItemKey.of(bus.getStackInSlot(0)).equals(ItemKey.of(stack)), "real GT input bus accepts selected subtype without ore expression");
+                check(storage.getItemAmount(stack) == available - 16, "real GT manual output conserves subtype amount");
+            }
+        }
+    }
+
+    private static IInventory inputBus(ForgeDirection front) {
+        gregtech.api.metatileentity.implementations.MTEHatchInputBus bus = new gregtech.api.metatileentity.implementations.MTEHatchInputBus("terminal-check", 1, new String[0], null);
+        bus.disableLimited = false;
+        gregtech.api.interfaces.tileentity.IGregTechTileEntity tile = (gregtech.api.interfaces.tileentity.IGregTechTileEntity) java.lang.reflect.Proxy.newProxyInstance(
+            IInventory.class.getClassLoader(), new Class<?>[] { gregtech.api.interfaces.tileentity.IGregTechTileEntity.class }, (proxy, method, args) -> {
+                switch (method.getName()) {
+                    case "getFrontFacing": return front;
+                    case "getMetaTileEntity": return bus;
+                    case "getSizeInventory": return bus.getSizeInventory();
+                    case "getInventoryStackLimit": return 64;
+                    case "getAccessibleSlotsFromSide": return new int[0];
+                    case "getStackInSlot": return bus.getStackInSlot((Integer) args[0]);
+                    case "setInventorySlotContents": bus.setInventorySlotContents((Integer) args[0], (ItemStack) args[1]); return null;
+                    case "canInsertItem": return bus.allowPutStack((gregtech.api.interfaces.tileentity.IGregTechTileEntity) proxy, (Integer) args[0], ForgeDirection.getOrientation((Integer) args[2]), (ItemStack) args[1]);
+                    case "markDirty": return null;
+                    default:
+                        if (method.getReturnType() == boolean.class) return false;
+                        if (method.getReturnType() == long.class) return 0L;
+                        if (method.getReturnType() == int.class) return 0;
+                        return null;
+                }
+            });
+        bus.setBaseMetaTileEntity(tile);
+        return tile;
+    }
+
+    private static void checkManualIdleRetry() throws Exception {
+        boolean previousBackoff = com.futa_gtnh.Config.ioIdleBackoff;
+        Field storageField = SharedStorageManager.class.getDeclaredField("storage");
+        storageField.setAccessible(true);
+        SharedStorage previousStorage = SharedStorageManager.getStorage();
+        CountingStorage storage = new CountingStorage();
+        storageField.set(null, storage);
+        com.futa_gtnh.Config.ioIdleBackoff = true;
+        try {
+            for (boolean node : new boolean[] { false, true }) {
+                for (boolean withOre : new boolean[] { false, true }) {
+                    TestWorld world = new TestWorld();
+                    TileEntity source = node ? new TileEntityIoNode() : new TileEntitySharedTerminal();
+                    TerminalIoConfig io = node ? ((TileEntityIoNode) source).getIo() : ((TileEntitySharedTerminal) source).getIo();
+                    TestInventory target = new TestInventory();
+                    world.source = source;
+                    world.target = target;
+                    source.setWorldObj(world);
+                    target.setWorldObj(world);
+                    io.setMode(EAST, false, Mode.PUSH);
+                    ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+                    SharedStorageManager.getStorage().insertItemManual(iron, 1000);
+                    io.getOutputFilter(EAST).toggleItem(iron);
+                    if (withOre) io.getOutputFilter(EAST).setOreFilter("ingotGold");
+                    target.inventory.setInventorySlotContents(0, new ItemStack(Items.diamond, 64));
+                    for (int tick = 0; tick < 1000; tick++) source.updateEntity();
+                    Field idle = source.getClass().getDeclaredField("idleRounds");
+                    Field timer = source.getClass().getDeclaredField("ioTimer");
+                    idle.setAccessible(true);
+                    timer.setAccessible(true);
+                    check(idle.getInt(source) == TerminalIoEngine.IDLE_BACKOFF_STEPS.length, "full target reaches maximum scan backoff");
+                    int scansBeforeRetry = storage.scans;
+                    timer.setInt(source, 0);
+                    target.inventory.setInventorySlotContents(0, null);
+                    for (int tick = 1; tick < io.getIntervalTicks(); tick++) {
+                        source.updateEntity();
+                        check(target.inventory.getStackInSlot(0) == null, "manual retry never exceeds configured frequency");
+                    }
+                    source.updateEntity();
+                    check(target.inventory.getStackInSlot(0) != null && target.inventory.getStackInSlot(0).stackSize == 16, "manual output resumes within configured interval after target clears: node=" + node + ", ore=" + withOre);
+                    check(idle.getInt(source) == 0, "successful manual retry wakes normal IO");
+                    check(storage.scans == scansBeforeRetry, "manual idle retries do not scan warehouse or ore matches");
+                    idle.setInt(source, 6);
+                    timer.setInt(source, 20);
+                    if (node) ((TileEntityIoNode) source).onIoChanged();
+                    else ((TileEntitySharedTerminal) source).onIoChanged();
+                    check(idle.getInt(source) == 0 && timer.getInt(source) == 0, "editing IO clears previous idle delay");
+                }
+            }
+        } finally {
+            com.futa_gtnh.Config.ioIdleBackoff = previousBackoff;
+            storageField.set(null, previousStorage);
+        }
+    }
+
+    private static final class CountingStorage extends SharedStorage {
+        int scans;
+        @Override public synchronized java.util.List<java.util.Map.Entry<ItemKey, Long>> snapshotItemsCached() {
+            scans++;
+            return super.snapshotItemsCached();
+        }
+    }
+
+    private static final class TestWorld extends net.minecraft.world.World {
+        TileEntity source;
+        TileEntity target;
+        TestWorld() {
+            super(new net.minecraft.world.storage.SaveHandlerMP(), "terminal-io-check",
+                new net.minecraft.world.WorldSettings(0, net.minecraft.world.WorldSettings.GameType.SURVIVAL, false, false, net.minecraft.world.WorldType.DEFAULT),
+                new net.minecraft.world.WorldProviderSurface(), new net.minecraft.profiler.Profiler());
+        }
+        @Override protected net.minecraft.world.chunk.IChunkProvider createChunkProvider() { return null; }
+        @Override protected int func_152379_p() { return 0; }
+        @Override public net.minecraft.entity.Entity getEntityByID(int id) { return null; }
+        @Override public TileEntity getTileEntity(int x, int y, int z) { return y == 0 && z == 0 ? x == 0 ? source : x == 1 ? target : null : null; }
+        @Override public int getBlockMetadata(int x, int y, int z) { return 0; }
+        @Override public net.minecraft.block.Block getBlock(int x, int y, int z) { return net.minecraft.init.Blocks.air; }
+        @Override public void markBlockForUpdate(int x, int y, int z) {}
+        @Override public void markTileEntityChunkModified(int x, int y, int z, TileEntity tile) {}
+    }
+
+    private static final class TestInventory extends TileEntity implements IInventory {
+        final InventoryBasic inventory = new InventoryBasic("target", true, 1);
+        public int getSizeInventory() { return inventory.getSizeInventory(); }
+        public ItemStack getStackInSlot(int slot) { return inventory.getStackInSlot(slot); }
+        public ItemStack decrStackSize(int slot, int amount) { return inventory.decrStackSize(slot, amount); }
+        public ItemStack getStackInSlotOnClosing(int slot) { return inventory.getStackInSlotOnClosing(slot); }
+        public void setInventorySlotContents(int slot, ItemStack stack) { inventory.setInventorySlotContents(slot, stack); }
+        public String getInventoryName() { return "target"; }
+        public boolean hasCustomInventoryName() { return true; }
+        public int getInventoryStackLimit() { return 64; }
+        @Override public void markDirty() {}
+        public boolean isUseableByPlayer(net.minecraft.entity.player.EntityPlayer player) { return true; }
+        public void openInventory() {}
+        public void closeInventory() {}
+        public boolean isItemValidForSlot(int slot, ItemStack stack) { return true; }
     }
 
     private static int itemSlot(TileEntitySharedTerminal terminal, ForgeDirection face, ItemKey key) {

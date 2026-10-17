@@ -129,10 +129,12 @@ public final class TerminalOutputFilter {
     }
 
     public boolean isEmpty(boolean fluid) {
-        return fluid ? fluids.isEmpty()
-            : items.isEmpty() && presets.isEmpty()
-                && oreFilter.trim()
-                    .isEmpty();
+        return fluid ? fluids.isEmpty() : items.isEmpty() && !hasOreRules();
+    }
+
+    public boolean hasOreRules() {
+        return !presets.isEmpty() || !oreFilter.trim()
+            .isEmpty();
     }
 
     public void clear() {

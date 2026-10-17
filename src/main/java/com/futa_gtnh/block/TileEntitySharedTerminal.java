@@ -84,6 +84,8 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
     /** 配置改了之后调一次：存档要重新落盘。 */
     public void onIoChanged() {
+        ioTimer = 0;
+        idleRounds = 0;
         markDirty();
     }
 
@@ -100,18 +102,25 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         if (!io.hasAnyMode()) return;
 
         int interval = Math.max(1, io.getIntervalTicks());
-        if (++ioTimer < TerminalIoEngine.idleWaitTicks(interval, idleRounds)) return;
-        ioTimer = 0;
+        boolean fullScan = ++ioTimer >= TerminalIoEngine.idleWaitTicks(interval, idleRounds);
+        if (!fullScan && ioTimer % interval != 0) return;
+        if (fullScan) ioTimer = 0;
 
         boolean moved = false;
         try {
-            moved = TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io);
+            moved = fullScan ? TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io)
+                : TerminalIoEngine.tickManualItems(worldObj, xCoord, yCoord, zCoord, io);
         } catch (Throwable t) {
             // 相邻方块是别的模组写的，出什么怪事都不该把整个服务端 tick 带崩
             FutaGtnhMod.LOG.warn("共享终端：主动搬运时出错（{} {} {}），这个面这一轮跳过", xCoord, yCoord, zCoord, t);
         }
-        idleRounds = moved || !Config.ioIdleBackoff ? 0
-            : Math.min(idleRounds + 1, TerminalIoEngine.IDLE_BACKOFF_STEPS.length);
+        if (moved) {
+            ioTimer = 0;
+            idleRounds = 0;
+        } else if (fullScan) {
+            idleRounds = !Config.ioIdleBackoff ? 0
+                : Math.min(idleRounds + 1, TerminalIoEngine.IDLE_BACKOFF_STEPS.length);
+        }
     }
 
     private boolean allowsOutput(ForgeDirection face, ItemStack stack) {

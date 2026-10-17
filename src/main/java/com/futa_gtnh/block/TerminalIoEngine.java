@@ -57,6 +57,7 @@ final class TerminalIoEngine {
      * 「空轮」= 这一轮没有任何东西真的被搬动（目标满了、源是空的、没有条目
      * 过白名单……即「无需 IO」）。空闲的节点每个周期都全量扫一遍仓库是服务器
      * 重 tick 的主因之一，退避把它压到最多每 128 tick（6.4 秒）扫一次；
+     * 手动选择的物品始终按配置间隔直查重试；不随全仓扫描退避。
      * 一旦搬动了东西立刻回到配置的节奏。{@link Config#ioIdleBackoff}
      * 关掉时恢复成恒定轮询（旧行为），代价是空闲节点回到每周期全量扫描。
      */
@@ -135,6 +136,23 @@ final class TerminalIoEngine {
         return moved;
     }
 
+    /** 空闲退避期间只重试精确选择的物品，不扫描矿典或整个仓库。 */
+    static boolean tickManualItems(World world, int x, int y, int z, TerminalIoConfig config) {
+        boolean moved = false;
+        for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
+            if (!config.getMode(face, false)
+                .pushes() || config.getOutputFilter(face)
+                    .getItems()
+                    .isEmpty())
+                continue;
+            TileEntity neighbour = world.getTileEntity(x + face.offsetX, y + face.offsetY, z + face.offsetZ);
+            if (!(neighbour instanceof IInventory) || neighbour instanceof TileEntitySharedTerminal
+                || neighbour instanceof TileEntityIoNode) continue;
+            moved |= pushItems((IInventory) neighbour, face.getOpposite(), config, face, false);
+        }
+        return moved;
+    }
+
     // ==================================================================
     // 物品
     // ==================================================================
@@ -208,6 +226,11 @@ final class TerminalIoEngine {
      */
     private static boolean pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config,
         ForgeDirection face) {
+        return pushItems(inventory, side, config, face, true);
+    }
+
+    private static boolean pushItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config,
+        ForgeDirection face, boolean includeOre) {
         TerminalOutputFilter filter = config.getOutputFilter(face);
         if (filter.isEmpty(false)) return false;
         int budget = Math.max(1, config.getItemsPerOperation());
@@ -221,6 +244,7 @@ final class TerminalIoEngine {
             budget -= accepted;
             if (budget <= 0) return moved;
         }
+        if (!includeOre || !filter.hasOreRules()) return moved;
         List<Map.Entry<ItemKey, Long>> snapshot = storage.snapshotItemsCached();
         for (Map.Entry<ItemKey, Long> entry : snapshot) {
             if (budget <= 0) return moved;

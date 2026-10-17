@@ -95,6 +95,8 @@ public class TileEntityIoNode extends TileEntity {
 
     /** 配置改了之后调一次：存档重新落盘，渲染状态（端帽颜色）也刷一遍。 */
     public void onIoChanged() {
+        ioTimer = 0;
+        idleRounds = 0;
         markDirty();
         if (worldObj != null && !worldObj.isRemote) worldObj.markBlockForUpdate(xCoord, yCoord, zCoord);
     }
@@ -218,17 +220,24 @@ public class TileEntityIoNode extends TileEntity {
         if (!io.hasAnyMode()) return;
 
         int interval = Math.max(1, io.getIntervalTicks());
-        if (++ioTimer < TerminalIoEngine.idleWaitTicks(interval, idleRounds)) return;
-        ioTimer = 0;
+        boolean fullScan = ++ioTimer >= TerminalIoEngine.idleWaitTicks(interval, idleRounds);
+        if (!fullScan && ioTimer % interval != 0) return;
+        if (fullScan) ioTimer = 0;
 
         boolean moved = false;
         try {
-            moved = TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io);
+            moved = fullScan ? TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io)
+                : TerminalIoEngine.tickManualItems(worldObj, xCoord, yCoord, zCoord, io);
         } catch (Throwable t) {
             FutaGtnhMod.LOG.warn("IO 节点：主动搬运时出错（{} {} {}），这一轮跳过", xCoord, yCoord, zCoord, t);
         }
-        idleRounds = moved || !Config.ioIdleBackoff ? 0
-            : Math.min(idleRounds + 1, TerminalIoEngine.IDLE_BACKOFF_STEPS.length);
+        if (moved) {
+            ioTimer = 0;
+            idleRounds = 0;
+        } else if (fullScan) {
+            idleRounds = !Config.ioIdleBackoff ? 0
+                : Math.min(idleRounds + 1, TerminalIoEngine.IDLE_BACKOFF_STEPS.length);
+        }
     }
 
     // ==================================================================

@@ -1,7 +1,10 @@
 package com.futa_gtnh.client.widget;
 
 import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiTextField;
+
+import org.lwjgl.input.Keyboard;
 
 /**
  * 本模组统一的搜索输入框。
@@ -81,10 +84,27 @@ public class FutaSearchField extends GuiTextField {
     @Override
     public boolean textboxKeyTyped(char typedChar, int keyCode) {
         String before = getText();
-        boolean consumed = super.textboxKeyTyped(typedChar, keyCode);
+        boolean consumed = super.textboxKeyTyped(shortcutCharacter(typedChar, keyCode), keyCode);
         // 方向键/翻页键也会「消费」事件，但不改文本 —— 不算搜索词变了
         if (consumed && !before.equals(getText())) fireChange();
         return consumed;
+    }
+
+    /** LWJGL3 下组合键未必附带控制字符；转换成原版输入框认识的编辑快捷键。 */
+    static char shortcutCharacter(char typedChar, int keyCode) {
+        if (!GuiScreen.isCtrlKeyDown()) return typedChar;
+        switch (keyCode) {
+            case Keyboard.KEY_A:
+                return '\u0001';
+            case Keyboard.KEY_C:
+                return '\u0003';
+            case Keyboard.KEY_V:
+                return '\u0016';
+            case Keyboard.KEY_X:
+                return '\u0018';
+            default:
+                return typedChar;
+        }
     }
 
     @Override

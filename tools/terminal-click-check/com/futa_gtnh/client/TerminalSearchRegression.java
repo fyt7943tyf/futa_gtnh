@@ -52,6 +52,7 @@ public final class TerminalSearchRegression {
         mc.thePlayer.inventory = new InventoryPlayer(mc.thePlayer);
         mc.fontRenderer = (TestFont) unsafe.allocateInstance(TestFont.class);
         org.lwjgl.input.Keyboard.shift = false;
+        checkEditingShortcuts(mc.fontRenderer, unsafe);
         TestGui gui = new TestGui(new ContainerSharedTerminal(mc.thePlayer.inventory, null));
         gui.mc = mc;
         mc.currentScreen = gui;
@@ -126,6 +127,53 @@ public final class TerminalSearchRegression {
         check(!gui.acceptSearchDrop(109, 58, ghost), "modal blocks search drop through dialog");
         check(!gui.handleSearchClick(109, 58, 1) && search.getText().equals("精炼铁锭"), "modal blocks search click through dialog");
         System.out.println("Terminal search regression: " + assertions + " assertions passed");
+    }
+
+    private static void checkEditingShortcuts(FontRenderer font, Unsafe unsafe) throws Exception {
+        Method normalize = FutaSearchField.class.getDeclaredMethod("shortcutCharacter", char.class, int.class);
+        normalize.setAccessible(true);
+        FutaSearchField field = new FutaSearchField(font, 0, 0, 92, 16);
+        field.setMaxStringLength(1024);
+        field.setFocused(true);
+        field.setText("ingotIron");
+        org.lwjgl.input.Keyboard.control = true;
+        check(field.textboxKeyTyped('\0', 30) && field.getSelectedText().equals("ingotIron"), "physical Ctrl+A selects expression without control character");
+        check((Character) normalize.invoke(null, '\0', 47) == '\u0016', "physical Ctrl+V enters vanilla paste branch with a zero character");
+        check((Character) normalize.invoke(null, 'v', 47) == '\u0016', "physical Ctrl+V enters vanilla paste branch with a printable character");
+        check((Character) normalize.invoke(null, '\u0016', 47) == '\u0016', "legacy paste control character is preserved");
+        check((Character) normalize.invoke(null, '\0', 46) == '\u0003' && (Character) normalize.invoke(null, '\0', 45) == '\u0018', "copy and cut map to vanilla editing branches");
+        check((Character) normalize.invoke(null, '\0', 203) == '\0', "Ctrl navigation remains unchanged");
+        org.lwjgl.input.Keyboard.control = false;
+        org.lwjgl.input.Keyboard.rightControl = true;
+        check((Character) normalize.invoke(null, '\0', 47) == '\u0016', "right Ctrl supports paste");
+        org.lwjgl.input.Keyboard.rightControl = false;
+        field.setSelectionPos(field.getCursorPosition());
+        check(field.textboxKeyTyped('v', 47) && field.getText().equals("ingotIronv"), "plain V still types normally");
+        field.setFocused(false);
+        org.lwjgl.input.Keyboard.control = true;
+        check(!field.textboxKeyTyped('\0', 30) && field.getSelectedText().isEmpty(), "unfocused field ignores editing shortcuts");
+        for (Class<?> type : new Class<?>[] { GuiTerminalIo.class, GuiIoNode.class }) {
+            Object gui = unsafe.allocateInstance(type);
+            Field tab = type.getDeclaredField("tab");
+            Field filterTab = type.getDeclaredField("TAB_FILTER");
+            tab.setAccessible(true);
+            filterTab.setAccessible(true);
+            tab.setInt(gui, filterTab.getInt(null));
+            Field oreField = type.getDeclaredField("oreFilterField");
+            oreField.setAccessible(true);
+            oreField.set(gui, field);
+            Method keyTyped = type.getDeclaredMethod("keyTyped", char.class, int.class);
+            keyTyped.setAccessible(true);
+            field.setFocused(true);
+            field.setText("crushed*&!crushedPurified*");
+            keyTyped.invoke(gui, '\0', 30);
+            check(field.getSelectedText().equals(field.getText()), type.getSimpleName() + " routes physical Ctrl shortcuts to focused ore field");
+            field.setEnabled(false);
+            field.textboxKeyTyped('z', 44);
+            check(field.getText().equals("crushed*&!crushedPurified*"), "disabled ore field remains read-only");
+            field.setEnabled(true);
+        }
+        org.lwjgl.input.Keyboard.control = false;
     }
 
     private static void set(Object gui, String name, Object value) throws Exception {

@@ -23,6 +23,8 @@ public final class TerminalIoCheckLauncher {
             Launch.blackboard = new HashMap<>();
             Thread.currentThread().setContextClassLoader(loader);
             loader.registerTransformer("cpw.mods.fml.common.asm.transformers.EventSubscriptionTransformer");
+            // GT's Java 17 multi-release classes contain no event handlers needed by these checks.
+            loader.addTransformerExclusion("gregtech.");
             try {
                 Class.forName("com.futa_gtnh.block.TerminalIoRegression", true, loader)
                     .getMethod("main", String[].class)
