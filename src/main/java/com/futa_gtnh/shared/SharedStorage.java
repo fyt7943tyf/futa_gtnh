@@ -12,6 +12,7 @@ import net.minecraft.nbt.NBTTagList;
 
 import com.futa_gtnh.api.SharedStorageReadStatus;
 import com.futa_gtnh.api.SharedStorageSnapshot;
+import com.futa_gtnh.storagebus.StorageBusRegistry;
 
 /**
  * 全服共享的无限存储池。物品和流体各一张表，<b>数量用 long 记</b>，
@@ -31,9 +32,15 @@ import com.futa_gtnh.api.SharedStorageSnapshot;
  * <p>
  * <b>线程模型</b>：MC 服务端的方块/实体/网络逻辑都在主线程上跑，
  * 所以正常路径没有竞争。但 GT 的某些机器、管道或第三方模组有可能从工作线程
- * 调进来，因此所有会改状态的方法都加了 {@code synchronized}；
- * 需要遍历时请用 {@link #snapshotItems()} / {@link #snapshotFluids()}，
+ * 调进来，因此池子本身的修改仍然全部在 {@code synchronized} 的 {@code *Pool}
+ * 方法里完成；需要遍历时请用 {@link #snapshotItems()} / {@link #snapshotFluids()}，
  * 它们返回独立副本，调用方在锁外遍历不会踩到 {@code ConcurrentModificationException}。
+ *
+ * <p>
+ * <b>存储总线</b>的读写要在世界里的容器上做，只能在服务端主线程执行；
+ * 工作线程调 {@link #insertItem}/{@link #extractItem} 时会自动退回「只用池子」
+ * （见 {@code StorageBusRegistry.canTouchWorld()}）。聚合库存的读取是锁保护的
+ * 缓存表，工作线程读也不会碰世界。
  */
 public class SharedStorage {
 
@@ -99,7 +106,10 @@ public class SharedStorage {
     public synchronized long getItemAmount(ItemKey key) {
         if (key == null) return 0L;
         Long amount = items.get(key);
-        return amount == null ? 0L : amount;
+        long internal = amount == null ? 0L : amount;
+        // 存储总线把相邻容器的库存并进共享存储的「可读视图」。
+        // 只写总线不在可读表里，所以这里看不到它们。
+        return saturatingAdd(internal, StorageBusRegistry.getReadableItemAmount(key));
     }
 
     public synchronized long getItemAmount(net.minecraft.item.ItemStack stack) {
@@ -107,7 +117,20 @@ public class SharedStorage {
     }
 
     public synchronized boolean hasItem(ItemKey key) {
-        return key != null && items.containsKey(key);
+        return key != null && getItemAmount(key) > 0L;
+    }
+
+    /** 算存量上限时用的数量：包含只写总线的隐藏库存，避免「看不见的东西绕过上限」。 */
+    private long itemAmountForLimit(ItemKey key) {
+        Long amount = key == null ? null : items.get(key);
+        long internal = amount == null ? 0L : amount;
+        return saturatingAdd(internal, StorageBusRegistry.getAllItemAmount(key));
+    }
+
+    private long fluidAmountForLimit(FluidKey key) {
+        Long amount = key == null ? null : fluids.get(key);
+        long internal = amount == null ? 0L : amount;
+        return saturatingAdd(internal, StorageBusRegistry.getAllFluidAmount(key));
     }
 
     /**
@@ -125,12 +148,38 @@ public class SharedStorage {
      * @param amount 要存的数量
      * @return 实际存进去的数量；因为上限而没存进去的部分需要调用方自行处理
      */
-    public synchronized long insertItem(net.minecraft.item.ItemStack stack, long amount) {
+    public long insertItem(net.minecraft.item.ItemStack stack, long amount) {
         return insertItem(ItemKey.of(stack), amount);
     }
 
+    /**
+     * 存入物品：<b>先按优先级尝试存储总线，剩下的再进共享存储池</b>。
+     *
+     * <p>
+     * 这一步会暂时拿着存储锁：总线写入必须和池子上限的扣减在同一个临界区里，
+     * 否则两个并发写入可以各自看到「还有空间」而一起超限。总线 I/O 只在本模组
+     * 的方块 / 管道路径上发生，量级是「一次请求几十格」，可以接受。
+     */
     public synchronized long insertItem(ItemKey key, long amount) {
-        return insertItemInternal(key, amount, true);
+        if (key == null || amount <= 0L) return 0L;
+
+        // 上限按「池子 + 全部总线」算；只写总线的隐藏库存也计入
+        long room = itemSpaceLeft(key);
+        if (room <= 0L) return 0L;
+        long allowed = Math.min(amount, room);
+
+        // AE 存储总线的优先级语义：高优先级（含 0）先填，然后才是共享存储池，
+        // 负优先级只在池子也收不下时接溢出。
+        // 工作线程不碰世界里的容器，直接退回池子（理由见 StorageBusRegistry.canTouchWorld）。
+        boolean buses = StorageBusRegistry.canTouchWorld();
+        long external = buses ? StorageBusRegistry.insertItem(key, allowed, true) : 0L;
+        long remaining = allowed - external;
+        long internal = remaining > 0L ? insertItemPool(key, remaining, true) : 0L;
+        remaining -= internal;
+        if (buses && remaining > 0L) {
+            external += StorageBusRegistry.insertItem(key, remaining, false);
+        }
+        return external + internal;
     }
 
     /**
@@ -145,25 +194,91 @@ public class SharedStorage {
      * 而它由本模组的 {@code Slot} 直接调用，模组外的自动化碰不到；
      * 自动化走的是 {@code IInventory}/{@code IFluidHandler} 那一套，一律受上限约束。
      */
-    public synchronized long insertItemManual(net.minecraft.item.ItemStack stack, long amount) {
+    public long insertItemManual(net.minecraft.item.ItemStack stack, long amount) {
         return insertItemManual(ItemKey.of(stack), amount);
     }
 
     public synchronized long insertItemManual(ItemKey key, long amount) {
-        return insertItemInternal(key, amount, false);
+        if (key == null || amount <= 0L) return 0L;
+        long room = itemManualSpaceLeft(key);
+        if (room <= 0L) return 0L;
+        long allowed = Math.min(amount, room);
+        boolean buses = StorageBusRegistry.canTouchWorld();
+        long external = buses ? StorageBusRegistry.insertItem(key, allowed, true) : 0L;
+        long remaining = allowed - external;
+        long internal = remaining > 0L ? insertItemPool(key, remaining, false) : 0L;
+        remaining -= internal;
+        if (buses && remaining > 0L) {
+            external += StorageBusRegistry.insertItem(key, remaining, false);
+        }
+        return external + internal;
     }
 
-    private long insertItemInternal(ItemKey key, long amount, boolean obeyLimit) {
+    /**
+     * 直接进共享存储池，<b>不经过存储总线</b>。
+     *
+     * <p>
+     * 给「从相邻容器主动抽入」这条路径用：源容器本身可能就挂着一条存储总线，
+     * 如果抽出来的东西又被总线写回同一个容器，就会先扣源格、再写回、再扣，
+     * 既白费力气，也可能在缓存刷新前造成数量对不上。主动抽入的语义本来就是
+     * 「进池子」，所以这条路直接走池子。
+     */
+    public long insertItemDirect(net.minecraft.item.ItemStack stack, long amount) {
+        return insertItemDirect(ItemKey.of(stack), amount);
+    }
+
+    public long insertItemDirect(ItemKey key, long amount) {
+        if (key == null || amount <= 0L) return 0L;
+        long room = itemSpaceLeft(key);
+        if (room <= 0L) return 0L;
+        return insertItemPool(key, Math.min(amount, room), true);
+    }
+
+    /** 直接进池子、且允许超出上限；用于主动搬运失败时的回滚。 */
+    public long insertItemManualDirect(ItemKey key, long amount) {
+        if (key == null || amount <= 0L) return 0L;
+        long room = itemManualSpaceLeft(key);
+        if (room <= 0L) return 0L;
+        return insertItemPool(key, Math.min(amount, room), false);
+    }
+
+    /** @return 共享存储池自己的存量，<b>不含</b>存储总线；主动输出用 */
+    public synchronized long getItemAmountPool(ItemKey key) {
+        if (key == null) return 0L;
+        Long amount = items.get(key);
+        return amount == null ? 0L : amount.longValue();
+    }
+
+    /** 直接从池子取，不经过存储总线；主动输出 / 回滚用 */
+    public long extractItemDirect(ItemKey key, long amount) {
+        if (key == null || amount <= 0L) return 0L;
+        return extractItemPool(key, amount);
+    }
+
+    public synchronized long getFluidAmountPool(FluidKey key) {
+        if (key == null) return 0L;
+        Long amount = fluids.get(key);
+        return amount == null ? 0L : amount.longValue();
+    }
+
+    public long extractFluidDirect(FluidKey key, long amount) {
+        if (key == null || amount <= 0L) return 0L;
+        return extractFluidPool(key, amount);
+    }
+
+    private synchronized long insertItemPool(ItemKey key, long amount, boolean obeyLimit) {
         if (key == null || amount <= 0L) return 0L;
 
-        long have = getItemAmount(key);
+        long have = itemAmountForLimit(key);
         // 手动存放时上限不参与，但全局上限仍然要守：long 加爆了会让合计值变负
         long ceiling = obeyLimit ? limitOf(itemLimits, key) : MAX_AMOUNT;
         long space = Math.max(0L, ceiling - have) - craftingItems.getOrDefault(key, 0L);
         if (space <= 0L) return 0L;
 
         long accepted = Math.min(amount, space);
-        items.put(key, have + accepted);
+        Long existing = items.get(key);
+        long internal = existing == null ? 0L : existing.longValue();
+        items.put(key, saturatingAdd(internal, accepted));
         // 用饱和加法：合计值本身溢出变负的话，/futashared info 会打印出负数，
         // 之后每一次取出还会让这个负数继续漂移
         itemTotal = saturatingAdd(itemTotal, accepted);
@@ -173,13 +288,30 @@ public class SharedStorage {
     }
 
     /**
-     * 取出物品。
+     * 取出物品：<b>低优先级总线 → 共享存储池 → 高优先级总线</b>，
+     * 和 AE 存储总线的抽取顺序一致。
      *
      * @return 实际取出的数量，可能少于请求量（存量不足）。条目取空后会从表里删掉。
      */
     public synchronized long extractItem(ItemKey key, long amount) {
         if (key == null || amount <= 0L) return 0L;
 
+        long remaining = amount;
+        boolean buses = StorageBusRegistry.canTouchWorld();
+        long taken = buses ? StorageBusRegistry.extractItem(key, remaining, true) : 0L;
+        remaining -= taken;
+        if (remaining > 0L) {
+            long internal = extractItemPool(key, remaining);
+            taken += internal;
+            remaining -= internal;
+        }
+        if (buses && remaining > 0L) {
+            taken += StorageBusRegistry.extractItem(key, remaining, false);
+        }
+        return taken;
+    }
+
+    private synchronized long extractItemPool(ItemKey key, long amount) {
         Long stored = items.get(key);
         if (stored == null) return 0L;
 
@@ -204,13 +336,15 @@ public class SharedStorage {
      * 不做上限夹取，但要累加合计值（同一键在存档里出现两次时也不能只是覆盖）。
      */
     private void mergeItem(ItemKey key, long amount) {
-        long have = getItemAmount(key);
+        Long existing = items.get(key);
+        long have = existing == null ? 0L : existing.longValue();
         items.put(key, saturatingAdd(have, amount));
         itemTotal = saturatingAdd(itemTotal, amount);
     }
 
     private void mergeFluid(FluidKey key, long amount) {
-        long have = getFluidAmount(key);
+        Long existing = fluids.get(key);
+        long have = existing == null ? 0L : existing.longValue();
         fluids.put(key, saturatingAdd(have, amount));
         fluidTotal = saturatingAdd(fluidTotal, amount);
     }
@@ -222,7 +356,8 @@ public class SharedStorage {
     public synchronized long getFluidAmount(FluidKey key) {
         if (key == null) return 0L;
         Long amount = fluids.get(key);
-        return amount == null ? 0L : amount;
+        long internal = amount == null ? 0L : amount;
+        return saturatingAdd(internal, StorageBusRegistry.getReadableFluidAmount(key));
     }
 
     public synchronized long getFluidAmount(net.minecraftforge.fluids.FluidStack stack) {
@@ -230,32 +365,77 @@ public class SharedStorage {
     }
 
     public synchronized boolean hasFluid(FluidKey key) {
-        return key != null && fluids.containsKey(key);
+        return key != null && getFluidAmount(key) > 0L;
     }
 
-    public synchronized long insertFluid(net.minecraftforge.fluids.FluidStack stack, long amount) {
+    public long insertFluid(net.minecraftforge.fluids.FluidStack stack, long amount) {
         return insertFluid(FluidKey.of(stack), amount);
     }
 
     public synchronized long insertFluid(FluidKey key, long amount) {
-        return insertFluidInternal(key, amount, true);
+        if (key == null || amount <= 0L) return 0L;
+        long room = fluidSpaceLeft(key);
+        if (room <= 0L) return 0L;
+        long allowed = Math.min(amount, room);
+        boolean buses = StorageBusRegistry.canTouchWorld();
+        long external = buses ? StorageBusRegistry.insertFluid(key, allowed, true) : 0L;
+        long remaining = allowed - external;
+        long internal = remaining > 0L ? insertFluidPool(key, remaining, true) : 0L;
+        remaining -= internal;
+        if (buses && remaining > 0L) {
+            external += StorageBusRegistry.insertFluid(key, remaining, false);
+        }
+        return external + internal;
     }
 
     /** 玩家手动倒入流体，允许超出上限（同 {@link #insertItemManual}）。 */
     public synchronized long insertFluidManual(FluidKey key, long amount) {
-        return insertFluidInternal(key, amount, false);
+        if (key == null || amount <= 0L) return 0L;
+        long room = fluidManualSpaceLeft(key);
+        if (room <= 0L) return 0L;
+        long allowed = Math.min(amount, room);
+        boolean buses = StorageBusRegistry.canTouchWorld();
+        long external = buses ? StorageBusRegistry.insertFluid(key, allowed, true) : 0L;
+        long remaining = allowed - external;
+        long internal = remaining > 0L ? insertFluidPool(key, remaining, false) : 0L;
+        remaining -= internal;
+        if (buses && remaining > 0L) {
+            external += StorageBusRegistry.insertFluid(key, remaining, false);
+        }
+        return external + internal;
     }
 
-    private long insertFluidInternal(FluidKey key, long amount, boolean obeyLimit) {
+    /** 直接进池子，不经过存储总线（主动抽入 / 回滚用），见 {@link #insertItemDirect}。 */
+    public long insertFluidDirect(net.minecraftforge.fluids.FluidStack stack, long amount) {
+        return insertFluidDirect(FluidKey.of(stack), amount);
+    }
+
+    public long insertFluidDirect(FluidKey key, long amount) {
+        if (key == null || amount <= 0L) return 0L;
+        long room = fluidSpaceLeft(key);
+        if (room <= 0L) return 0L;
+        return insertFluidPool(key, Math.min(amount, room), true);
+    }
+
+    public long insertFluidManualDirect(FluidKey key, long amount) {
+        if (key == null || amount <= 0L) return 0L;
+        long room = fluidManualSpaceLeft(key);
+        if (room <= 0L) return 0L;
+        return insertFluidPool(key, Math.min(amount, room), false);
+    }
+
+    private synchronized long insertFluidPool(FluidKey key, long amount, boolean obeyLimit) {
         if (key == null || amount <= 0L) return 0L;
 
-        long have = getFluidAmount(key);
+        long have = fluidAmountForLimit(key);
         long ceiling = obeyLimit ? limitOf(fluidLimits, key) : MAX_AMOUNT;
         long space = Math.max(0L, ceiling - have) - craftingFluids.getOrDefault(key, 0L);
         if (space <= 0L) return 0L;
 
         long accepted = Math.min(amount, space);
-        fluids.put(key, have + accepted);
+        Long existing = fluids.get(key);
+        long internal = existing == null ? 0L : existing.longValue();
+        fluids.put(key, saturatingAdd(internal, accepted));
         fluidTotal = saturatingAdd(fluidTotal, accepted);
         markChanged();
         if (accepted > 0L) notifyFluidChanged(key);
@@ -265,6 +445,22 @@ public class SharedStorage {
     public synchronized long extractFluid(FluidKey key, long amount) {
         if (key == null || amount <= 0L) return 0L;
 
+        long remaining = amount;
+        boolean buses = StorageBusRegistry.canTouchWorld();
+        long taken = buses ? StorageBusRegistry.extractFluid(key, remaining, true) : 0L;
+        remaining -= taken;
+        if (remaining > 0L) {
+            long internal = extractFluidPool(key, remaining);
+            taken += internal;
+            remaining -= internal;
+        }
+        if (buses && remaining > 0L) {
+            taken += StorageBusRegistry.extractFluid(key, remaining, false);
+        }
+        return taken;
+    }
+
+    private synchronized long extractFluidPool(FluidKey key, long amount) {
         Long stored = fluids.get(key);
         if (stored == null) return 0L;
 
@@ -285,18 +481,35 @@ public class SharedStorage {
     // 只读视图 / 统计
     // ==================================================================
 
-    /** @return 物品条目的独立副本，可以安全地在锁外遍历 */
+    /**
+     * @return 物品条目的独立副本，可以安全地在锁外遍历。
+     *         包含存储总线带来的可读库存（同一个键会合并数量）。
+     */
     public synchronized List<Map.Entry<ItemKey, Long>> snapshotItems() {
-        List<Map.Entry<ItemKey, Long>> result = new ArrayList<>(items.size());
-        for (Map.Entry<ItemKey, Long> entry : items.entrySet()) {
+        LinkedHashMap<ItemKey, Long> merged = new LinkedHashMap<>(items);
+        for (Map.Entry<ItemKey, Long> entry : StorageBusRegistry.snapshotReadableItems()
+            .entrySet()) {
+            Long existing = merged.get(entry.getKey());
+            long base = existing == null ? 0L : existing.longValue();
+            merged.put(entry.getKey(), Long.valueOf(saturatingAdd(base, entry.getValue())));
+        }
+        List<Map.Entry<ItemKey, Long>> result = new ArrayList<>(merged.size());
+        for (Map.Entry<ItemKey, Long> entry : merged.entrySet()) {
             result.add(new AbstractMap.SimpleImmutableEntry<>(entry));
         }
         return result;
     }
 
     public synchronized List<Map.Entry<FluidKey, Long>> snapshotFluids() {
-        List<Map.Entry<FluidKey, Long>> result = new ArrayList<>(fluids.size());
-        for (Map.Entry<FluidKey, Long> entry : fluids.entrySet()) {
+        LinkedHashMap<FluidKey, Long> merged = new LinkedHashMap<>(fluids);
+        for (Map.Entry<FluidKey, Long> entry : StorageBusRegistry.snapshotReadableFluids()
+            .entrySet()) {
+            Long existing = merged.get(entry.getKey());
+            long base = existing == null ? 0L : existing.longValue();
+            merged.put(entry.getKey(), Long.valueOf(saturatingAdd(base, entry.getValue())));
+        }
+        List<Map.Entry<FluidKey, Long>> result = new ArrayList<>(merged.size());
+        for (Map.Entry<FluidKey, Long> entry : merged.entrySet()) {
             result.add(new AbstractMap.SimpleImmutableEntry<>(entry));
         }
         return result;
@@ -322,34 +535,42 @@ public class SharedStorage {
      * @return 只读列表；调用方不得修改列表或其中的条目
      */
     public synchronized List<Map.Entry<ItemKey, Long>> snapshotItemsCached() {
-        if (itemSnapshotCache == null || itemSnapshotRevision != revision) {
+        int currentRevision = getRevision();
+        if (itemSnapshotCache == null || itemSnapshotRevision != currentRevision) {
             itemSnapshotCache = snapshotItems();
-            itemSnapshotRevision = revision;
+            // 先记版本再构建：构建期间总线可能又变了，记旧版本只会让下一次多重建一次，
+            // 记新版本则可能把旧内容永久标成最新。
+            itemSnapshotRevision = currentRevision;
         }
         return itemSnapshotCache;
     }
 
     /** 同 {@link #snapshotItemsCached()}，流体侧。 */
     public synchronized List<Map.Entry<FluidKey, Long>> snapshotFluidsCached() {
-        if (fluidSnapshotCache == null || fluidSnapshotRevision != revision) {
+        int currentRevision = getRevision();
+        if (fluidSnapshotCache == null || fluidSnapshotRevision != currentRevision) {
             fluidSnapshotCache = snapshotFluids();
-            fluidSnapshotRevision = revision;
+            fluidSnapshotRevision = currentRevision;
         }
         return fluidSnapshotCache;
     }
 
     /** Captures revision, items and fluids atomically; called by the server-thread read API. */
     synchronized SharedStorageSnapshot snapshotForReadApi(String generation) {
-        List<SharedStorageSnapshot.ItemEntry> itemRows = new ArrayList<>(items.size());
-        for (Map.Entry<ItemKey, Long> entry : items.entrySet()) {
+        // 先记版本：构建期间总线可能变化，记旧版本只会让下一次多重建一次。
+        int currentRevision = getRevision();
+        List<Map.Entry<ItemKey, Long>> itemEntries = snapshotItems();
+        List<SharedStorageSnapshot.ItemEntry> itemRows = new ArrayList<>(itemEntries.size());
+        for (Map.Entry<ItemKey, Long> entry : itemEntries) {
             itemRows.add(
                 new SharedStorageSnapshot.ItemEntry(
                     entry.getKey()
                         .prototype(),
                     entry.getValue()));
         }
-        List<SharedStorageSnapshot.FluidEntry> fluidRows = new ArrayList<>(fluids.size());
-        for (Map.Entry<FluidKey, Long> entry : fluids.entrySet()) {
+        List<Map.Entry<FluidKey, Long>> fluidEntries = snapshotFluids();
+        List<SharedStorageSnapshot.FluidEntry> fluidRows = new ArrayList<>(fluidEntries.size());
+        for (Map.Entry<FluidKey, Long> entry : fluidEntries) {
             fluidRows.add(
                 new SharedStorageSnapshot.FluidEntry(
                     entry.getKey()
@@ -359,11 +580,11 @@ public class SharedStorage {
         SharedStorageReadStatus status = new SharedStorageReadStatus(
             SharedStorageReadStatus.State.READY,
             generation,
-            revision);
+            currentRevision);
         return new SharedStorageSnapshot(status, itemRows, fluidRows);
     }
 
-    /** @return 只读视图，仅限已持有本对象锁的场景使用（例如序列化时） */
+    /** @return 只读视图，仅限已持有本对象锁的场景使用（例如序列化时）。不包含存储总线。 */
     public synchronized Map<ItemKey, Long> itemView() {
         return Collections.unmodifiableMap(items);
     }
@@ -373,23 +594,57 @@ public class SharedStorage {
     }
 
     public synchronized int itemTypeCount() {
-        return items.size();
+        int count = items.size();
+        for (ItemKey key : StorageBusRegistry.snapshotReadableItems()
+            .keySet()) {
+            if (!items.containsKey(key)) count++;
+        }
+        return count;
     }
 
     public synchronized int fluidTypeCount() {
-        return fluids.size();
+        int count = fluids.size();
+        for (FluidKey key : StorageBusRegistry.snapshotReadableFluids()
+            .keySet()) {
+            if (!fluids.containsKey(key)) count++;
+        }
+        return count;
     }
 
     public synchronized long getItemTotal() {
-        return itemTotal;
+        return saturatingAdd(itemTotal, StorageBusRegistry.readableItemTotal());
     }
 
     public synchronized long getFluidTotal() {
-        return fluidTotal;
+        return saturatingAdd(fluidTotal, StorageBusRegistry.readableFluidTotal());
     }
 
+    /**
+     * 内容版本号 = 池子版本 + 存储总线聚合版本。
+     *
+     * <p>
+     * 两者都只增不减，所以相加仍然是单调的，可以用作缓存失效水位。
+     * 总线版本单独放在 {@link StorageBusRegistry} 里，是为了让总线变化
+     * <b>不把共享存储标记成脏</b>：外部容器由自己的方块实体落盘。
+     */
     public synchronized int getRevision() {
-        return revision;
+        return revision + StorageBusRegistry.getRevision();
+    }
+
+    /**
+     * 存储总线报告「可读库存变了」。
+     *
+     * <p>
+     * 只通知监听器（AE 桥 / 终端增量广播），<b>不碰 {@link #dirty}</b>：
+     * 总线里的东西住在相邻容器的方块实体里，由它们自己落盘。
+     * 版本号由 {@link StorageBusRegistry} 在聚合库存变化时推进。
+     */
+    public synchronized void notifyExternalItemChanged(ItemKey key) {
+        if (key != null) notifyItemChanged(key);
+    }
+
+    public synchronized void notifyExternalFluidChanged(FluidKey key) {
+        if (key != null) notifyFluidChanged(key);
     }
 
     /** 清空全部内容，<b>包括隔离区</b> —— 这是 /futashared clear 的语义，管理员要的就是彻底清掉。 */
@@ -573,23 +828,26 @@ public class SharedStorage {
      */
     public synchronized long itemSpaceLeft(ItemKey key) {
         if (key == null) return 0L;
-        return Math
-            .max(0L, Math.max(0L, limitOf(itemLimits, key) - getItemAmount(key)) - craftingItems.getOrDefault(key, 0L));
+        return Math.max(
+            0L,
+            Math.max(0L, limitOf(itemLimits, key) - itemAmountForLimit(key)) - craftingItems.getOrDefault(key, 0L));
     }
 
     public synchronized long fluidSpaceLeft(FluidKey key) {
         if (key == null) return 0L;
         return Math.max(
             0L,
-            Math.max(0L, limitOf(fluidLimits, key) - getFluidAmount(key)) - craftingFluids.getOrDefault(key, 0L));
+            Math.max(0L, limitOf(fluidLimits, key) - fluidAmountForLimit(key)) - craftingFluids.getOrDefault(key, 0L));
     }
 
     public synchronized long itemManualSpaceLeft(ItemKey key) {
-        return key == null ? 0L : MAX_AMOUNT - getItemAmount(key) - craftingItems.getOrDefault(key, 0L);
+        if (key == null) return 0L;
+        return Math.max(0L, MAX_AMOUNT - itemAmountForLimit(key) - craftingItems.getOrDefault(key, 0L));
     }
 
     public synchronized long fluidManualSpaceLeft(FluidKey key) {
-        return key == null ? 0L : MAX_AMOUNT - getFluidAmount(key) - craftingFluids.getOrDefault(key, 0L);
+        if (key == null) return 0L;
+        return Math.max(0L, MAX_AMOUNT - fluidAmountForLimit(key) - craftingFluids.getOrDefault(key, 0L));
     }
 
     /** A real withdrawal with a reserved rollback slot; no storage lock is held across AE callbacks. */
@@ -597,18 +855,22 @@ public class SharedStorage {
         if (key == null || requested <= 0L || craftingItems.containsKey(key)) return null;
         long amount = Math.min(requested, getItemAmount(key));
         if (amount <= 0L) return null;
-        craftingItems.put(key, amount);
-        extractItem(key, amount);
-        return new CraftingReservation(key, null, amount, craftingEpoch);
+        // 总线可能在这一刻刚好被别的机器抽空：按实际取到的量托管，
+        // 否则 finish(0) 会把没取到的部分也从账上抹掉。
+        long taken = extractItem(key, amount);
+        if (taken <= 0L) return null;
+        craftingItems.put(key, taken);
+        return new CraftingReservation(key, null, taken, craftingEpoch);
     }
 
     public synchronized CraftingReservation reserveFluidForCrafting(FluidKey key, long requested) {
         if (key == null || requested <= 0L || craftingFluids.containsKey(key)) return null;
         long amount = Math.min(requested, getFluidAmount(key));
         if (amount <= 0L) return null;
-        craftingFluids.put(key, amount);
-        extractFluid(key, amount);
-        return new CraftingReservation(null, key, amount, craftingEpoch);
+        long taken = extractFluid(key, amount);
+        if (taken <= 0L) return null;
+        craftingFluids.put(key, taken);
+        return new CraftingReservation(null, key, taken, craftingEpoch);
     }
 
     public final class CraftingReservation {

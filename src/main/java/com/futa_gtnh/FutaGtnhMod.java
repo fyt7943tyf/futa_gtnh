@@ -79,6 +79,9 @@ public class FutaGtnhMod {
     /** IO 节点方块（共享存储的自动化输入输出口）。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockIoNode blockIoNode;
 
+    /** 存储总线方块（把相邻容器接进共享存储）。在 {@code CommonProxy#preInit} 里创建并注册。 */
+    public static com.futa_gtnh.storagebus.BlockStorageBus blockStorageBus;
+
     /** 自选抽奖机方块。没装 Enhanced LootBags 时为 null。 */
     public static BlockLootMachine blockLootMachine;
 

@@ -248,6 +248,28 @@ tasks.register<JavaExec>("verifyTerminalIo") {
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 
+val compileStorageBusChecks = tasks.register<JavaCompile>("compileStorageBusChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/storage-bus-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output +
+        sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("storage-bus-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifyStorageBus") {
+    group = "verification"
+    description = "Checks storage bus aggregation, priority routing, filters, access modes, fluids and unregistering"
+    dependsOn(compileStorageBusChecks)
+    mainClass.set("com.futa_gtnh.storagebus.StorageBusCheckLauncher")
+    classpath = files(compileStorageBusChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifyStorageBus") }
+
 // Botania is optional at runtime; only these checks need its concrete classes.
 val botaniaAuraCheckDependencies = configurations.create("botaniaAuraCheckDependencies") {
     isTransitive = false

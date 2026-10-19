@@ -40,6 +40,9 @@ public class ModEventHandler {
         if (event.phase != TickEvent.Phase.END) return;
         com.futa_gtnh.network.ServerActions.tick();
         SharedStorageManager.onServerTick();
+        // 存储总线：把这一 tick 里相邻容器的变化统一广播给终端 / AE。
+        // 必须排在 AE 桥的 tick 末推送之前 —— 那个钩子会消费这里排队的键。
+        com.futa_gtnh.storagebus.StorageBusRegistry.onServerTickEnd();
         // 推进寻物扫描。没有任务时它第一件事就是返回，开销是一次 isEmpty()
         LocatorManager.onServerTick();
         // 匠魂工作站的自动补料（没装匠魂、或配置关掉时，第一步就返回）

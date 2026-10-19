@@ -23,7 +23,10 @@ import com.futa_gtnh.block.TileEntitySharedTerminal;
 import com.futa_gtnh.inventory.ContainerAeSignalTransmitter;
 import com.futa_gtnh.inventory.ContainerIoNode;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
+import com.futa_gtnh.inventory.ContainerStorageBus;
 import com.futa_gtnh.rts.client.GuiRtsOverlay;
+import com.futa_gtnh.storagebus.StorageBusConfig;
+import com.futa_gtnh.storagebus.TileEntityStorageBus;
 
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
@@ -71,11 +74,15 @@ public final class UiSmokeCheck {
             TileEntityIoNode node = new TileEntityIoNode(); node.setWorldObj(mc.theWorld);
             TileAeSignalTransmitter transmitter = new TileAeSignalTransmitter(); transmitter.setWorldObj(mc.theWorld);
             TileEntityLootMachine loot = new TileEntityLootMachine(); loot.setWorldObj(mc.theWorld);
+            TileEntityStorageBus bus = new TileEntityStorageBus(); bus.setWorldObj(mc.theWorld);
+            ClientStorageBus.setConfig(mc.theWorld.provider.dimensionId, bus.xCoord, bus.yCoord, bus.zCoord,
+                new StorageBusConfig().writeToNbt(), "", false, false);
             add("settings", GuiClientConfig::new);
             add("terminal", () -> new GuiSharedTerminal(storage));
             add("limits", () -> new GuiStorageLimits(storage));
             add("terminal_io", () -> new GuiTerminalIo(storage));
             add("node", () -> new GuiIoNode(new ContainerIoNode(node, mc.thePlayer), 2));
+            add("storage_bus", () -> new GuiStorageBus(new ContainerStorageBus(bus, mc.thePlayer)));
             add("transmitter", () -> new GuiAeSignalTransmitter(new ContainerAeSignalTransmitter(transmitter, mc.thePlayer), mc.thePlayer));
             if (CommonProxy.swiftStep != null) add("swift_step", () -> new GuiSwiftStep(new ItemStack(CommonProxy.swiftStep)));
             add("locator", GuiLocatorWand::new);

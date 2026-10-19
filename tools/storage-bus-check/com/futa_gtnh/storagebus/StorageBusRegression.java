@@ -1,0 +1,537 @@
+package com.futa_gtnh.storagebus;
+
+import java.io.File;
+import java.lang.reflect.Field;
+import java.util.Collections;
+
+import net.minecraft.init.Bootstrap;
+import net.minecraft.init.Items;
+import net.minecraft.inventory.IInventory;
+import net.minecraft.inventory.InventoryBasic;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.tileentity.TileEntity;
+import net.minecraft.world.World;
+import net.minecraft.world.WorldProviderSurface;
+import net.minecraft.world.WorldSettings;
+import net.minecraft.world.WorldType;
+import net.minecraft.world.chunk.IChunkProvider;
+import net.minecraft.world.storage.SaveHandlerMP;
+import net.minecraftforge.common.util.ForgeDirection;
+import net.minecraftforge.fluids.Fluid;
+import net.minecraftforge.fluids.FluidRegistry;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.FluidTank;
+import net.minecraftforge.fluids.FluidTankInfo;
+import net.minecraftforge.fluids.IFluidHandler;
+import net.minecraftforge.oredict.OreDictionary;
+
+import com.futa_gtnh.shared.FluidKey;
+import com.futa_gtnh.shared.ItemKey;
+import com.futa_gtnh.shared.SharedStorage;
+import com.futa_gtnh.shared.SharedStorageManager;
+
+import cpw.mods.fml.common.DummyModContainer;
+import cpw.mods.fml.common.LoadController;
+import cpw.mods.fml.common.Loader;
+import cpw.mods.fml.common.ModMetadata;
+import cpw.mods.fml.relauncher.FMLInjectionData;
+import cpw.mods.fml.relauncher.FMLRelaunchLog;
+import cpw.mods.fml.relauncher.Side;
+
+/**
+ * Registry-only regression checks for the shared storage bus.
+ *
+ * <p>
+ * 不启动客户端、不连网络：只用一个假 World + 一个假容器，验证
+ * 「终端可见的聚合库存」「按优先级写入/抽取」「筛选」「只读/只写」「流体」
+ * 以及注销后不再出现。和 {@code TerminalIoRegression} 同一套 bootstrap。
+ */
+public final class StorageBusRegression {
+
+    private static final ForgeDirection EAST = ForgeDirection.EAST;
+    private static final ForgeDirection WEST = ForgeDirection.WEST;
+    private static int checks;
+
+    private StorageBusRegression() {}
+
+    public static void main(String[] args) throws Exception {
+        Loader.injectData(
+            new Object[] { "7", "99", "40", "1614", "1.7.10", "9.05", new File("."), Collections.emptyList() });
+        Field side = FMLRelaunchLog.class.getDeclaredField("side");
+        side.setAccessible(true);
+        side.set(null, Side.SERVER);
+        Bootstrap.func_151354_b();
+        Field namedMods = Loader.class.getDeclaredField("namedMods");
+        namedMods.setAccessible(true);
+        namedMods.set(Loader.instance(), Collections.emptyMap());
+        LoadController controller = new LoadController(Loader.instance());
+        Field activeContainer = LoadController.class.getDeclaredField("activeContainer");
+        activeContainer.setAccessible(true);
+        activeContainer.set(controller, new DummyModContainer(new ModMetadata()));
+        Field modController = Loader.class.getDeclaredField("modController");
+        modController.setAccessible(true);
+        modController.set(Loader.instance(), controller);
+        Field minecraftHome = FMLInjectionData.class.getDeclaredField("minecraftHome");
+        minecraftHome.setAccessible(true);
+        minecraftHome.set(null, new File("build/storage-bus-check"));
+        File aeConfigDirectory = new File("build/storage-bus-check/ae-config");
+        aeConfigDirectory.mkdirs();
+        appeng.core.AEConfig.instance = new appeng.core.AEConfig(new File(aeConfigDirectory, "AE2.cfg"));
+        TileEntity.addMapping(TileEntityStorageBus.class, "storage-bus-regression");
+
+        checkAggregationAndRouting();
+        checkPlacement();
+        checkConfigRoundTrip();
+        checkReadOnlyAndWriteOnly();
+        checkFilters();
+        checkFluids();
+        checkUnregister();
+
+        System.out.println("Storage bus regression passed: " + checks + " checks");
+    }
+
+    // ==================================================================
+    // 聚合 / 写入 / 抽取
+    // ==================================================================
+
+    private static void checkAggregationAndRouting() {
+        Fixture f = Fixture.create();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+
+        f.target.inventory.setInventorySlotContents(0, new ItemStack(Items.iron_ingot, 64));
+        refresh(f);
+        check(f.storage.getItemAmount(iron) == 64, "target contents visible to shared storage");
+        check(f.storage.getItemTotal() == 64, "readable total includes bus");
+        check(f.storage.itemTypeCount() == 1, "type count includes bus");
+        check(
+            f.storage.snapshotItemsCached()
+                .size() == 1,
+            "cached snapshot includes bus");
+
+        check(f.storage.extractItem(iron, 30) == 30, "withdraw draws from bus");
+        check(f.target.total(iron) == 34 && f.storage.getItemAmount(iron) == 34, "withdraw conserves bus stock");
+
+        // 优先级 0：总线先于共享存储池接收写入
+        check(f.storage.insertItem(iron, 50) == 50, "insert accepted");
+        check(f.target.total(iron) == 84, "priority-0 bus receives before the pool");
+        check(f.storage.getItemAmount(iron) == 84, "aggregate count after insert");
+        check(f.storage.itemView().isEmpty(), "no duplicate pool copy when bus accepted");
+
+        // 正优先级更先；池子为空时仍然进总线
+        f.bus.getConfig().setPriority(10);
+        StorageBusRegistry.refresh(f.bus.getLink());
+        check(f.storage.insertItem(iron, 10) == 10 && f.target.total(iron) == 94, "positive priority writes to bus");
+
+        // 负优先级：池子有货时先抽池子
+        SharedStorage storage = f.storage;
+        storage.clear();
+        StorageBusRegistry.clear();
+        Fixture g = Fixture.create();
+        ItemKey gold = ItemKey.of(new ItemStack(Items.gold_ingot));
+        g.bus.getConfig().setPriority(-10);
+        g.target.inventory.setInventorySlotContents(0, new ItemStack(Items.gold_ingot, 40));
+        refresh(g);
+        g.storage.insertItemManual(gold, 100);
+        check(g.storage.getItemAmount(gold) == 140, "negative-priority bus still counts toward stock");
+        check(g.storage.extractItem(gold, 100) == 100, "withdraw amount satisfied");
+        check(g.target.total(gold) == 0, "negative-priority bus is drained before the pool");
+        check(
+            g.storage.itemView()
+                .getOrDefault(gold, 0L) == 40L,
+            "pool keeps the remainder after the negative bus is empty");
+
+        // 主动抽入 / 回滚用 direct 入口：即使目标挂着可写总线，也只进池子
+        Fixture h = Fixture.create();
+        h.target.inventory.setInventorySlotContents(0, new ItemStack(Items.iron_ingot, 20));
+        refresh(h);
+        check(h.storage.insertItemDirect(iron, 5) == 5, "direct insert accepted");
+        check(h.target.total(iron) == 20, "direct insert never writes back to the source bus");
+        check(h.storage.getItemAmountPool(iron) == 5, "direct insert lands in the pool");
+        check(h.storage.extractItemDirect(iron, 5) == 5, "direct extraction uses pool only");
+        check(h.target.total(iron) == 20 && h.storage.getItemAmount(iron) == 20, "direct extraction conserves stock");
+    }
+
+    private static void checkPlacement() {
+        TestWorld world = new TestWorld();
+        TestContainer target = new TestContainer();
+        world.target = target;
+        target.setWorldObj(world);
+
+        check(
+            TileEntityStorageBus.pickTargetSide(world, 0, 0, 0, EAST) == EAST,
+            "placement prefers the clicked face");
+        check(
+            TileEntityStorageBus.pickTargetSide(world, 0, 0, 0, WEST) == EAST,
+            "placement falls back to the first adjacent container");
+        check(
+            TileEntityStorageBus.pickTargetSide(world, 20, 0, 0, WEST) == WEST,
+            "placement keeps the clicked face when no container exists");
+        BlockStorageBus block = new BlockStorageBus();
+        check(
+            block.onBlockPlaced(world, 0, 0, 0, WEST.ordinal(), 0.5F, 0.5F, 0.5F, 0) == EAST.ordinal(),
+            "block metadata records the target face");
+    }
+
+    private static void checkConfigRoundTrip() {
+        StorageBusConfig config = new StorageBusConfig();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        FluidKey water = FluidKey.of(new FluidStack(FluidRegistry.WATER, 1));
+        config.setTargetSide(EAST);
+        config.setPriority(-7);
+        config.setAccess(StorageBusConfig.AccessMode.READ_ONLY);
+        config.setFilterMode(StorageBusConfig.FilterMode.BLACKLIST);
+        config.setMatchMode(StorageBusConfig.MatchMode.FUZZY);
+        config.setItemFilter(2, iron);
+        config.setFluidFilter(4, water);
+
+        StorageBusConfig restored = new StorageBusConfig();
+        restored.readFromNbt(config.writeToNbt());
+        check(restored.getTargetSide() == EAST, "config NBT target");
+        check(restored.getPriority() == -7, "config NBT priority");
+        check(restored.getAccess() == StorageBusConfig.AccessMode.READ_ONLY, "config NBT access");
+        check(restored.getFilterMode() == StorageBusConfig.FilterMode.BLACKLIST, "config NBT filter mode");
+        check(restored.getMatchMode() == StorageBusConfig.MatchMode.FUZZY, "config NBT match mode");
+        check(iron.equals(restored.getItemFilter(2)) && restored.getItemFilter(0) == null, "config NBT keeps item slot");
+        check(water.equals(restored.getFluidFilter(4)) && restored.getFluidFilter(0) == null, "config NBT keeps fluid slot");
+        check(!restored.allowsItem(iron), "config NBT blacklist still matches");
+        check(!restored.allowsFluid(water), "config NBT fluid blacklist still matches");
+
+        restored.setPriority(Integer.MAX_VALUE);
+        check(restored.getPriority() == StorageBusConfig.MAX_PRIORITY, "priority clamped high");
+        restored.setPriority(Integer.MIN_VALUE);
+        check(restored.getPriority() == -StorageBusConfig.MAX_PRIORITY, "priority clamped low");
+    }
+
+    private static void checkReadOnlyAndWriteOnly() {
+        Fixture f = Fixture.create();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        f.target.inventory.setInventorySlotContents(0, new ItemStack(Items.iron_ingot, 30));
+        f.bus.getConfig().setAccess(StorageBusConfig.AccessMode.READ_ONLY);
+        refresh(f);
+
+        check(f.storage.getItemAmount(iron) == 30, "read-only bus is visible");
+        check(f.storage.insertItem(iron, 10) == 10, "read-only bus rejects insert without losing it");
+        check(f.target.total(iron) == 30, "read-only target unchanged");
+        check(f.storage.getItemAmount(iron) == 40, "rejected insert lands in the pool");
+        check(f.storage.extractItem(iron, 5) == 5, "read-only bus can be extracted");
+        check(f.target.total(iron) == 30, "pool extracted before equal-priority bus");
+
+        Fixture g = Fixture.create();
+        g.bus.getConfig().setAccess(StorageBusConfig.AccessMode.WRITE_ONLY);
+        g.target.inventory.setInventorySlotContents(0, new ItemStack(Items.iron_ingot, 7));
+        refresh(g);
+        check(g.storage.getItemAmount(iron) == 0, "write-only bus is hidden");
+        check(g.storage.insertItem(iron, 4) == 4, "write-only bus accepts insert");
+        check(g.target.total(iron) == 11, "write-only target received items");
+        check(g.storage.extractItem(iron, 1) == 0, "write-only bus cannot be extracted");
+        check(g.storage.itemView().isEmpty(), "write-only has no readable pool copy");
+
+        g.bus.getConfig().setAccess(StorageBusConfig.AccessMode.READ_WRITE);
+        refresh(g);
+        check(g.storage.getItemAmount(iron) == 11, "access change exposes existing stock");
+    }
+
+    private static void checkFilters() {
+        Fixture f = Fixture.create();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        ItemKey gold = ItemKey.of(new ItemStack(Items.gold_ingot));
+        f.bus.getConfig()
+            .setItemFilter(0, iron);
+        refresh(f);
+
+        check(f.storage.insertItem(gold, 5) == 5, "whitelisted bus rejects other items");
+        check(f.target.total(gold) == 0, "gold did not enter target");
+        check(f.storage.getItemAmount(gold) == 5, "gold fell through to the pool");
+        check(f.storage.insertItem(iron, 6) == 6 && f.target.total(iron) == 6, "whitelisted item enters target");
+
+        f.bus.getConfig()
+            .setFilterMode(StorageBusConfig.FilterMode.BLACKLIST);
+        refresh(f);
+        check(f.storage.insertItem(iron, 2) == 2 && f.target.total(iron) == 6, "blacklist now rejects iron");
+        check(f.storage.insertItem(gold, 3) == 3 && f.target.total(gold) == 3, "blacklist accepts non-listed gold");
+
+        // 精确 / 模糊：带 NBT 的变体
+        ItemStack taggedIron = new ItemStack(Items.iron_ingot);
+        taggedIron.setTagCompound(new NBTTagCompound());
+        taggedIron.getTagCompound()
+            .setString("variant", "bus-check");
+        ItemKey taggedKey = ItemKey.of(taggedIron);
+        f.bus.getConfig()
+            .clearFilters();
+        f.bus.getConfig()
+            .setFilterMode(StorageBusConfig.FilterMode.WHITELIST);
+        f.bus.getConfig()
+            .setItemFilter(0, taggedKey);
+        f.bus.getConfig()
+            .setMatchMode(StorageBusConfig.MatchMode.EXACT);
+        check(!f.bus.getConfig()
+            .allowsItem(iron), "exact mode distinguishes NBT");
+        f.bus.getConfig()
+            .setMatchMode(StorageBusConfig.MatchMode.FUZZY);
+        check(f.bus.getConfig()
+            .allowsItem(iron), "fuzzy mode ignores NBT");
+
+        // 矿辞：给两个不同物品注册同一个矿辞名
+        Item oreItem = new Item().setUnlocalizedName("storage-bus-ore-check");
+        Item.itemRegistry.addObject(30150, "storage-bus-ore-check", oreItem);
+        OreDictionary.registerOre("ingotStorageBusCheck", new ItemStack(Items.iron_ingot));
+        OreDictionary.registerOre("ingotStorageBusCheck", new ItemStack(oreItem));
+        ItemKey oreKey = ItemKey.of(new ItemStack(oreItem));
+        f.bus.getConfig()
+            .clearFilters();
+        f.bus.getConfig()
+            .setItemFilter(0, oreKey);
+        f.bus.getConfig()
+            .setMatchMode(StorageBusConfig.MatchMode.ORE_DICT);
+        check(f.bus.getConfig()
+            .allowsItem(iron), "ore dictionary mode matches another item with the same ore name");
+        check(!f.bus.getConfig()
+            .allowsItem(gold), "ore dictionary mode still rejects unrelated items");
+    }
+
+    private static void checkFluids() {
+        Fixture f = Fixture.create();
+        FluidKey water = FluidKey.of(new FluidStack(FluidRegistry.WATER, 1));
+        f.target.tank.fill(new FluidStack(FluidRegistry.WATER, 4000), true);
+        refresh(f);
+
+        check(f.storage.getFluidAmount(water) == 4000, "fluid target visible");
+        check(f.storage.extractFluid(water, 1000) == 1000, "fluid withdraw from bus");
+        check(f.target.tank.getFluidAmount() == 3000, "fluid withdraw conserves target");
+        check(f.storage.insertFluid(water, 500) == 500, "fluid insert accepted");
+        check(f.target.tank.getFluidAmount() == 3500, "fluid insert goes to bus first");
+
+        f.bus.getConfig()
+            .setFluidFilter(0, water);
+        f.bus.getConfig()
+            .setFilterMode(StorageBusConfig.FilterMode.BLACKLIST);
+        refresh(f);
+        check(f.target.tank.getFluidAmount() == 3500, "fluid blacklist does not change existing content");
+        check(f.storage.getFluidAmount(water) == 0, "blacklisted fluid hidden from shared storage");
+    }
+
+    private static void checkUnregister() {
+        Fixture f = Fixture.create();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        f.target.inventory.setInventorySlotContents(0, new ItemStack(Items.iron_ingot, 12));
+        refresh(f);
+        check(f.storage.getItemAmount(iron) == 12, "registered bus visible");
+        f.bus.invalidate();
+        check(f.storage.getItemAmount(iron) == 0, "unregistered bus disappears");
+        check(f.target.total(iron) == 12, "unregister never deletes target contents");
+    }
+
+    // ==================================================================
+    // Fixture / helpers
+    // ==================================================================
+
+    private static void refresh(Fixture fixture) {
+        StorageBusRegistry.refresh(fixture.bus.getLink());
+    }
+
+    private static void check(boolean value, String message) {
+        if (!value) throw new AssertionError(message);
+        checks++;
+    }
+
+    private static final class Fixture {
+
+        final SharedStorage storage;
+        final TestWorld world;
+        final TestContainer target;
+        final TileEntityStorageBus bus;
+
+        private Fixture(SharedStorage storage, TestWorld world, TestContainer target, TileEntityStorageBus bus) {
+            this.storage = storage;
+            this.world = world;
+            this.target = target;
+            this.bus = bus;
+        }
+
+        static Fixture create() {
+            SharedStorageManager.getStorage()
+                .clear();
+            StorageBusRegistry.clear();
+            TestWorld world = new TestWorld();
+            TestContainer target = new TestContainer();
+            TileEntityStorageBus bus = new TileEntityStorageBus();
+            target.setWorldObj(world);
+            world.target = target;
+            world.bus = bus;
+            bus.setWorldObj(world);
+            bus.getConfig()
+                .setTargetSide(EAST);
+            bus.ensureRegistered();
+            StorageBusRegistry.refresh(bus.getLink());
+            return new Fixture(SharedStorageManager.getStorage(), world, target, bus);
+        }
+    }
+
+    /** 同时提供物品和流体的假容器。 */
+    private static final class TestContainer extends TileEntity implements IInventory, IFluidHandler {
+
+        final InventoryBasic inventory = new InventoryBasic("storage-bus-target", true, 3);
+        final FluidTank tank = new FluidTank(16000);
+
+        int total(ItemKey key) {
+            int total = 0;
+            for (int slot = 0; slot < inventory.getSizeInventory(); slot++) {
+                ItemStack stack = inventory.getStackInSlot(slot);
+                if (stack != null && key.equals(ItemKey.of(stack))) total += stack.stackSize;
+            }
+            return total;
+        }
+
+        @Override
+        public int getSizeInventory() {
+            return inventory.getSizeInventory();
+        }
+
+        @Override
+        public ItemStack getStackInSlot(int slot) {
+            return inventory.getStackInSlot(slot);
+        }
+
+        @Override
+        public ItemStack decrStackSize(int slot, int amount) {
+            return inventory.decrStackSize(slot, amount);
+        }
+
+        @Override
+        public ItemStack getStackInSlotOnClosing(int slot) {
+            return inventory.getStackInSlotOnClosing(slot);
+        }
+
+        @Override
+        public void setInventorySlotContents(int slot, ItemStack stack) {
+            inventory.setInventorySlotContents(slot, stack);
+        }
+
+        @Override
+        public String getInventoryName() {
+            return inventory.getInventoryName();
+        }
+
+        @Override
+        public boolean hasCustomInventoryName() {
+            return false;
+        }
+
+        @Override
+        public int getInventoryStackLimit() {
+            return 64;
+        }
+
+        @Override
+        public void markDirty() {}
+
+        @Override
+        public boolean isUseableByPlayer(net.minecraft.entity.player.EntityPlayer player) {
+            return true;
+        }
+
+        @Override
+        public void openInventory() {}
+
+        @Override
+        public void closeInventory() {}
+
+        @Override
+        public boolean isItemValidForSlot(int slot, ItemStack stack) {
+            return true;
+        }
+
+        @Override
+        public int fill(ForgeDirection from, FluidStack resource, boolean doFill) {
+            return tank.fill(resource, doFill);
+        }
+
+        @Override
+        public FluidStack drain(ForgeDirection from, FluidStack resource, boolean doDrain) {
+            FluidStack current = tank.getFluid();
+            if (current == null || resource == null || !current.isFluidEqual(resource)) return null;
+            return tank.drain(resource.amount, doDrain);
+        }
+
+        @Override
+        public FluidStack drain(ForgeDirection from, int amount, boolean doDrain) {
+            return tank.drain(amount, doDrain);
+        }
+
+        @Override
+        public boolean canFill(ForgeDirection from, Fluid fluid) {
+            return true;
+        }
+
+        @Override
+        public boolean canDrain(ForgeDirection from, Fluid fluid) {
+            return true;
+        }
+
+        @Override
+        public FluidTankInfo[] getTankInfo(ForgeDirection from) {
+            return new FluidTankInfo[] { tank.getInfo() };
+        }
+    }
+
+    private static final class TestWorld extends World {
+
+        TileEntityStorageBus bus;
+        TestContainer target;
+
+        TestWorld() {
+            super(
+                new SaveHandlerMP(),
+                "storage-bus-check",
+                new WorldSettings(0, WorldSettings.GameType.SURVIVAL, false, false, WorldType.DEFAULT),
+                new WorldProviderSurface(),
+                new net.minecraft.profiler.Profiler());
+        }
+
+        @Override
+        protected IChunkProvider createChunkProvider() {
+            return null;
+        }
+
+        @Override
+        protected int func_152379_p() {
+            return 0;
+        }
+
+        @Override
+        public net.minecraft.entity.Entity getEntityByID(int id) {
+            return null;
+        }
+
+        @Override
+        public TileEntity getTileEntity(int x, int y, int z) {
+            if (y != 0 || z != 0) return null;
+            if (x == 0) return bus;
+            if (x == 1) return target;
+            return null;
+        }
+
+        @Override
+        public int getBlockMetadata(int x, int y, int z) {
+            return 0;
+        }
+
+        @Override
+        public boolean blockExists(int x, int y, int z) {
+            return true;
+        }
+
+        @Override
+        public net.minecraft.block.Block getBlock(int x, int y, int z) {
+            return net.minecraft.init.Blocks.air;
+        }
+
+        @Override
+        public void markBlockForUpdate(int x, int y, int z) {}
+
+        @Override
+        public void markTileEntityChunkModified(int x, int y, int z, TileEntity tile) {}
+    }
+}

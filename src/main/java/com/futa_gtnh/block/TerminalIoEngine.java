@@ -17,6 +17,7 @@ import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.storagebus.StorageBusRegistry;
 
 /**
  * 共享终端方块的<b>主动搬运</b>：按配置往相邻的容器抽东西 / 送东西。
@@ -166,6 +167,8 @@ final class TerminalIoEngine {
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
         boolean moved = false;
+        TileEntity sourceTile = inventory instanceof TileEntity ? (TileEntity) inventory : null;
+        boolean busTarget = sourceTile != null && StorageBusRegistry.isTargetTile(sourceTile);
 
         for (int slot = 0; slot < inventory.getSizeInventory() && budget > 0; slot++) {
             ItemStack stack = inventory.getStackInSlot(slot);
@@ -176,7 +179,12 @@ final class TerminalIoEngine {
             if (key == null) continue;
 
             int want = Math.min(budget, stack.stackSize);
-            long stored = storage.insertItem(stack, want);
+            // 主动抽入直接进池子：源容器本身可能挂着存储总线，写回总线会把刚抽出来的东西
+            // 又塞回同一个格子（甚至先扣格再写回），既白费力气又可能让缓存短暂对不上。
+            // 源恰好是总线目标、而且这条库存已经被总线计入聚合表时，这一步是「总线 → 池子」
+            // 的内部搬家，不受存量上限约束（总量没变）；被筛选挡住的条目仍按普通上限走。
+            boolean counted = busTarget && StorageBusRegistry.targetCountsItem(sourceTile, key);
+            long stored = counted ? storage.insertItemManualDirect(key, want) : storage.insertItemDirect(stack, want);
             if (stored <= 0L) continue;
 
             int remaining = stack.stackSize - (int) stored;
@@ -189,13 +197,20 @@ final class TerminalIoEngine {
             // 那样我们就等于凭空多了一份东西，所以回头验一下：
             // 源那一格如果还是原来的数量，就把刚存进去的吐回去。
             if (!sourceShrank(inventory, slot, stack, (int) stored)) {
-                storage.extractItem(key, stored);
+                storage.extractItemDirect(key, stored);
                 continue;
             }
 
             SharedStorageManager.broadcastItemChange(key);
             budget -= (int) stored;
             moved = true;
+        }
+        if (busTarget && moved) {
+            try {
+                StorageBusRegistry.refreshTargeting(sourceTile);
+            } catch (Throwable ignored) {
+                // 下一次周期刷新会收敛
+            }
         }
         return moved;
     }
@@ -239,7 +254,7 @@ final class TerminalIoEngine {
 
         // 手动条目直接查库存，先使用本轮额度；缺货或目标不收时继续尝试矿典条目。
         for (ItemKey key : filter.getItems()) {
-            int accepted = pushItem(inventory, side, storage, key, storage.getItemAmount(key), budget);
+            int accepted = pushItem(inventory, side, storage, key, storage.getItemAmountPool(key), budget);
             moved |= accepted > 0;
             budget -= accepted;
             if (budget <= 0) return moved;
@@ -276,15 +291,16 @@ final class TerminalIoEngine {
             want = Math.min(want, freeSpaceFor(inventory, side, prototype, budget));
             if (want <= 0) break;
 
-            long taken = storage.extractItem(key, want);
+            long taken = storage.extractItemDirect(key, want);
             if (taken <= 0L) break;
 
             int accepted = insertInto(inventory, side, key.prototype(taken));
             if (accepted < taken) {
                 // 目标中途不收（比如别的机器同时塞满了）：剩下的原样放回仓库。
                 // 宁可退回去，也不能凭空多出来。
-                // 这是回滚不是存款 —— 用不受上限的入口，否则上限一挡，东西就没了
-                storage.insertItemManual(key, taken - accepted);
+                // 这是回滚不是存款 —— 用不受上限、且不经过存储总线的入口，
+                // 否则上限/总线一挡，东西就没了
+                storage.insertItemManualDirect(key, taken - accepted);
             }
             inventory.markDirty();
             SharedStorageManager.broadcastItemChange(key);
@@ -424,7 +440,12 @@ final class TerminalIoEngine {
         if (drained == null || drained.getFluid() == null || drained.amount <= 0) return false;
 
         SharedStorage storage = SharedStorageManager.getStorage();
-        long stored = storage.insertFluid(drained, drained.amount);
+        TileEntity sourceTile = handler instanceof TileEntity ? (TileEntity) handler : null;
+        boolean busTarget = sourceTile != null && StorageBusRegistry.isTargetTile(sourceTile);
+        FluidKey key = FluidKey.of(drained);
+        boolean counted = busTarget && key != null && StorageBusRegistry.targetCountsFluid(sourceTile, key);
+        long stored = counted ? storage.insertFluidManualDirect(key, drained.amount)
+            : storage.insertFluidDirect(drained, drained.amount);
         if (stored < drained.amount) {
             // 存储顶到上限了（理论上不可能）：没存进去的那部分原样灌回去
             int back = (int) (drained.amount - stored);
@@ -432,8 +453,14 @@ final class TerminalIoEngine {
             if (stored <= 0L) return false;
         }
 
-        FluidKey key = FluidKey.of(drained);
         if (key != null) SharedStorageManager.broadcastFluidChange(key);
+        if (busTarget) {
+            try {
+                StorageBusRegistry.refreshTargeting(sourceTile);
+            } catch (Throwable ignored) {
+                // 下一次周期刷新会收敛
+            }
+        }
         return true;
     }
 
@@ -475,14 +502,14 @@ final class TerminalIoEngine {
                 int accepted = handler.fill(side, key.prototype(want), false);
                 if (accepted <= 0) break;
 
-                long taken = storage.extractFluid(key, accepted);
+                long taken = storage.extractFluidDirect(key, accepted);
                 if (taken <= 0L) break;
 
                 int filled = handler.fill(side, key.prototype(taken), true);
                 if (filled < taken) {
                     // 目标中途不收了：没灌进去的原样放回仓库。
-                    // 同样是回滚，不受上限约束
-                    storage.insertFluidManual(key, taken - filled);
+                    // 同样是回滚，不受上限约束、也不经过存储总线
+                    storage.insertFluidManualDirect(key, taken - filled);
                 }
                 if (filled > 0) {
                     SharedStorageManager.broadcastFluidChange(key);

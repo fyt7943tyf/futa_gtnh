@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import net.minecraft.entity.player.EntityPlayerMP;
@@ -19,6 +20,7 @@ import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketStorageDelta;
 import com.futa_gtnh.network.PacketStorageSync;
 import com.futa_gtnh.station.StationViews;
+import com.futa_gtnh.storagebus.StorageBusRegistry;
 import com.futa_gtnh.tinkers.TinkersAutoFill;
 
 /**
@@ -94,12 +96,29 @@ public final class SharedStorageManager {
     }
 
     /**
+     * 当前线程是不是服务端主线程。
+     *
+     * <p>
+     * 1.7.10 的 {@code MinecraftServer} 没有现成的「是否主线程」方法，而
+     * {@link #readApiThread} 在 {@code onServerStarted} 里记下的就是服务端线程。
+     * 还没启动服务端（无头检查 / 单测）时返回 true，避免把测试路径全挡掉。
+     */
+    public static boolean isServerThread() {
+        Thread serverThread = readApiThread;
+        return serverThread == null || Thread.currentThread() == serverThread;
+    }
+
+    /**
      * 服务端启动完成时调用。重复调用（单人模式换存档）会先把上一份存盘再重新载入。
      */
     public static void onServerStarted(MinecraftServer server) {
         if (loaded) {
             saveNow();
         }
+
+        // 上一个世界/存档遗留的总线登记必须清掉：方块实体会在新区块加载后的
+        // 第一次 tick 重新登记，旧 World 的引用不能留在静态表里。
+        StorageBusRegistry.clear();
 
         readApiThread = Thread.currentThread();
         readApiGeneration = UUID.randomUUID()
@@ -139,6 +158,8 @@ public final class SharedStorageManager {
         try {
             saveNow();
         } finally {
+            // 清掉总线对 World / TileEntity 的引用：服务端停掉后它们不应该继续被静态表持有
+            StorageBusRegistry.clear();
             loaded = false;
             readApiGeneration = UUID.randomUUID()
                 .toString();
@@ -226,6 +247,13 @@ public final class SharedStorageManager {
      * 缓存就永远命中不了 —— 每有一个玩家开界面就要把几千个条目重新压一遍。
      */
     public static void sendSnapshotTo(EntityPlayerMP player) {
+        // 打开界面时先让存储总线扫描一次目标容器：玩家刚往箱子里放的东西
+        // 不应该等到下一个刷新周期才出现在终端里。
+        StorageBusRegistry.refreshAll();
+        sendSnapshotToRaw(player);
+    }
+
+    private static void sendSnapshotToRaw(EntityPlayerMP player) {
         int transferId = ++transferCounter;
         PacketStorageSync.sendTo(player, transferId, getOrBuildPayload());
     }
@@ -304,10 +332,62 @@ public final class SharedStorageManager {
         }
     }
 
+    /**
+     * 存储总线报来一批「可读聚合库存变了」的键。
+     *
+     * <p>
+     * 和玩家操作不同，总线变化可能一次动很多键（区块加载/卸载、目标换箱子、
+     * 访问模式切换），所以这里合并成一个增量包；装不下就退回全量快照。
+     * AE 桥的监听器也在这一步收到通知 —— 它会把这些键攒到自己的 tick 末再推送，
+     * 不会在存储锁里回调 AE。
+     */
+    public static void onExternalStorageChanged(Set<ItemKey> itemKeys, Set<FluidKey> fluidKeys) {
+        if (!loaded) return;
+
+        SharedStorage current = storage;
+        boolean any = false;
+        if (itemKeys != null) {
+            for (ItemKey key : itemKeys) {
+                if (key == null) continue;
+                current.notifyExternalItemChanged(key);
+                any = true;
+            }
+        }
+        if (fluidKeys != null) {
+            for (FluidKey key : fluidKeys) {
+                if (key == null) continue;
+                current.notifyExternalFluidChanged(key);
+                any = true;
+            }
+        }
+        if (!any) return;
+
+        PacketStorageDelta delta = new PacketStorageDelta();
+        if (itemKeys != null) {
+            for (ItemKey key : itemKeys) {
+                if (key != null) delta.addItem(key, current.getItemAmount(key));
+            }
+        }
+        if (fluidKeys != null) {
+            for (FluidKey key : fluidKeys) {
+                if (key != null) delta.addFluid(key, current.getFluidAmount(key));
+            }
+        }
+        if (delta.isEmpty()) return;
+        if (delta.hasOverflowed()) {
+            // 一次变化的键太多 / 某个键的 NBT 太大：全量快照是分片的，体积可控
+            resyncAll();
+            return;
+        }
+        broadcastDelta(delta);
+    }
+
     /** 让所有正看着界面的玩家重新拉一份全量快照。 */
     public static void resyncAll() {
+        // 一次刷新足够；每个观众各刷一遍会随总线数量放大
+        StorageBusRegistry.refreshAll();
         for (EntityPlayerMP viewer : viewers()) {
-            sendSnapshotTo(viewer);
+            sendSnapshotToRaw(viewer);
         }
     }
 

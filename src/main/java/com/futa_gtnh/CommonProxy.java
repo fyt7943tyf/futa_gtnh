@@ -50,6 +50,9 @@ public class CommonProxy {
     /** IO 节点方块（共享存储的自动化输入输出口）。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockIoNode blockIoNode;
 
+    /** 存储总线方块（把相邻容器接进共享存储）。配置关闭时为 null。 */
+    public static com.futa_gtnh.storagebus.BlockStorageBus blockStorageBus;
+
     /** 自选抽奖机方块。没装 Enhanced LootBags 时为 null。 */
     public static BlockLootMachine blockLootMachine;
 
@@ -218,6 +221,16 @@ public class CommonProxy {
         GameRegistry.registerBlock(blockIoNode, BlockIoNode.NAME);
         GameRegistry.registerTileEntity(TileEntityIoNode.class, FutaGtnhMod.MODID + ":" + BlockIoNode.NAME);
         FutaGtnhMod.blockIoNode = blockIoNode;
+
+        // 存储总线：把一个相邻容器接进共享存储（终端可见，按优先级写入/抽取）
+        if (Config.enableStorageBus) {
+            blockStorageBus = new com.futa_gtnh.storagebus.BlockStorageBus();
+            GameRegistry.registerBlock(blockStorageBus, com.futa_gtnh.storagebus.BlockStorageBus.NAME);
+            GameRegistry.registerTileEntity(
+                com.futa_gtnh.storagebus.TileEntityStorageBus.class,
+                FutaGtnhMod.MODID + ":" + com.futa_gtnh.storagebus.BlockStorageBus.NAME);
+            FutaGtnhMod.blockStorageBus = blockStorageBus;
+        }
 
         // 迅步的隐形光源：注册但<b>不给 ItemBlock</b>（itemclass 传 null），
         // 这样它不会出现在创造模式物品栏 / NEI 物品列表里 —— 玩家拿不到它，
@@ -404,6 +417,16 @@ public class CommonProxy {
                 new ItemStack(blockIoNode, 1),
                 new Object[] { " E ", "IHI", " E ", 'E', "enderpearl", 'I', "ingotIron", 'H',
                     new ItemStack(Blocks.hopper, 1) }));
+
+        // 存储总线：末影珍珠（跨空间）+ 铁锭 + 箱子（目标容器）+ 漏斗（把两边接起来）。
+        // 和 IO 节点区分开：IO 节点是「主动定时搬」，总线是「按需、就在终端库存里」。
+        if (blockStorageBus != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(blockStorageBus, 1),
+                    new Object[] { " E ", "ICI", "IHI", 'E', "enderpearl", 'I', "ingotIron", 'C', "chestWood", 'H',
+                        new ItemStack(Blocks.hopper, 1) }));
+        }
 
         // 迅步：羽毛 + 金锭 + 钻石。全部走矿物词典，装了别的模组也成立
         if (swiftStep != null) {

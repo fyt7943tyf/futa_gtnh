@@ -84,5 +84,8 @@ public final class NetworkHandler {
         INSTANCE
             .registerMessage(PacketAeTransmitterConfig.Handler.class, PacketAeTransmitterConfig.class, 32, Side.SERVER);
         INSTANCE.registerMessage(PacketAeTransmitterSync.Handler.class, PacketAeTransmitterSync.class, 33, Side.CLIENT);
+        // 存储总线：配置快照（S2C）与整份上行 / 权威值请求（C2S）
+        INSTANCE.registerMessage(PacketStorageBusSync.Handler.class, PacketStorageBusSync.class, 34, Side.CLIENT);
+        INSTANCE.registerMessage(PacketStorageBusConfig.Handler.class, PacketStorageBusConfig.class, 35, Side.SERVER);
     }
 }

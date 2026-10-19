@@ -109,6 +109,24 @@ public class Config {
     public static boolean ioIdleBackoff = true;
 
     // ------------------------------------------------------------------
+    // 共享存储总线
+    // ------------------------------------------------------------------
+
+    /** 是否注册「存储总线」方块（把相邻容器接进共享存储，语义对齐 AE 存储总线）。 */
+    public static boolean enableStorageBus = true;
+
+    /**
+     * 存储总线扫描相邻容器的周期（tick）。
+     *
+     * <p>
+     * 总线本身不存东西，它的库存镜像来自目标容器。每次扫描只读一遍容器的槽位 /
+     * 罐子（通常几十格），所以周期不需要很长；但服务器上总线很多时，周期过短
+     * 会变成主要开销。默认 10 tick（0.5 秒）已经比 AE 终端的手动刷新更及时。
+     * 玩家打开共享终端时会额外刷新一次，不受这个周期影响。
+     */
+    public static int storageBusRefreshTicks = 10;
+
+    // ------------------------------------------------------------------
     // 客户端功能开关（设置界面）
     // ------------------------------------------------------------------
 
@@ -689,6 +707,20 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             ioIdleBackoff,
             "共享终端方块 / IO 节点的全仓搬运空闲时按 4→8→16→32→64→128 tick 指数退避；手动选中的物品仍按配置间隔直查并重试输出。改配置或搬动东西后恢复配置节奏。关掉后所有路径恒定轮询。默认 true（退避）。");
+
+        enableStorageBus = configuration.getBoolean(
+            "enableStorageBus",
+            Configuration.CATEGORY_GENERAL,
+            enableStorageBus,
+            "是否注册「存储总线」方块：把一个相邻容器接进共享存储，终端里可见/可取，按优先级写入和抽取，支持筛选与只读/只写。语义对齐 AE2 的 ME 存储总线。");
+
+        storageBusRefreshTicks = configuration.getInt(
+            "storageBusRefreshTicks",
+            Configuration.CATEGORY_GENERAL,
+            storageBusRefreshTicks,
+            1,
+            200,
+            "存储总线扫描相邻容器的周期（tick）。默认 10（0.5 秒）；打开共享终端时会额外刷新一次。");
 
         // 客户端功能开关（见字段区的说明），设置界面读写
         clientEnableSharedBagKey = configuration.getBoolean(

@@ -121,7 +121,8 @@ public class CommandSharedStorage extends CommandBase {
                 if (args.length < 2 || !"confirm".equalsIgnoreCase(args[1])) {
                     reply(
                         sender,
-                        EnumChatFormatting.RED + "这会清空全服共享存储里所有东西，且不可撤销。" + "确认请执行：/futashared clear confirm");
+                        EnumChatFormatting.RED + "这会清空全服共享存储池里所有东西（存储总线接进来的容器不受影响），且不可撤销。"
+                            + "确认请执行：/futashared clear confirm");
                     return;
                 }
                 SharedStorageManager.getStorage()
@@ -129,7 +130,7 @@ public class CommandSharedStorage extends CommandBase {
                 SharedStorageManager.invalidateSnapshot();
                 SharedStorageManager.saveNow();
                 SharedStorageManager.resyncAll();
-                reply(sender, EnumChatFormatting.RED + "共享存储已清空。");
+                reply(sender, EnumChatFormatting.RED + "共享存储池已清空（存储总线里的容器内容未动）。");
                 break;
 
             default:

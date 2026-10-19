@@ -9,14 +9,18 @@ import com.futa_gtnh.block.TileEntitySharedTerminal;
 import com.futa_gtnh.client.GuiIoNode;
 import com.futa_gtnh.client.GuiLootMachine;
 import com.futa_gtnh.client.GuiSharedTerminal;
+import com.futa_gtnh.client.GuiStorageBus;
 import com.futa_gtnh.exchange.AutoStore;
 import com.futa_gtnh.inventory.ContainerIoNode;
 import com.futa_gtnh.inventory.ContainerLootMachine;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
+import com.futa_gtnh.inventory.ContainerStorageBus;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketAutoStoreSync;
 import com.futa_gtnh.network.PacketIoNodeSync;
+import com.futa_gtnh.network.PacketStorageBusSync;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.storagebus.TileEntityStorageBus;
 
 import cpw.mods.fml.common.network.IGuiHandler;
 
@@ -43,6 +47,9 @@ public class GuiHandler implements IGuiHandler {
     /** AE 无线发信端的命名/状态界面。 */
     public static final int GUI_AE_SIGNAL_TRANSMITTER = 8;
 
+    /** 存储总线的配置界面。 */
+    public static final int GUI_STORAGE_BUS = 9;
+
     @Override
     public Object getServerGuiElement(int id, net.minecraft.entity.player.EntityPlayer player, World world, int x,
         int y, int z) {
@@ -57,6 +64,17 @@ public class GuiHandler implements IGuiHandler {
                 PacketIoNodeSync.send(serverPlayer, node);
             }
             return new ContainerIoNode(node, player);
+        }
+
+        if (id == GUI_STORAGE_BUS) {
+            TileEntityStorageBus bus = resolveStorageBus(world, x, y, z);
+            if (bus == null) return null;
+            if (player instanceof EntityPlayerMP) {
+                EntityPlayerMP serverPlayer = (EntityPlayerMP) player;
+                bus.ensureRegistered();
+                PacketStorageBusSync.send(serverPlayer, bus);
+            }
+            return new ContainerStorageBus(bus, player);
         }
 
         if (id == GUI_AE_SIGNAL_TRANSMITTER) {
@@ -110,6 +128,12 @@ public class GuiHandler implements IGuiHandler {
             return new GuiIoNode(new ContainerIoNode(node, player), id - GUI_IO_NODE_BASE);
         }
 
+        if (id == GUI_STORAGE_BUS) {
+            TileEntityStorageBus bus = resolveStorageBus(world, x, y, z);
+            if (bus == null) return null;
+            return new GuiStorageBus(new ContainerStorageBus(bus, player));
+        }
+
         if (id == GUI_AE_SIGNAL_TRANSMITTER) {
             com.futa_gtnh.aewireless.TileAeSignalTransmitter transmitter = resolveAeTransmitter(world, x, y, z);
             if (transmitter == null) return null;
@@ -157,6 +181,12 @@ public class GuiHandler implements IGuiHandler {
         if (world == null) return null;
         net.minecraft.tileentity.TileEntity tile = world.getTileEntity(x, y, z);
         return tile instanceof TileEntityIoNode ? (TileEntityIoNode) tile : null;
+    }
+
+    private static TileEntityStorageBus resolveStorageBus(World world, int x, int y, int z) {
+        if (world == null) return null;
+        net.minecraft.tileentity.TileEntity tile = world.getTileEntity(x, y, z);
+        return tile instanceof TileEntityStorageBus ? (TileEntityStorageBus) tile : null;
     }
 
     private static com.futa_gtnh.aewireless.TileAeSignalTransmitter resolveAeTransmitter(World world, int x, int y,
