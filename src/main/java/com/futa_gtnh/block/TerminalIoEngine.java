@@ -254,7 +254,7 @@ final class TerminalIoEngine {
 
         // 手动条目直接查库存，先使用本轮额度；缺货或目标不收时继续尝试矿典条目。
         for (ItemKey key : filter.getItems()) {
-            int accepted = pushItem(inventory, side, storage, key, storage.getItemAmountPool(key), budget);
+            int accepted = pushItem(inventory, side, storage, key, storage.getItemAmount(key), budget);
             moved |= accepted > 0;
             budget -= accepted;
             if (budget <= 0) return moved;
@@ -285,13 +285,14 @@ final class TerminalIoEngine {
         if (prototype == null || prototype.getItem() == null) return 0;
         int maxSize = Math.max(1, prototype.getMaxStackSize());
         int moved = 0;
+        TileEntity destination = inventory instanceof TileEntity ? (TileEntity) inventory : null;
         while (budget > 0 && available > 0L) {
             int want = (int) Math.min(Math.min((long) budget, (long) maxSize), available);
             // 目标装不下就别去扣仓库：先算清楚有多少空位（额度内够用就停）
             want = Math.min(want, freeSpaceFor(inventory, side, prototype, budget));
             if (want <= 0) break;
 
-            long taken = storage.extractItemDirect(key, want);
+            long taken = storage.extractItemExcluding(key, want, destination);
             if (taken <= 0L) break;
 
             int accepted = insertInto(inventory, side, key.prototype(taken));
@@ -483,6 +484,7 @@ final class TerminalIoEngine {
         int budget = Math.max(1, config.getFluidPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
         boolean moved = false;
+        TileEntity destination = handler instanceof TileEntity ? (TileEntity) handler : null;
 
         List<Map.Entry<FluidKey, Long>> snapshot = storage.snapshotFluidsCached();
         for (Map.Entry<FluidKey, Long> entry : snapshot) {
@@ -502,7 +504,7 @@ final class TerminalIoEngine {
                 int accepted = handler.fill(side, key.prototype(want), false);
                 if (accepted <= 0) break;
 
-                long taken = storage.extractFluidDirect(key, accepted);
+                long taken = storage.extractFluidExcluding(key, accepted, destination);
                 if (taken <= 0L) break;
 
                 int filled = handler.fill(side, key.prototype(taken), true);

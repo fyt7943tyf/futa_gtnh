@@ -29,6 +29,8 @@ import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.storagebus.StorageBusRegistry;
+import com.futa_gtnh.storagebus.TileEntityStorageBus;
 
 import appeng.util.item.AEItemStack;
 import appeng.util.prioitylist.OreFilteredList;
@@ -77,6 +79,7 @@ public final class TerminalIoRegression {
         checkOutputPriority();
         checkManualSubtypeOutput();
         checkManualIdleRetry();
+        checkBusAttachedFluidOutput();
         System.out.println("Terminal IO regression passed: " + checks + " checks");
     }
 
@@ -442,6 +445,51 @@ public final class TerminalIoRegression {
         check(tank.tank.getFluid() == null && storage.getFluidAmount(lava) == before + 900, "active fluid input ignores output filter");
     }
 
+    private static void checkBusAttachedFluidOutput() throws Exception {
+        SharedStorage storage = SharedStorageManager.getStorage();
+        storage.clear();
+        StorageBusRegistry.clear();
+
+        TestWorld world = new TestWorld();
+        TestTank sourceTank = new TestTank();
+        sourceTank.setWorldObj(world);
+        sourceTank.xCoord = 1;
+        sourceTank.yCoord = 0;
+        sourceTank.zCoord = 0;
+        sourceTank.tank.fill(new FluidStack(FluidRegistry.WATER, 3000), true);
+
+        TileEntityStorageBus bus = new TileEntityStorageBus();
+        bus.setWorldObj(world);
+        bus.xCoord = 0;
+        bus.yCoord = 0;
+        bus.zCoord = 0;
+        world.source = bus;
+        world.target = sourceTank;
+        bus.addFace(EAST);
+        StorageBusRegistry.refresh(bus.getLink(EAST));
+
+        TestTank target = new TestTank();
+        TerminalIoConfig config = new TerminalIoConfig();
+        config.getOutputFilter(WEST)
+            .toggleFluid(FluidKey.of(new FluidStack(FluidRegistry.WATER, 1)));
+        invoke(
+            "pushFluid",
+            new Class<?>[] { IFluidHandler.class, ForgeDirection.class, TerminalIoConfig.class,
+                ForgeDirection.class },
+            target,
+            WEST,
+            config,
+            WEST);
+        check(
+            target.tank.getFluid() != null && target.tank.getFluidAmount() > 0
+                && sourceTank.tank.getFluidAmount() < 3000,
+            "active fluid output can drain a storage-bus-attached tank");
+
+        bus.invalidate();
+        StorageBusRegistry.clear();
+        storage.clear();
+    }
+
     private static void checkOutputPriority() throws Exception {
         SharedStorage storage = SharedStorageManager.getStorage();
         ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
@@ -644,6 +692,7 @@ public final class TerminalIoRegression {
         @Override protected int func_152379_p() { return 0; }
         @Override public net.minecraft.entity.Entity getEntityByID(int id) { return null; }
         @Override public TileEntity getTileEntity(int x, int y, int z) { return y == 0 && z == 0 ? x == 0 ? source : x == 1 ? target : null : null; }
+        @Override public boolean blockExists(int x, int y, int z) { return true; }
         @Override public int getBlockMetadata(int x, int y, int z) { return 0; }
         @Override public net.minecraft.block.Block getBlock(int x, int y, int z) { return net.minecraft.init.Blocks.air; }
         @Override public void markBlockForUpdate(int x, int y, int z) {}
@@ -685,7 +734,7 @@ public final class TerminalIoRegression {
         checks++;
     }
 
-    private static final class TestTank implements IFluidHandler {
+    private static final class TestTank extends TileEntity implements IFluidHandler {
         private final FluidTank tank = new FluidTank(4000);
         public int fill(ForgeDirection from, FluidStack resource, boolean doFill) { return tank.fill(resource, doFill); }
         public FluidStack drain(ForgeDirection from, FluidStack resource, boolean doDrain) {

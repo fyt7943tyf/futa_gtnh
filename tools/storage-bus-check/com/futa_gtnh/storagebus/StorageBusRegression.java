@@ -560,6 +560,19 @@ public final class StorageBusRegression {
         refresh(f);
         check(f.target.tank.getFluidAmount() == 3500, "fluid blacklist does not change existing content");
         check(f.storage.getFluidAmount(water) == 0, "blacklisted fluid hidden from shared storage");
+
+        Fixture g = Fixture.create();
+        g.target.tank.fill(new FluidStack(FluidRegistry.WATER, 4000), true);
+        refresh(g);
+        TestContainer otherTarget = new TestContainer();
+        check(
+            g.storage.extractFluidExcluding(water, 1000, otherTarget) == 1000,
+            "active output can withdraw fluid from a bus target");
+        check(g.target.tank.getFluidAmount() == 3000, "active bus withdrawal conserves the source tank");
+        check(
+            g.storage.extractFluidExcluding(water, 1000, g.target) == 0,
+            "active output excludes the destination's own bus");
+        check(g.target.tank.getFluidAmount() == 3000, "excluded destination keeps its fluid");
     }
 
     private static void checkUnregister() {

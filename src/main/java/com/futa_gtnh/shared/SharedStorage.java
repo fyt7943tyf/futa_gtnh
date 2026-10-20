@@ -9,6 +9,7 @@ import java.util.Map;
 
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
+import net.minecraft.tileentity.TileEntity;
 
 import com.futa_gtnh.api.SharedStorageReadStatus;
 import com.futa_gtnh.api.SharedStorageSnapshot;
@@ -294,11 +295,22 @@ public class SharedStorage {
      * @return 实际取出的数量，可能少于请求量（存量不足）。条目取空后会从表里删掉。
      */
     public synchronized long extractItem(ItemKey key, long amount) {
+        return extractItemExcluding(key, amount, null);
+    }
+
+    /**
+     * 从聚合库存取物品，但跳过 {@code excluded} 这个目标容器。
+     *
+     * <p>
+     * 主动 IO 输出时目标可能正好也挂着存储总线；不排除它就会把刚灌进去的东西
+     * 又从同一个容器抽回来，形成无意义的原地搬运。池子仍然参与抽取。
+     */
+    public synchronized long extractItemExcluding(ItemKey key, long amount, TileEntity excluded) {
         if (key == null || amount <= 0L) return 0L;
 
         long remaining = amount;
         boolean buses = StorageBusRegistry.canTouchWorld();
-        long taken = buses ? StorageBusRegistry.extractItem(key, remaining, true) : 0L;
+        long taken = buses ? StorageBusRegistry.extractItem(key, remaining, true, excluded) : 0L;
         remaining -= taken;
         if (remaining > 0L) {
             long internal = extractItemPool(key, remaining);
@@ -306,7 +318,7 @@ public class SharedStorage {
             remaining -= internal;
         }
         if (buses && remaining > 0L) {
-            taken += StorageBusRegistry.extractItem(key, remaining, false);
+            taken += StorageBusRegistry.extractItem(key, remaining, false, excluded);
         }
         return taken;
     }
@@ -443,11 +455,16 @@ public class SharedStorage {
     }
 
     public synchronized long extractFluid(FluidKey key, long amount) {
+        return extractFluidExcluding(key, amount, null);
+    }
+
+    /** 同 {@link #extractItemExcluding}，但用于流体。 */
+    public synchronized long extractFluidExcluding(FluidKey key, long amount, TileEntity excluded) {
         if (key == null || amount <= 0L) return 0L;
 
         long remaining = amount;
         boolean buses = StorageBusRegistry.canTouchWorld();
-        long taken = buses ? StorageBusRegistry.extractFluid(key, remaining, true) : 0L;
+        long taken = buses ? StorageBusRegistry.extractFluid(key, remaining, true, excluded) : 0L;
         remaining -= taken;
         if (remaining > 0L) {
             long internal = extractFluidPool(key, remaining);
@@ -455,7 +472,7 @@ public class SharedStorage {
             remaining -= internal;
         }
         if (buses && remaining > 0L) {
-            taken += StorageBusRegistry.extractFluid(key, remaining, false);
+            taken += StorageBusRegistry.extractFluid(key, remaining, false, excluded);
         }
         return taken;
     }

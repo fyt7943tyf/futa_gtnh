@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import net.minecraft.tileentity.TileEntity;
+
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorageManager;
@@ -436,11 +438,19 @@ public final class StorageBusRegistry {
      * @return 总线实际给出的总量
      */
     public static long extractItem(ItemKey key, long amount, boolean belowPool) {
+        return extractItem(key, amount, belowPool, null);
+    }
+
+    /**
+     * @param excluded 不从这个容器里抽（主动输出时排除目标自己，避免把目标刚收到的东西又抽回来）
+     */
+    public static long extractItem(ItemKey key, long amount, boolean belowPool, TileEntity excluded) {
         if (key == null || amount <= 0L || !enabled) return 0L;
         List<StorageBusLink> links = readableLinks(belowPool);
         long remaining = amount;
         for (StorageBusLink link : links) {
             if (remaining <= 0L) break;
+            if (excluded != null && link.targetTile() == excluded) continue;
             try {
                 long taken = link.extractItem(key, remaining);
                 if (taken <= 0L) continue;
@@ -454,11 +464,16 @@ public final class StorageBusRegistry {
     }
 
     public static long extractFluid(FluidKey key, long amount, boolean belowPool) {
+        return extractFluid(key, amount, belowPool, null);
+    }
+
+    public static long extractFluid(FluidKey key, long amount, boolean belowPool, TileEntity excluded) {
         if (key == null || amount <= 0L || !enabled) return 0L;
         List<StorageBusLink> links = readableLinks(belowPool);
         long remaining = amount;
         for (StorageBusLink link : links) {
             if (remaining <= 0L) break;
+            if (excluded != null && link.targetTile() == excluded) continue;
             try {
                 long taken = link.extractFluid(key, remaining);
                 if (taken <= 0L) continue;
