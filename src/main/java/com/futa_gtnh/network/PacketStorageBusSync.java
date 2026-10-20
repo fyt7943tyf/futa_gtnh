@@ -5,6 +5,8 @@ import net.minecraft.nbt.NBTTagCompound;
 
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.client.ClientStorageBus;
+import com.futa_gtnh.storagebus.StorageBusConfig;
+import com.futa_gtnh.storagebus.StorageBusLink;
 import com.futa_gtnh.storagebus.TileEntityStorageBus;
 
 import cpw.mods.fml.common.network.ByteBufUtils;
@@ -27,6 +29,8 @@ public class PacketStorageBusSync implements IMessage {
     private int x;
     private int y;
     private int z;
+    private int side;
+    private int faceMask;
     private NBTTagCompound config;
     private String targetName = "";
     private boolean itemTarget;
@@ -34,27 +38,34 @@ public class PacketStorageBusSync implements IMessage {
 
     public PacketStorageBusSync() {}
 
-    public static PacketStorageBusSync of(TileEntityStorageBus bus) {
+    public static PacketStorageBusSync of(TileEntityStorageBus bus, int requestedSide) {
         if (bus == null || bus.getWorldObj() == null) return null;
+        int mask = bus.getFaceMask();
+        if (mask == 0) return null;
+        int side = requestedSide;
+        if (side < 0 || side >= TileEntityStorageBus.FACES || (mask & (1 << side)) == 0) {
+            side = Integer.numberOfTrailingZeros(mask);
+        }
+        StorageBusConfig config = bus.getConfig(side);
+        StorageBusLink link = bus.getLink(side);
+        if (config == null || link == null) return null;
 
         PacketStorageBusSync packet = new PacketStorageBusSync();
         packet.dimension = bus.getWorldObj().provider.dimensionId;
         packet.x = bus.xCoord;
         packet.y = bus.yCoord;
         packet.z = bus.zCoord;
-        packet.config = bus.getConfig()
-            .writeToNbt();
-        packet.targetName = bus.getLink()
-            .getTargetName();
-        packet.itemTarget = bus.getLink()
-            .hasItemTarget();
-        packet.fluidTarget = bus.getLink()
-            .hasFluidTarget();
+        packet.side = side;
+        packet.faceMask = mask;
+        packet.config = config.writeToNbt();
+        packet.targetName = link.getTargetName();
+        packet.itemTarget = link.hasItemTarget();
+        packet.fluidTarget = link.hasFluidTarget();
         return packet;
     }
 
-    public static void send(EntityPlayerMP player, TileEntityStorageBus bus) {
-        PacketStorageBusSync packet = of(bus);
+    public static void send(EntityPlayerMP player, TileEntityStorageBus bus, int side) {
+        PacketStorageBusSync packet = of(bus, side);
         if (packet != null) NetworkHandler.INSTANCE.sendTo(packet, player);
     }
 
@@ -64,6 +75,8 @@ public class PacketStorageBusSync implements IMessage {
         x = buf.readInt();
         y = buf.readInt();
         z = buf.readInt();
+        side = buf.readByte();
+        faceMask = buf.readInt();
         config = buf.readBoolean() ? ByteBufUtils.readTag(buf) : null;
         targetName = ByteBufUtils.readUTF8String(buf);
         itemTarget = buf.readBoolean();
@@ -76,6 +89,8 @@ public class PacketStorageBusSync implements IMessage {
         buf.writeInt(x);
         buf.writeInt(y);
         buf.writeInt(z);
+        buf.writeByte(side);
+        buf.writeInt(faceMask);
         buf.writeBoolean(config != null);
         if (config != null) ByteBufUtils.writeTag(buf, config);
         ByteBufUtils.writeUTF8String(buf, targetName == null ? "" : targetName);
@@ -93,6 +108,8 @@ public class PacketStorageBusSync implements IMessage {
                     message.x,
                     message.y,
                     message.z,
+                    message.side,
+                    message.faceMask,
                     message.config,
                     message.targetName,
                     message.itemTarget,

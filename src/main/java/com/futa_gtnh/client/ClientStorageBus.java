@@ -3,14 +3,16 @@ package com.futa_gtnh.client;
 import net.minecraft.nbt.NBTTagCompound;
 
 import com.futa_gtnh.storagebus.StorageBusConfig;
+import com.futa_gtnh.storagebus.TileEntityStorageBus;
 
 /**
- * 客户端记住的某条存储总线配置。
+ * 客户端记住的当前存储总线面配置。
  *
  * <p>
  * 权威值在服务端的方块实体里，这里只是最近一次 {@code PacketStorageBusSync}
- * 推过来的快照。界面每帧检查坐标/维度是否还是当前这条总线，不是就自动向服务端
- * 再要一份 —— 和 {@link ClientIoNode} 同一个模式。
+ * 推过来的快照。一个方块实体可能有多面，界面同一时刻只看一面：
+ * 切换面时向服务端重新要一份，服务端连同 {@code mask} 一起回传，
+ * 界面据此知道还有哪几面可以切。
  */
 public final class ClientStorageBus {
 
@@ -22,16 +24,20 @@ public final class ClientStorageBus {
     private static int z;
     private static final StorageBusConfig CONFIG = new StorageBusConfig();
     private static boolean present;
+    private static int selectedSide;
+    private static int faceMask;
     private static String targetName = "";
     private static boolean itemTarget;
     private static boolean fluidTarget;
 
-    public static void setConfig(int newDimension, int newX, int newY, int newZ, NBTTagCompound tag,
-        String newTargetName, boolean newItemTarget, boolean newFluidTarget) {
+    public static void setConfig(int newDimension, int newX, int newY, int newZ, int newSide, int newMask,
+        NBTTagCompound tag, String newTargetName, boolean newItemTarget, boolean newFluidTarget) {
         dimension = newDimension;
         x = newX;
         y = newY;
         z = newZ;
+        selectedSide = newSide;
+        faceMask = newMask;
         CONFIG.readFromNbt(tag);
         targetName = newTargetName == null ? "" : newTargetName;
         itemTarget = newItemTarget;
@@ -59,6 +65,27 @@ public final class ClientStorageBus {
         return z;
     }
 
+    public static int getSelectedSide() {
+        return selectedSide;
+    }
+
+    public static int getFaceMask() {
+        return faceMask;
+    }
+
+    public static boolean hasFace(int side) {
+        return side >= 0 && side < TileEntityStorageBus.FACES && (faceMask & (1 << side)) != 0;
+    }
+
+    /** @return 从 {@code from} 开始沿 {@code direction} 找到的下一个已安装面；找不到返回 {@code from} */
+    public static int nextFace(int from, int direction) {
+        for (int step = 1; step <= TileEntityStorageBus.FACES; step++) {
+            int side = (from + direction * step + TileEntityStorageBus.FACES) % TileEntityStorageBus.FACES;
+            if (hasFace(side)) return side;
+        }
+        return from;
+    }
+
     public static String getTargetName() {
         return targetName;
     }
@@ -74,6 +101,8 @@ public final class ClientStorageBus {
     public static void clear() {
         dimension = Integer.MIN_VALUE;
         present = false;
+        selectedSide = 0;
+        faceMask = 0;
         targetName = "";
         itemTarget = false;
         fluidTarget = false;

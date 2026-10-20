@@ -43,6 +43,13 @@ public class ClientProxy extends CommonProxy {
         com.futa_gtnh.block.BlockIoNode.renderId = RenderingRegistry.getNextAvailableRenderId();
         RenderingRegistry.registerBlockHandler(new com.futa_gtnh.client.IoNodeRenderer());
 
+        // 存储总线薄板：一个格子里按面掩码画最多六块 AE 风格阶梯面板。
+        com.futa_gtnh.storagebus.BlockStorageBus.renderId = RenderingRegistry.getNextAvailableRenderId();
+        RenderingRegistry.registerBlockHandler(new com.futa_gtnh.client.StorageBusRenderer());
+
+        // 手持存储总线时的白色放置预览（AE PartPlacement 同语义）
+        MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.client.StorageBusPlacementPreview());
+
         // 世界渲染事件在 MinecraftForge.EVENT_BUS 上，不在 FML 的那条总线上。
         // 挂错了不会报错，只会永远收不到事件 —— 光渲染器会安静地什么都不画。
         MinecraftForge.EVENT_BUS.register(new LocatorBeamRenderer());

@@ -28,12 +28,14 @@ import com.futa_gtnh.shared.ItemKey;
 public final class StorageBusLink {
 
     private final TileEntityStorageBus bus;
+    private final ForgeDirection side;
 
     private LinkedHashMap<ItemKey, Long> itemCache = new LinkedHashMap<>();
     private LinkedHashMap<FluidKey, Long> fluidCache = new LinkedHashMap<>();
 
-    StorageBusLink(TileEntityStorageBus bus) {
+    StorageBusLink(TileEntityStorageBus bus, ForgeDirection side) {
         this.bus = bus;
+        this.side = side;
     }
 
     public TileEntityStorageBus getBus() {
@@ -41,7 +43,7 @@ public final class StorageBusLink {
     }
 
     public StorageBusConfig getConfig() {
-        return bus.getConfig();
+        return bus.getConfig(side);
     }
 
     public boolean isReadable() {
@@ -55,14 +57,12 @@ public final class StorageBusLink {
     }
 
     public ForgeDirection getTargetSide() {
-        return getConfig().getTargetSide();
+        return side;
     }
 
     /** @return 目标方块实体；目标面无效或区块未加载时为 null */
     public TileEntity targetTile() {
         if (bus == null || bus.getWorldObj() == null || bus.isInvalid()) return null;
-        ForgeDirection side = bus.getConfig()
-            .getTargetSide();
         if (side == null || side == ForgeDirection.UNKNOWN) return null;
         try {
             int x = bus.xCoord + side.offsetX;

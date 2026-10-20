@@ -24,9 +24,11 @@ public class ContainerStorageBus extends Container {
     private static final int HIDDEN = -3000;
 
     private final TileEntityStorageBus bus;
+    private final int side;
 
-    public ContainerStorageBus(TileEntityStorageBus bus, EntityPlayer player) {
+    public ContainerStorageBus(TileEntityStorageBus bus, EntityPlayer player, int side) {
         this.bus = bus;
+        this.side = side;
 
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < 9; column++) {
@@ -40,6 +42,10 @@ public class ContainerStorageBus extends Container {
 
     public TileEntityStorageBus getBus() {
         return bus;
+    }
+
+    public int getSide() {
+        return side;
     }
 
     @Override

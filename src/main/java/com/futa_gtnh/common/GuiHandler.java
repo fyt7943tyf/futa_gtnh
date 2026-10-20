@@ -47,8 +47,9 @@ public class GuiHandler implements IGuiHandler {
     /** AE 无线发信端的命名/状态界面。 */
     public static final int GUI_AE_SIGNAL_TRANSMITTER = 8;
 
-    /** 存储总线的配置界面。 */
-    public static final int GUI_STORAGE_BUS = 9;
+    /** 存储总线的配置界面：每个面一个 GUI id，id - base 就是板的面 ordinal。 */
+    public static final int GUI_STORAGE_BUS_BASE = 9;
+    public static final int GUI_STORAGE_BUS_COUNT = 6;
 
     @Override
     public Object getServerGuiElement(int id, net.minecraft.entity.player.EntityPlayer player, World world, int x,
@@ -66,15 +67,17 @@ public class GuiHandler implements IGuiHandler {
             return new ContainerIoNode(node, player);
         }
 
-        if (id == GUI_STORAGE_BUS) {
+        if (id >= GUI_STORAGE_BUS_BASE && id < GUI_STORAGE_BUS_BASE + GUI_STORAGE_BUS_COUNT) {
             TileEntityStorageBus bus = resolveStorageBus(world, x, y, z);
             if (bus == null) return null;
+            int side = id - GUI_STORAGE_BUS_BASE;
+            if (!bus.hasFace(side)) return null;
             if (player instanceof EntityPlayerMP) {
                 EntityPlayerMP serverPlayer = (EntityPlayerMP) player;
                 bus.ensureRegistered();
-                PacketStorageBusSync.send(serverPlayer, bus);
+                PacketStorageBusSync.send(serverPlayer, bus, side);
             }
-            return new ContainerStorageBus(bus, player);
+            return new ContainerStorageBus(bus, player, side);
         }
 
         if (id == GUI_AE_SIGNAL_TRANSMITTER) {
@@ -128,10 +131,11 @@ public class GuiHandler implements IGuiHandler {
             return new GuiIoNode(new ContainerIoNode(node, player), id - GUI_IO_NODE_BASE);
         }
 
-        if (id == GUI_STORAGE_BUS) {
+        if (id >= GUI_STORAGE_BUS_BASE && id < GUI_STORAGE_BUS_BASE + GUI_STORAGE_BUS_COUNT) {
             TileEntityStorageBus bus = resolveStorageBus(world, x, y, z);
             if (bus == null) return null;
-            return new GuiStorageBus(new ContainerStorageBus(bus, player));
+            int side = id - GUI_STORAGE_BUS_BASE;
+            return new GuiStorageBus(new ContainerStorageBus(bus, player, side));
         }
 
         if (id == GUI_AE_SIGNAL_TRANSMITTER) {

@@ -59,6 +59,9 @@ public class GuiStorageBus extends FutaGuiContainer {
 
     private final ContainerStorageBus container;
 
+    /** 当前正在编辑的面；右键哪块板打开的就是哪一面。 */
+    private int selectedSide;
+
     private int requestTimer;
     /** 界面开着时定期向服务端要一份权威值：目标容器可能被别人换掉 / 拆掉。 */
     private int syncTimer;
@@ -66,6 +69,7 @@ public class GuiStorageBus extends FutaGuiContainer {
     public GuiStorageBus(ContainerStorageBus container) {
         super(container);
         this.container = container;
+        this.selectedSide = container == null ? 0 : container.getSide();
         this.xSize = GUI_WIDTH;
         this.ySize = GUI_HEIGHT;
     }
@@ -88,8 +92,8 @@ public class GuiStorageBus extends FutaGuiContainer {
         guiTop = (height - GUI_HEIGHT) / 2;
 
         buttonList.clear();
-        buttonList.add(new FlatButton(BTN_TARGET_PREV, guiLeft + 70, guiTop + 22, 18, 16));
-        buttonList.add(new FlatButton(BTN_TARGET_NEXT, guiLeft + 112, guiTop + 22, 18, 16));
+        buttonList.add(new FlatButton(BTN_TARGET_PREV, guiLeft + 100, guiTop + 22, 18, 16));
+        buttonList.add(new FlatButton(BTN_TARGET_NEXT, guiLeft + 142, guiTop + 22, 18, 16));
 
         for (int i = 0; i < 3; i++) {
             buttonList.add(new FlatButton(BTN_ACCESS_BASE + i, guiLeft + 54 + i * 52, guiTop + 58, 48, 16));
@@ -120,7 +124,8 @@ public class GuiStorageBus extends FutaGuiContainer {
         TileEntityStorageBus bus = container.getBus();
         TileEntity tile = bus;
         int dimension = tile.getWorldObj() == null ? 0 : tile.getWorldObj().provider.dimensionId;
-        return ClientStorageBus.matches(dimension, tile.xCoord, tile.yCoord, tile.zCoord);
+        return ClientStorageBus.matches(dimension, tile.xCoord, tile.yCoord, tile.zCoord)
+            && ClientStorageBus.getSelectedSide() == selectedSide;
     }
 
     private static String tr(String key) {
@@ -147,6 +152,7 @@ public class GuiStorageBus extends FutaGuiContainer {
                     bus.xCoord,
                     bus.yCoord,
                     bus.zCoord,
+                    selectedSide,
                     ClientStorageBus.get()
                         .writeToNbt()));
         } catch (Throwable ignored) {
@@ -158,19 +164,20 @@ public class GuiStorageBus extends FutaGuiContainer {
         TileEntityStorageBus bus = container.getBus();
         if (bus == null) return;
         try {
-            NetworkHandler.INSTANCE.sendToServer(PacketStorageBusConfig.request(bus.xCoord, bus.yCoord, bus.zCoord));
+            NetworkHandler.INSTANCE
+                .sendToServer(PacketStorageBusConfig.request(bus.xCoord, bus.yCoord, bus.zCoord, selectedSide));
         } catch (Throwable ignored) {
             // 等下一次重试
         }
     }
 
-    private void switchTarget(int delta) {
-        StorageBusConfig config = ClientStorageBus.get();
-        ForgeDirection current = config.getTargetSide();
-        int ordinal = current == null || current == ForgeDirection.UNKNOWN ? 0 : current.ordinal();
-        ordinal = (ordinal + delta + 6) % 6;
-        config.setTargetSide(ForgeDirection.getOrientation(ordinal));
-        pushConfig();
+    /** 在已安装的面之间切换；不改目标面，目标面就是这条总线的身份。 */
+    private void switchFace(int delta) {
+        if (!configReady()) return;
+        int next = ClientStorageBus.nextFace(selectedSide, delta);
+        if (next == selectedSide) return;
+        selectedSide = next;
+        requestConfig();
         refreshLabels();
     }
 
@@ -210,6 +217,15 @@ public class GuiStorageBus extends FutaGuiContainer {
     @Override
     public void updateScreen() {
         super.updateScreen();
+        if (container != null && container.getBus() != null) {
+            TileEntityStorageBus bus = container.getBus();
+            int dimension = bus.getWorldObj() == null ? 0 : bus.getWorldObj().provider.dimensionId;
+            if (ClientStorageBus.matches(dimension, bus.xCoord, bus.yCoord, bus.zCoord)
+                && !ClientStorageBus.hasFace(selectedSide)) {
+                // 开着界面时这一条被拆了 / 服务端选了别的面：跟着服务端走
+                selectedSide = ClientStorageBus.getSelectedSide();
+            }
+        }
         if (!configReady()) {
             if (++requestTimer >= 10) {
                 requestTimer = 0;
@@ -226,8 +242,8 @@ public class GuiStorageBus extends FutaGuiContainer {
         StorageBusConfig config = ClientStorageBus.get();
         boolean ready = configReady();
 
-        setLabel(BTN_TARGET_PREV, "←", ready);
-        setLabel(BTN_TARGET_NEXT, "→", ready);
+        setLabel(BTN_TARGET_PREV, "←", ready && Integer.bitCount(ClientStorageBus.getFaceMask()) > 1);
+        setLabel(BTN_TARGET_NEXT, "→", ready && Integer.bitCount(ClientStorageBus.getFaceMask()) > 1);
 
         String[] accessKeys = { "futa_gtnh.gui.storage_bus.access.read_write",
             "futa_gtnh.gui.storage_bus.access.read_only", "futa_gtnh.gui.storage_bus.access.write_only" };
@@ -326,7 +342,7 @@ public class GuiStorageBus extends FutaGuiContainer {
         // 标题 / 目标
         String target = tr("futa_gtnh.gui.storage_bus.target") + " "
             + EnumChatFormatting.YELLOW
-            + directionName(config.getTargetSide());
+            + directionName(ForgeDirection.getOrientation(selectedSide));
         fontRendererObj.drawStringWithShadow(target, guiLeft + 8, guiTop + 26, 0xFFFFFF);
         String targetName = ClientStorageBus.getTargetName();
         if (targetName.isEmpty()) {
@@ -514,11 +530,11 @@ public class GuiStorageBus extends FutaGuiContainer {
         if (!configReady()) return;
 
         if (button.id == BTN_TARGET_PREV) {
-            switchTarget(-1);
+            switchFace(-1);
             return;
         }
         if (button.id == BTN_TARGET_NEXT) {
-            switchTarget(1);
+            switchFace(1);
             return;
         }
         if (button.id >= BTN_ACCESS_BASE && button.id < BTN_ACCESS_BASE + 3) {

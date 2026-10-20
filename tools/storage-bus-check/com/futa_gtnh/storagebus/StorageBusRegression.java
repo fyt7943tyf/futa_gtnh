@@ -3,7 +3,10 @@ package com.futa_gtnh.storagebus;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.util.Collections;
+import java.util.UUID;
 
+import net.minecraft.block.Block;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Bootstrap;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
@@ -11,7 +14,11 @@ import net.minecraft.inventory.InventoryBasic;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.network.play.server.S35PacketUpdateTileEntity;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.util.AxisAlignedBB;
+import net.minecraft.util.MovingObjectPosition;
+import net.minecraft.util.Vec3;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldProviderSurface;
 import net.minecraft.world.WorldSettings;
@@ -27,6 +34,8 @@ import net.minecraftforge.fluids.FluidTankInfo;
 import net.minecraftforge.fluids.IFluidHandler;
 import net.minecraftforge.oredict.OreDictionary;
 
+import com.futa_gtnh.FutaGtnhMod;
+import com.futa_gtnh.client.ClientStorageBus;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -52,6 +61,7 @@ public final class StorageBusRegression {
 
     private static final ForgeDirection EAST = ForgeDirection.EAST;
     private static final ForgeDirection WEST = ForgeDirection.WEST;
+    private static final ForgeDirection SOUTH = ForgeDirection.SOUTH;
     private static int checks;
 
     private StorageBusRegression() {}
@@ -83,6 +93,10 @@ public final class StorageBusRegression {
 
         checkAggregationAndRouting();
         checkPlacement();
+        checkMultiFace();
+        checkItemUseFirst();
+        checkItemUseFirstPlacement();
+        checkClientFaceRotation();
         checkConfigRoundTrip();
         checkReadOnlyAndWriteOnly();
         checkFilters();
@@ -120,8 +134,8 @@ public final class StorageBusRegression {
         check(f.storage.itemView().isEmpty(), "no duplicate pool copy when bus accepted");
 
         // 正优先级更先；池子为空时仍然进总线
-        f.bus.getConfig().setPriority(10);
-        StorageBusRegistry.refresh(f.bus.getLink());
+        f.bus.getConfig(EAST).setPriority(10);
+        StorageBusRegistry.refresh(f.bus.getLink(EAST));
         check(f.storage.insertItem(iron, 10) == 10 && f.target.total(iron) == 94, "positive priority writes to bus");
 
         // 负优先级：池子有货时先抽池子
@@ -130,7 +144,7 @@ public final class StorageBusRegression {
         StorageBusRegistry.clear();
         Fixture g = Fixture.create();
         ItemKey gold = ItemKey.of(new ItemStack(Items.gold_ingot));
-        g.bus.getConfig().setPriority(-10);
+        g.bus.getConfig(EAST).setPriority(-10);
         g.target.inventory.setInventorySlotContents(0, new ItemStack(Items.gold_ingot, 40));
         refresh(g);
         g.storage.insertItemManual(gold, 100);
@@ -172,6 +186,242 @@ public final class StorageBusRegression {
         check(
             block.onBlockPlaced(world, 0, 0, 0, WEST.ordinal(), 0.5F, 0.5F, 0.5F, 0) == EAST.ordinal(),
             "block metadata records the target face");
+
+        world.blockMetadata = EAST.ordinal();
+        java.util.List<AxisAlignedBB> boxes = new java.util.ArrayList<>();
+        block.addCollisionBoxesToList(
+            world,
+            0,
+            0,
+            0,
+            AxisAlignedBB.getBoundingBox(-1.0D, -1.0D, -1.0D, 2.0D, 2.0D, 2.0D),
+            boxes,
+            null);
+        check(boxes.size() == 1, "a single configured face has one collision plate");
+        AxisAlignedBB plate = boxes.get(0);
+        check(
+            Math.abs(plate.minX - 12.0D / 16.0D) < 1.0E-6 && Math.abs(plate.maxX - 1.0D) < 1.0E-6,
+            "east-facing plate is flush with the target face");
+        check(
+            Math.abs(plate.minY - 2.0D / 16.0D) < 1.0E-6 && Math.abs(plate.maxY - 14.0D / 16.0D) < 1.0E-6,
+            "plate leaves a margin around the target face");
+        check(
+            StorageBusGeometry.plateBox(EAST)
+                .maxX == 1.0D,
+            "plate geometry follows the target face");
+
+        for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
+            AxisAlignedBB plateBox = StorageBusGeometry.plateBox(face);
+            check(
+                plateBox.minX >= 0.0D && plateBox.minY >= 0.0D
+                    && plateBox.minZ >= 0.0D
+                    && plateBox.maxX <= 1.0D
+                    && plateBox.maxY <= 1.0D
+                    && plateBox.maxZ <= 1.0D,
+                "plate stays inside the cell: " + face);
+            for (AxisAlignedBB layer : new AxisAlignedBB[] { StorageBusGeometry.baseBox(face),
+                StorageBusGeometry.middleBox(face), StorageBusGeometry.connectorBox(face) }) {
+                check(
+                    layer.minX >= plateBox.minX - 1.0E-6 && layer.maxX <= plateBox.maxX + 1.0E-6
+                        && layer.minY >= plateBox.minY - 1.0E-6
+                        && layer.maxY <= plateBox.maxY + 1.0E-6
+                        && layer.minZ >= plateBox.minZ - 1.0E-6
+                        && layer.maxZ <= plateBox.maxZ + 1.0E-6,
+                    "AE-style layer stays inside the collision plate: " + face);
+            }
+        }
+    }
+
+    private static void checkMultiFace() {
+        TestWorld world = new TestWorld();
+        TileEntityStorageBus bus = new TileEntityStorageBus();
+        bus.setWorldObj(world);
+        world.bus = bus;
+
+        check(bus.addFace(EAST), "first face can be added");
+        check(bus.addFace(WEST), "second face can be added to the same cell");
+        check(!bus.addFace(EAST), "duplicate face is rejected");
+        check(
+            bus.getFaceMask() == (1 << EAST.ordinal()) + (1 << WEST.ordinal()),
+            "face mask contains both configured faces");
+        check(
+            bus.getConfig(EAST) != null && bus.getConfig(WEST) != null && bus.getConfig(EAST) != bus.getConfig(WEST),
+            "each face has an independent configuration");
+
+        bus.getConfig(EAST)
+            .setPriority(11);
+        bus.getConfig(WEST)
+            .setPriority(-12);
+        check(
+            bus.getConfig(EAST)
+                .getPriority() == 11
+                && bus.getConfig(WEST)
+                    .getPriority() == -12,
+            "priorities do not leak between faces");
+
+        BlockStorageBus block = new BlockStorageBus();
+        java.util.List<AxisAlignedBB> boxes = new java.util.ArrayList<>();
+        block.addCollisionBoxesToList(
+            world,
+            0,
+            0,
+            0,
+            AxisAlignedBB.getBoundingBox(-1.0D, -1.0D, -1.0D, 2.0D, 2.0D, 2.0D),
+            boxes,
+            null);
+        check(boxes.size() == 2, "two configured faces produce two collision plates");
+        boolean hasWestPlate = boxes.get(0).minX < 0.5D || boxes.get(1).minX < 0.5D;
+        boolean hasEastPlate = boxes.get(0).minX > 0.5D || boxes.get(1).minX > 0.5D;
+        check(hasWestPlate && hasEastPlate, "collision plates keep their opposite faces");
+
+        MovingObjectPosition eastHit = block.collisionRayTrace(
+            world,
+            0,
+            0,
+            0,
+            Vec3.createVectorHelper(0.5D, 0.5D, 0.5D),
+            Vec3.createVectorHelper(2.0D, 0.5D, 0.5D));
+        check(
+            eastHit != null && eastHit.hitInfo instanceof Integer
+                && ((Integer) eastHit.hitInfo).intValue() == EAST.ordinal(),
+            "ray from the middle hits the east plate");
+        MovingObjectPosition westHit = block.collisionRayTrace(
+            world,
+            0,
+            0,
+            0,
+            Vec3.createVectorHelper(0.5D, 0.5D, 0.5D),
+            Vec3.createVectorHelper(-1.0D, 0.5D, 0.5D));
+        check(
+            westHit != null && westHit.hitInfo instanceof Integer
+                && ((Integer) westHit.hitInfo).intValue() == WEST.ordinal(),
+            "ray from the middle hits the west plate");
+
+        NBTTagCompound saved = new NBTTagCompound();
+        bus.writeToNBT(saved);
+        TileEntityStorageBus copy = new TileEntityStorageBus();
+        copy.setWorldObj(world);
+        copy.readFromNBT(saved);
+        check(
+            copy.getFaceMask() == (1 << EAST.ordinal()) + (1 << WEST.ordinal()),
+            "multi-face mask survives NBT round trip");
+        check(
+            copy.getConfig(EAST)
+                .getPriority() == 11
+                && copy.getConfig(WEST)
+                    .getPriority() == -12,
+            "per-face settings survive NBT round trip");
+
+        TileEntityStorageBus clientCopy = new TileEntityStorageBus();
+        clientCopy.setWorldObj(world);
+        clientCopy.onDataPacket(null, (S35PacketUpdateTileEntity) bus.getDescriptionPacket());
+        check(
+            clientCopy.getFaceMask() == (1 << EAST.ordinal()) + (1 << WEST.ordinal())
+                && clientCopy.hasFace(EAST)
+                && clientCopy.hasFace(WEST),
+            "face mask survives tile-entity description packet");
+
+        NBTTagCompound legacy = new NBTTagCompound();
+        StorageBusConfig single = new StorageBusConfig();
+        single.setTargetSide(EAST);
+        single.setPriority(3);
+        legacy.setTag("bus", single.writeToNbt());
+        TileEntityStorageBus migrated = new TileEntityStorageBus();
+        migrated.setWorldObj(world);
+        migrated.readFromNBT(legacy);
+        check(
+            migrated.getFaceMask() == (1 << EAST.ordinal()) && migrated.getConfig(EAST)
+                .getPriority() == 3,
+            "legacy single-face NBT migrates to the matching plate");
+
+        check(bus.removeFace(EAST), "one face can be removed");
+        check(
+            !bus.hasFace(EAST) && bus.hasFace(WEST)
+                && bus.getFaceMask() == (1 << WEST.ordinal()),
+            "removing one face leaves the other intact");
+        bus.invalidate();
+    }
+
+    private static void checkItemUseFirst() {
+        TestWorld world = new TestWorld();
+        TestContainer target = new TestContainer();
+        TileEntityStorageBus bus = new TileEntityStorageBus();
+        target.setWorldObj(world);
+        bus.setWorldObj(world);
+        world.target = target;
+        world.bus = bus;
+        BlockStorageBus busBlock = new BlockStorageBus();
+        world.busBlock = busBlock;
+        FutaGtnhMod.blockStorageBus = busBlock;
+
+        TestPlayer player = new TestPlayer(world);
+        player.setSneaking(true);
+        ItemStack stack = new ItemStack(busBlock, 2);
+        ItemStorageBus item = new ItemStorageBus(busBlock);
+
+        // 右键目标西面：总线格在 (0,0,0)，目标在 (1,0,0)，应加 EAST 面。
+        // 潜行也应生效：玩家常潜行贴总线，避免打开目标容器。
+        boolean handled = item.onItemUseFirst(stack, player, world, 1, 0, 0, WEST.ordinal(), 0.5F, 0.5F, 0.5F);
+        check(handled, "onItemUseFirst handles an existing bus block");
+        check(bus.hasFace(EAST), "onItemUseFirst adds the clicked target face");
+        check(stack.stackSize == 1, "onItemUseFirst consumes one bus item");
+
+        handled = item.onItemUseFirst(stack, player, world, 1, 0, 0, WEST.ordinal(), 0.5F, 0.5F, 0.5F);
+        check(!handled, "an already-connected face does not place another bus");
+        check(bus.hasFace(EAST) && stack.stackSize == 1, "existing face does not consume another item");
+
+        // 从第二个目标方块“背对总线”的那一面右键：仍应找到北边的已有总线格并加 SOUTH 面。
+        handled = item.onItemUseFirst(stack, player, world, 0, 0, 1, SOUTH.ordinal(), 0.5F, 0.5F, 0.5F);
+        check(handled, "onItemUseFirst finds an adjacent bus from the clicked block's other side");
+        check(bus.hasFace(SOUTH) && stack.stackSize == 0, "adding from the far side targets the same bus cell");
+
+        bus.invalidate();
+        FutaGtnhMod.blockStorageBus = null;
+    }
+
+    private static void checkItemUseFirstPlacement() {
+        TestWorld world = new TestWorld();
+        TestContainer target = new TestContainer();
+        TileEntityStorageBus bus = new TileEntityStorageBus();
+        target.setWorldObj(world);
+        bus.setWorldObj(world);
+        world.target = target;
+        world.bus = bus;
+        BlockStorageBus busBlock = new BlockStorageBus();
+        world.busBlock = busBlock;
+        world.busBlockAtOrigin = false;
+        FutaGtnhMod.blockStorageBus = busBlock;
+
+        TestPlayer player = new TestPlayer(world);
+        ItemStack stack = new ItemStack(busBlock, 1);
+        ItemStorageBus item = new ItemStorageBus(busBlock);
+        boolean handled = item.onItemUseFirst(stack, player, world, 1, 0, 0, WEST.ordinal(), 0.5F, 0.5F, 0.5F);
+        check(handled, "onItemUseFirst can place the first bus");
+        check(bus.hasFace(EAST) && world.blockMetadata == EAST.ordinal(), "first bus records the clicked target face");
+        check(stack.stackSize == 0, "first placement consumes the bus item");
+
+        bus.invalidate();
+        FutaGtnhMod.blockStorageBus = null;
+    }
+
+    private static void checkClientFaceRotation() {
+        ClientStorageBus.setConfig(
+            0,
+            0,
+            0,
+            0,
+            0,
+            (1 << 0) | (1 << 3),
+            new StorageBusConfig().writeToNbt(),
+            "",
+            false,
+            false);
+        check(ClientStorageBus.hasFace(0) && ClientStorageBus.hasFace(3), "client cache keeps configured faces");
+        check(!ClientStorageBus.hasFace(1), "client cache rejects empty faces");
+        check(ClientStorageBus.nextFace(0, 1) == 3, "face rotation moves to the next configured face");
+        check(ClientStorageBus.nextFace(3, 1) == 0, "face rotation wraps around");
+        check(ClientStorageBus.nextFace(0, -1) == 3, "face rotation wraps backwards");
+        ClientStorageBus.clear();
     }
 
     private static void checkConfigRoundTrip() {
@@ -208,7 +458,7 @@ public final class StorageBusRegression {
         Fixture f = Fixture.create();
         ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
         f.target.inventory.setInventorySlotContents(0, new ItemStack(Items.iron_ingot, 30));
-        f.bus.getConfig().setAccess(StorageBusConfig.AccessMode.READ_ONLY);
+        f.bus.getConfig(EAST).setAccess(StorageBusConfig.AccessMode.READ_ONLY);
         refresh(f);
 
         check(f.storage.getItemAmount(iron) == 30, "read-only bus is visible");
@@ -219,7 +469,7 @@ public final class StorageBusRegression {
         check(f.target.total(iron) == 30, "pool extracted before equal-priority bus");
 
         Fixture g = Fixture.create();
-        g.bus.getConfig().setAccess(StorageBusConfig.AccessMode.WRITE_ONLY);
+        g.bus.getConfig(EAST).setAccess(StorageBusConfig.AccessMode.WRITE_ONLY);
         g.target.inventory.setInventorySlotContents(0, new ItemStack(Items.iron_ingot, 7));
         refresh(g);
         check(g.storage.getItemAmount(iron) == 0, "write-only bus is hidden");
@@ -228,7 +478,7 @@ public final class StorageBusRegression {
         check(g.storage.extractItem(iron, 1) == 0, "write-only bus cannot be extracted");
         check(g.storage.itemView().isEmpty(), "write-only has no readable pool copy");
 
-        g.bus.getConfig().setAccess(StorageBusConfig.AccessMode.READ_WRITE);
+        g.bus.getConfig(EAST).setAccess(StorageBusConfig.AccessMode.READ_WRITE);
         refresh(g);
         check(g.storage.getItemAmount(iron) == 11, "access change exposes existing stock");
     }
@@ -237,7 +487,7 @@ public final class StorageBusRegression {
         Fixture f = Fixture.create();
         ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
         ItemKey gold = ItemKey.of(new ItemStack(Items.gold_ingot));
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setItemFilter(0, iron);
         refresh(f);
 
@@ -246,7 +496,7 @@ public final class StorageBusRegression {
         check(f.storage.getItemAmount(gold) == 5, "gold fell through to the pool");
         check(f.storage.insertItem(iron, 6) == 6 && f.target.total(iron) == 6, "whitelisted item enters target");
 
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setFilterMode(StorageBusConfig.FilterMode.BLACKLIST);
         refresh(f);
         check(f.storage.insertItem(iron, 2) == 2 && f.target.total(iron) == 6, "blacklist now rejects iron");
@@ -258,19 +508,19 @@ public final class StorageBusRegression {
         taggedIron.getTagCompound()
             .setString("variant", "bus-check");
         ItemKey taggedKey = ItemKey.of(taggedIron);
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .clearFilters();
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setFilterMode(StorageBusConfig.FilterMode.WHITELIST);
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setItemFilter(0, taggedKey);
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setMatchMode(StorageBusConfig.MatchMode.EXACT);
-        check(!f.bus.getConfig()
+        check(!f.bus.getConfig(EAST)
             .allowsItem(iron), "exact mode distinguishes NBT");
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setMatchMode(StorageBusConfig.MatchMode.FUZZY);
-        check(f.bus.getConfig()
+        check(f.bus.getConfig(EAST)
             .allowsItem(iron), "fuzzy mode ignores NBT");
 
         // 矿辞：给两个不同物品注册同一个矿辞名
@@ -279,15 +529,15 @@ public final class StorageBusRegression {
         OreDictionary.registerOre("ingotStorageBusCheck", new ItemStack(Items.iron_ingot));
         OreDictionary.registerOre("ingotStorageBusCheck", new ItemStack(oreItem));
         ItemKey oreKey = ItemKey.of(new ItemStack(oreItem));
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .clearFilters();
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setItemFilter(0, oreKey);
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setMatchMode(StorageBusConfig.MatchMode.ORE_DICT);
-        check(f.bus.getConfig()
+        check(f.bus.getConfig(EAST)
             .allowsItem(iron), "ore dictionary mode matches another item with the same ore name");
-        check(!f.bus.getConfig()
+        check(!f.bus.getConfig(EAST)
             .allowsItem(gold), "ore dictionary mode still rejects unrelated items");
     }
 
@@ -303,9 +553,9 @@ public final class StorageBusRegression {
         check(f.storage.insertFluid(water, 500) == 500, "fluid insert accepted");
         check(f.target.tank.getFluidAmount() == 3500, "fluid insert goes to bus first");
 
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setFluidFilter(0, water);
-        f.bus.getConfig()
+        f.bus.getConfig(EAST)
             .setFilterMode(StorageBusConfig.FilterMode.BLACKLIST);
         refresh(f);
         check(f.target.tank.getFluidAmount() == 3500, "fluid blacklist does not change existing content");
@@ -328,7 +578,7 @@ public final class StorageBusRegression {
     // ==================================================================
 
     private static void refresh(Fixture fixture) {
-        StorageBusRegistry.refresh(fixture.bus.getLink());
+        StorageBusRegistry.refresh(fixture.bus.getLink(EAST));
     }
 
     private static void check(boolean value, String message) {
@@ -361,10 +611,8 @@ public final class StorageBusRegression {
             world.target = target;
             world.bus = bus;
             bus.setWorldObj(world);
-            bus.getConfig()
-                .setTargetSide(EAST);
-            bus.ensureRegistered();
-            StorageBusRegistry.refresh(bus.getLink());
+            bus.addFace(EAST);
+            StorageBusRegistry.refresh(bus.getLink(EAST));
             return new Fixture(SharedStorageManager.getStorage(), world, target, bus);
         }
     }
@@ -480,6 +728,9 @@ public final class StorageBusRegression {
 
         TileEntityStorageBus bus;
         TestContainer target;
+        BlockStorageBus busBlock;
+        boolean busBlockAtOrigin = true;
+        int blockMetadata;
 
         TestWorld() {
             super(
@@ -515,7 +766,7 @@ public final class StorageBusRegression {
 
         @Override
         public int getBlockMetadata(int x, int y, int z) {
-            return 0;
+            return blockMetadata;
         }
 
         @Override
@@ -525,7 +776,18 @@ public final class StorageBusRegression {
 
         @Override
         public net.minecraft.block.Block getBlock(int x, int y, int z) {
+            if (x == 0 && y == 0 && z == 0 && busBlockAtOrigin && busBlock != null) return busBlock;
             return net.minecraft.init.Blocks.air;
+        }
+
+        @Override
+        public boolean setBlock(int x, int y, int z, net.minecraft.block.Block block, int metadata, int flags) {
+            if (x == 0 && y == 0 && z == 0) {
+                busBlockAtOrigin = true;
+                blockMetadata = metadata;
+                return true;
+            }
+            return false;
         }
 
         @Override
@@ -533,5 +795,29 @@ public final class StorageBusRegression {
 
         @Override
         public void markTileEntityChunkModified(int x, int y, int z, TileEntity tile) {}
+    }
+
+    /** 不打开真实 GUI 的测试玩家。 */
+    private static final class TestPlayer extends EntityPlayer {
+
+        TestPlayer(World world) {
+            super(world, new com.mojang.authlib.GameProfile(UUID.randomUUID(), "storage-bus-test"));
+        }
+
+        @Override
+        public void openGui(Object mod, int modGuiId, World world, int x, int y, int z) {}
+
+        @Override
+        public net.minecraft.util.ChunkCoordinates getPlayerCoordinates() {
+            return new net.minecraft.util.ChunkCoordinates(0, 0, 0);
+        }
+
+        @Override
+        public boolean canCommandSenderUseCommand(int permissionLevel, String command) {
+            return true;
+        }
+
+        @Override
+        public void addChatMessage(net.minecraft.util.IChatComponent message) {}
     }
 }

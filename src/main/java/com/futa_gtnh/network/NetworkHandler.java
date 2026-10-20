@@ -87,5 +87,8 @@ public final class NetworkHandler {
         // 存储总线：配置快照（S2C）与整份上行 / 权威值请求（C2S）
         INSTANCE.registerMessage(PacketStorageBusSync.Handler.class, PacketStorageBusSync.class, 34, Side.CLIENT);
         INSTANCE.registerMessage(PacketStorageBusConfig.Handler.class, PacketStorageBusConfig.class, 35, Side.SERVER);
+        // 存储总线：放置/加面请求。客户端 onItemUseFirst 返回 true 时原生 C08 不会发送，
+        // 所以用独立包把这次右键带到服务端。
+        INSTANCE.registerMessage(PacketStorageBusUse.Handler.class, PacketStorageBusUse.class, 36, Side.SERVER);
     }
 }

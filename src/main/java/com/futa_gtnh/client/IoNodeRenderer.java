@@ -160,7 +160,7 @@ public class IoNodeRenderer implements ISimpleBlockRenderingHandler {
      * 像素尺寸从图标的左上角按比例取 —— 贴图本身就是按 16px 画的，
      * 6px 的面取 6/16 宽，1:1 不拉伸。
      */
-    private static void drawBox(Tessellator tessellator, AxisAlignedBB box, IIcon icon, float r, float g, float b) {
+    static void drawBox(Tessellator tessellator, AxisAlignedBB box, IIcon icon, float r, float g, float b) {
         if (icon == null) return;
 
         float x0 = (float) box.minX, y0 = (float) box.minY, z0 = (float) box.minZ;

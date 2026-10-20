@@ -75,14 +75,18 @@ public final class UiSmokeCheck {
             TileAeSignalTransmitter transmitter = new TileAeSignalTransmitter(); transmitter.setWorldObj(mc.theWorld);
             TileEntityLootMachine loot = new TileEntityLootMachine(); loot.setWorldObj(mc.theWorld);
             TileEntityStorageBus bus = new TileEntityStorageBus(); bus.setWorldObj(mc.theWorld);
+            bus.addFace(net.minecraftforge.common.util.ForgeDirection.EAST);
             ClientStorageBus.setConfig(mc.theWorld.provider.dimensionId, bus.xCoord, bus.yCoord, bus.zCoord,
+                net.minecraftforge.common.util.ForgeDirection.EAST.ordinal(),
+                1 << net.minecraftforge.common.util.ForgeDirection.EAST.ordinal(),
                 new StorageBusConfig().writeToNbt(), "", false, false);
             add("settings", GuiClientConfig::new);
             add("terminal", () -> new GuiSharedTerminal(storage));
             add("limits", () -> new GuiStorageLimits(storage));
             add("terminal_io", () -> new GuiTerminalIo(storage));
             add("node", () -> new GuiIoNode(new ContainerIoNode(node, mc.thePlayer), 2));
-            add("storage_bus", () -> new GuiStorageBus(new ContainerStorageBus(bus, mc.thePlayer)));
+            add("storage_bus", () -> new GuiStorageBus(new ContainerStorageBus(bus, mc.thePlayer,
+                net.minecraftforge.common.util.ForgeDirection.EAST.ordinal())));
             add("transmitter", () -> new GuiAeSignalTransmitter(new ContainerAeSignalTransmitter(transmitter, mc.thePlayer), mc.thePlayer));
             if (CommonProxy.swiftStep != null) add("swift_step", () -> new GuiSwiftStep(new ItemStack(CommonProxy.swiftStep)));
             add("locator", GuiLocatorWand::new);

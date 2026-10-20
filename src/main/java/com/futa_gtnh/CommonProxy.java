@@ -6,6 +6,7 @@ import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.world.World;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.oredict.ShapedOreRecipe;
 
 import com.futa_gtnh.aewireless.BlockAeSignalTransmitter;
@@ -225,11 +226,15 @@ public class CommonProxy {
         // 存储总线：把一个相邻容器接进共享存储（终端可见，按优先级写入/抽取）
         if (Config.enableStorageBus) {
             blockStorageBus = new com.futa_gtnh.storagebus.BlockStorageBus();
-            GameRegistry.registerBlock(blockStorageBus, com.futa_gtnh.storagebus.BlockStorageBus.NAME);
+            GameRegistry.registerBlock(
+                blockStorageBus,
+                com.futa_gtnh.storagebus.ItemStorageBus.class,
+                com.futa_gtnh.storagebus.BlockStorageBus.NAME);
             GameRegistry.registerTileEntity(
                 com.futa_gtnh.storagebus.TileEntityStorageBus.class,
                 FutaGtnhMod.MODID + ":" + com.futa_gtnh.storagebus.BlockStorageBus.NAME);
             FutaGtnhMod.blockStorageBus = blockStorageBus;
+            MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.storagebus.StorageBusLeftClickHandler());
         }
 
         // 迅步的隐形光源：注册但<b>不给 ItemBlock</b>（itemclass 传 null），
