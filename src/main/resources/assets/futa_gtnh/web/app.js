@@ -27,6 +27,8 @@
     var LS_CONSUMABLE = 'futa_gtnh.consumable';
     var LS_IGNORE_STOCK = 'futa_gtnh.ignorestock';
     var LS_TARGET_STOCK = 'futa_gtnh.targetstock';   // '0' = 目标产物不扣库存（中间产物照扣）
+    // 选好的配方按**物品键**再存一份：编号会在重建索引/换模组后重排，键不会
+    var LS_CHOICE_KEYS = 'futa_gtnh.choicekeys';
     var LS_BASKET = 'futa_gtnh.basket';
     var LS_GROUPS = 'futa_gtnh.groups';   // 书签组（组里有清单；旧键保留作镜像）
     var LS_ALTS = 'futa_gtnh.alts';
@@ -50,6 +52,7 @@
         item: { id: 0, count: 64 },                      // 物品页：数量
         plan: { id: 0, count: 64, plan: null, open: {}, rawMode: false, active: false },
         basketNames: {},                                 // 计划清单里的物品名（拿到接口数据后补上）
+        itemKeys: {},                                    // 物品编号 -> 稳定物品键（选配方时要按键另存一份）
         modalOpener: null,
         modalOrigin: ''      // 弹层是从哪个页面打开的，决定关闭后要不要重新规划
     };
@@ -360,6 +363,60 @@
             delete all[String(itemId)];
         }
         lsSet(LS_CHOICES, JSON.stringify(all));
+
+        // 同时按**物品键**记一份（见 LS_CHOICE_KEYS）：
+        // 编号是「这个会话里第几个被登记的物品」，重建索引/换模组之后会重排 ——
+        // 只按编号存的话，升级一次这份选择就挂到别的物品上了（玩家报过：
+        // 「我明明给它选了大型化学反应釜，为什么还在用流体固化器」）。
+        var key = state.itemKeys ? state.itemKeys[Number(itemId)] : null;
+        if (key) {
+            var byKey = readChoiceKeys();
+            if (rid) {
+                byKey[key] = String(rid);
+            } else {
+                delete byKey[key];
+            }
+            lsSet(LS_CHOICE_KEYS, JSON.stringify(byKey));
+        }
+    }
+
+    /**
+     * 记住「这个编号对应哪个物品键」，供上面那份稳定记录使用。
+     *
+     * <p>
+     * 键是接口给的（{@code /api/item} 的 {@code item.key}），只有在玩家真的看过那件东西时
+     * 才拿得到 —— 而「能给它选配方」本来就意味着他看过它，所以够用。
+     */
+    function rememberItemKey(item) {
+        if (!item || item.id === undefined || item.id === null) return;
+        if (!item.key) return;
+        if (!state.itemKeys) state.itemKeys = {};
+        state.itemKeys[Number(item.id)] = String(item.key);
+    }
+
+    /** 按物品键存的配方选择（{@code 物品键 -> 配方编号}）。 */
+    function readChoiceKeys() {
+        var raw = lsGet(LS_CHOICE_KEYS);
+        var out = {};
+        if (!raw) return out;
+        try {
+            var parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        } catch (e) {
+            /* 坏数据当没有 */
+        }
+        return out;
+    }
+
+    /** {@code choiceKeys=物品键=配方编号,…}（键里有冒号，所以用 = 分隔）。 */
+    function choiceKeysParam() {
+        var all = readChoiceKeys();
+        var keys = Object.keys(all);
+        var parts = [];
+        for (var i = 0; i < keys.length; i++) {
+            parts.push(encodeURIComponent(keys[i]) + '=' + encodeURIComponent(String(all[keys[i]])));
+        }
+        return parts.join(',');
     }
 
     /**
@@ -1397,6 +1454,11 @@
         }
         if (choices) {
             url += '&choices=' + encodeURIComponent(choices);
+        }
+        // 按物品键存的那份选择也带上（键优先于编号，见 WebRecipeServer.parseChoiceKeys）
+        var keyChoices = choiceKeysParam();
+        if (keyChoices) {
+            url += '&choiceKeys=' + keyChoices;
         }
         if (raw) {
             url += '&raw=' + encodeURIComponent(raw);
@@ -2548,9 +2610,10 @@
      * 所以单独一个按钮、还要点两次才算数。
      */
     var LS_PREFIX = 'futa_gtnh.';
-    var LS_SELECTION_KEYS = [LS_CHOICES, LS_ALTS, LS_RAW, LS_CATALYST, LS_CONSUMABLE, LS_DONE];
+    var LS_SELECTION_KEYS = [LS_CHOICES, LS_CHOICE_KEYS, LS_ALTS, LS_RAW, LS_CATALYST, LS_CONSUMABLE, LS_DONE];
     var LS_LABELS = {};
     LS_LABELS[LS_CHOICES] = '选过的配方';
+    LS_LABELS[LS_CHOICE_KEYS] = '选过的配方（按物品键存的那份，升级后仍然认得出）';
     LS_LABELS[LS_ALTS] = '选过的候选材料';
     LS_LABELS[LS_RAW] = '标成「自己准备」的材料';
     LS_LABELS[LS_CATALYST] = '标成「非消耗品」的';
@@ -3242,6 +3305,8 @@
         clear(host);
         var item = data.item || {};
         var id = item.id !== undefined ? item.id : state.item.id;
+        // 物品键要在手：玩家在这页选配方时，要按它另存一份（见 setChoice）
+        rememberItemKey(item);
         var count = state.item.count;
         var recipes = Array.isArray(data.recipes) ? data.recipes : [];
 
@@ -4227,6 +4292,7 @@
         apiItem(id, state.modalRlimit).then(function (data) {
             clear(body);
             var item = data.item || entry;
+            rememberItemKey(item);
             var recipes = Array.isArray(data.recipes) ? data.recipes : [];
             var total = num(data.recipeTotal, recipes.length);
 

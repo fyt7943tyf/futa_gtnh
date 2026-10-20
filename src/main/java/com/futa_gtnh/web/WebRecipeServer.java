@@ -450,6 +450,14 @@ public final class WebRecipeServer {
         // debug=1：把「被掐断的物品各自选了什么配方」也写进警告里（排查「明明能做却报缺」用）
         request.debug = "1".equals(query.get("debug"));
         request.choices = parseChoices(query.get("choices"));
+        // 稳定身份的那一份选择：choiceKeys=<物品键>=<配方编号>,…
+        //
+        // 「我明明给它选了大型化学反应釜，为什么还在用流体固化器」的根因是选择按**物品编号**存，
+        // 而编号是「这个会话里第几个被登记的物品」，重建索引/换模组之后整体重排 ——
+        // 老编号指到别的物品上，那份选择就成了谁也问不到的孤儿，规划一声不响地按自动挑的算。
+        // 物品键（registryName@meta / fluid:显示名）是稳定的：前端另存一份、请求时一起带上，
+        // 这里解析成当前编号。**键优先于编号** —— 编号那份可能已经指到别的物品上了。
+        request.choices.putAll(parseChoiceKeys(query.get("choiceKeys")));
         // 多候选材料的指定：alts=主人的物品:格子的x:格子的y:选中的物品,...
         request.alts = parseAlts(query.get("alts"));
         request.raw = parseIntSet(query.get("raw"));
@@ -659,6 +667,10 @@ public final class WebRecipeServer {
         json.obj()
             .k("id")
             .v(itemId)
+            // 稳定身份键：玩家选的配方要按它存 —— 编号是「这个会话里第几个被登记的物品」，
+            // 重建索引/换模组之后会重排，按编号存的选好配方会挂到别的物品上（见 choiceKeys）
+            .k("key")
+            .v(WebStore.keyOfId(itemId))
             .k("name")
             .v(WebStore.nameOf(itemId))
             .k("mod")
@@ -957,6 +969,40 @@ public final class WebRecipeServer {
                 if (itemId >= 0 && ordinal >= 0) out.put(WebStore.canonicalId(itemId), ordinal);
             } catch (Throwable ignored) {
                 // 单个坏值跳过，不影响其余的
+            }
+        }
+        return out;
+    }
+
+    /**
+     * {@code "物品键=配方编号,…"} -> 当前编号 -> 配方编号。
+     *
+     * <p>
+     * 物品键形如 {@code gregtech:gt.metaitem.02@32010} 或 {@code fluid:胶凝甲苯}（见
+     * {@code WebStore.keyOf}）：它和「这个会话里第几个被登记」无关，所以重建索引、
+     * 换模组之后照样能解析回当前编号。分辨不出来的键（物品被删了）直接跳过 ——
+     * 拿不到选择最多是按自动挑的算，而报错会让整个页面打不开。
+     *
+     * <p>
+     * 用 {@code =} 分隔而不是 {@code :}：键里本来就有冒号（注册名），用冒号切不开。
+     */
+    private static Map<Integer, Integer> parseChoiceKeys(String raw) {
+        Map<Integer, Integer> out = new HashMap<>();
+        if (raw == null || raw.isEmpty()) return out;
+        String[] pairs = raw.split(",");
+        for (int i = 0; i < pairs.length && out.size() < 512; i++) {
+            int eq = pairs[i].lastIndexOf('=');
+            if (eq <= 0) continue;
+            try {
+                String key = pairs[i].substring(0, eq)
+                    .trim();
+                int ordinal = Integer.parseInt(
+                    pairs[i].substring(eq + 1)
+                        .trim());
+                int itemId = WebStore.idOfKey(key);
+                if (itemId >= 0 && ordinal >= 0) out.put(Integer.valueOf(WebStore.canonicalId(itemId)), ordinal);
+            } catch (Throwable ignored) {
+                // 单个坏值跳过
             }
         }
         return out;

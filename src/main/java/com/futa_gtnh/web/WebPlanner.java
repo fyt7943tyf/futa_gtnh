@@ -124,6 +124,18 @@ public final class WebPlanner {
          */
         public final Set<Integer> unmatchedChoices = new LinkedHashSet<>();
         /**
+         * 这次规划里<b>真的问过</b>「你有没有给它选过配方」的物品。
+         *
+         * <p>
+         * 用来发现「选好的配方压根没派上用场」：选择是按<b>物品编号</b>存的，而编号是
+         * 「这个会话里第几个被登记的物品」—— 重建索引、换模组之后会整体重排。
+         * 老编号这时指到别的物品上，规划连问都不会问到它，于是<b>一声不响</b>按自动挑的算：
+         * 玩家看到的就是「我明明给它选了大型化学反应釜，为什么还在用流体固化器」。
+         */
+        public final Set<Integer> usedChoices = new LinkedHashSet<>();
+        /** 同上：这次真的用上的「当作原始材料」标记。 */
+        public final Set<Integer> usedRaw = new LinkedHashSet<>();
+        /**
          * 调试模式（请求里带 {@code debug=1}）：把「被掐断的那些物品各自选了什么配方、
          * 材料是谁」一并写进警告里。
          *
@@ -253,6 +265,21 @@ public final class WebPlanner {
             if (target != null && target.itemId == itemId) return true;
         }
         return false;
+    }
+
+    /**
+     * 这件东西被玩家标成「当作原始材料」了吗。
+     *
+     * <p>
+     * 顺手记一笔「这个标记这次真的用上了」：{@code raw} 是按物品编号存的，
+     * 编号在重建索引后会整体重排，老编号指到别的物品上时，那个标记就永远不会被问到 ——
+     * 玩家会觉得「我明明标了原始材料，它还是给我展开了配方」。最后拿
+     * {@link Request#usedRaw} 和 {@code raw} 比一比就知道有没有这种孤儿标记。
+     */
+    private static boolean isMarkedRaw(int itemId, Request request) {
+        if (!request.raw.contains(Integer.valueOf(itemId))) return false;
+        request.usedRaw.add(Integer.valueOf(itemId));
+        return true;
     }
 
     /**
@@ -457,6 +484,25 @@ public final class WebPlanner {
                 "这几样你之前选过配方，但当前索引里找不到那一条（配方编号在重建索引后会变，换过模组也会）：" + nameList(request.unmatchedChoices)
                     + "。已经按自动挑选处理，在物品页重新选一次就好。");
         }
+        // ★ 选好的配方<b>一次都没被问到</b>：说明它挂在一个当前计划里根本不存在的编号上。
+        //
+        // 这是「我明明给它选了大型化学反应釜，为什么还在用流体固化器」最常见的成因：
+        // 选择按物品编号存，而编号是「这个会话里第几个被登记的物品」—— 重建索引之后整体重排，
+        // 老编号指到别的物品上，那份选择就成了孤儿：规划既不报「找不到那条配方」，
+        // 也不用它，玩家只看到自动挑的那条。这种情况必须点名，不能一声不响。
+        Set<Integer> orphanChoices = new LinkedHashSet<>(request.choices.keySet());
+        orphanChoices.removeAll(request.usedChoices);
+        if (!orphanChoices.isEmpty()) {
+            plan.warnings.add(
+                "这几样你选过配方，但这次计划里没有它们 —— 选择是按物品编号存的，重建索引/换模组后编号会重排，" + "挂在上面的选择就对不上了："
+                    + nameList(orphanChoices)
+                    + "。打开那件物品重新选一次即可（旧记录在「本地数据」页可以一并清掉）。");
+        }
+        Set<Integer> orphanRaw = new LinkedHashSet<>(request.raw);
+        orphanRaw.removeAll(request.usedRaw);
+        if (!orphanRaw.isEmpty()) {
+            plan.warnings.add("这几样你标过「当作原始材料」，但这次计划里没有它们（同样是编号重排造成的）：" + nameList(orphanRaw) + "。需要的话重新标一次。");
+        }
         if (request.debug) {
             for (Integer id : expansion.cycleBroken) {
                 plan.warnings.add(describeChoice("[调试] ", expansion, id.intValue()));
@@ -592,7 +638,7 @@ public final class WebPlanner {
                 continue;
             }
 
-            boolean expandable = !request.raw.contains(work.itemId) && !extraRaw.contains(work.itemId)
+            boolean expandable = !isMarkedRaw(work.itemId, request) && !extraRaw.contains(work.itemId)
                 && work.depth < request.maxDepth
                 && !contains(work.path, work.itemId)
                 && WebRecipeIndex.hasRecipes(work.itemId);
@@ -653,7 +699,7 @@ public final class WebPlanner {
             if (!expandedHere && !coveredByStock) {
                 add(out.mustObtain, work.itemId, work.amount);
                 if (why == null) {
-                    if (request.raw.contains(work.itemId)) {
+                    if (isMarkedRaw(work.itemId, request)) {
                         why = WHY_MARKED_RAW;
                     } else if (extraRaw.contains(work.itemId)) {
                         why = WHY_CYCLE;
@@ -1076,6 +1122,8 @@ public final class WebPlanner {
     private static int pickRecipe(Request request, int itemId) {
         Integer forcedRid = request.choices.get(itemId);
         if (forcedRid != null) {
+            // 记「问过它」：最后要拿它跟 choices 比对，找出那些一次都没用上的选择
+            request.usedChoices.add(Integer.valueOf(itemId));
             int forced = ordinalOfRid(itemId, forcedRid.intValue());
             if (forced >= 0 && isUsable(forced, itemId)) return forced;
             // 玩家存的编号在当前索引里找不到（模组或配方变过）：记下来，最后在警告里说清楚。
