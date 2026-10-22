@@ -315,6 +315,7 @@ val botaniaAuraCheckDependencies = configurations.create("botaniaAuraCheckDepend
     isTransitive = false
 }
 dependencies.add(botaniaAuraCheckDependencies.name, "com.github.GTNewHorizons:Botania:1.13.36-GTNH:dev")
+dependencies.add(botaniaAuraCheckDependencies.name, "com.github.GTNewHorizons:CropsNH:2.0.133:dev")
 
 val compileBotaniaAuraChecks = tasks.register<JavaCompile>("compileBotaniaAuraChecks") {
     dependsOn(tasks.named("classes"))
@@ -333,11 +334,42 @@ tasks.register<JavaExec>("verifyBotaniaAura") {
     description = "Checks Swift Step Botania ticks, pure daisy conversion, mana conservation and aura isolation"
     // Standalone Forge enum registration needs Java 8 without lwjgl3ify's game bootstrap.
     javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(8)) })
-    dependsOn(compileBotaniaAuraChecks, compileReadApiChecks)
-    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
-    args("com.futa_gtnh.common.SwiftStepBotaniaRegression")
-    classpath = files(compileBotaniaAuraChecks.flatMap { it.destinationDirectory }) +
-        files(compileReadApiChecks.flatMap { it.destinationDirectory }) + botaniaAuraCheckDependencies +
+    dependsOn(compileBotaniaAuraChecks, compileReadApiChecks, compileProspectorChecks, extractTerminalClickLwjgl)
+    mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+    args("--tweakClass", "com.futa_gtnh.growthcheck.GrowthCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+    classpath = files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileBotaniaAuraChecks.flatMap { it.destinationDirectory }) +
+        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/botania-aura-check") + botaniaAuraCheckDependencies +
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 tasks.named("check") { dependsOn("verifyBotaniaAura") }
+
+// Keep the exact Eclipse 4.19 formatter while avoiding the retired update-site index.
+configure<com.diffplug.gradle.spotless.SpotlessExtension> {
+    java {
+        clearSteps()
+        toggleOffOn()
+        importOrderFile(com.diffplug.blowdryer.Blowdryer.file("spotless.importorder"))
+        removeUnusedImports()
+        eclipse("4.19").withP2Mirrors(mapOf(
+            "https://download.eclipse.org/eclipse/updates/4.19" to
+                "https://download.eclipse.org/releases/2021-03/202103171000"
+        )).configFile(com.diffplug.blowdryer.Blowdryer.file("spotless.eclipseformat.xml"))
+    }
+}
+
+tasks.register<JavaExec>("verifyPlantAuraOptional") {
+    group = "verification"
+    description = "Checks server-side plant aura loading without Botania or CropsNH"
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(8)) })
+    dependsOn(compileBotaniaAuraChecks, compileProspectorChecks)
+    mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+    args("--tweakClass", "com.futa_gtnh.growthcheck.GrowthCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+    systemProperty("futa.growth.absent", "true")
+    classpath = files(compileBotaniaAuraChecks.flatMap { it.destinationDirectory }) +
+        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/botania-aura-check") +
+        (sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath).filter {
+            !it.name.startsWith("Botania-") && !it.name.startsWith("CropsNH-")
+        }
+}
+tasks.named("check") { dependsOn("verifyPlantAuraOptional") }

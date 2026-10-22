@@ -14,8 +14,9 @@ import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.network.NetworkHandler;
 import com.futa_gtnh.network.PacketSetSwiftStep;
 import com.futa_gtnh.network.PacketSetSwiftStepMagnet;
+import com.futa_gtnh.network.PacketSwiftStepAuraStatus;
 
-/** 迅步设置界面，按移动、生长和恢复分为三个页面。 */
+/** 迅步设置界面，按移动、生长、恢复和加速分为四个页面。 */
 public class GuiSwiftStep extends FutaGuiScreen {
 
     private static final int GUI_WIDTH = 200;
@@ -23,6 +24,11 @@ public class GuiSwiftStep extends FutaGuiScreen {
 
     private static final int PAGE_MOVEMENT = 0;
     private static final int PAGE_GROWTH = 1;
+    private static final int PAGE_AURA = 3;
+    private static final int BTN_TAB_AURA = 36;
+    private static final int BTN_BREEDING_TOGGLE = 37;
+    private static final int BREED_SPEED_BASE = 400;
+    private static final int BOTANIA_SPEED_BASE = 410;
 
     private static final int BTN_FLIGHT_DOWN = 0;
     private static final int BTN_FLIGHT_UP = 1;
@@ -96,6 +102,8 @@ public class GuiSwiftStep extends FutaGuiScreen {
             addMovementControls(left, top);
         } else if (page == PAGE_GROWTH) {
             addGrowthControls(left, top);
+        } else if (page == PAGE_AURA) {
+            addAuraControls(left, top);
         } else {
             addRecoveryControls(left, top);
         }
@@ -111,28 +119,80 @@ public class GuiSwiftStep extends FutaGuiScreen {
     }
 
     private void addTabs(int left, int top) {
+        int[] ids = { BTN_TAB_MOVEMENT, BTN_TAB_GROWTH, BTN_TAB_RECOVERY, BTN_TAB_AURA };
+        String[] keys = { "movement", "growth", "recovery", "aura" };
+        for (int i = 0; i < ids.length; i++) {
+            GuiButton button = new GuiSmallButton(
+                ids[i],
+                left + 8 + 47 * i,
+                top + 26,
+                43,
+                18,
+                tr("futa_gtnh.swift_step.gui.tab." + keys[i]));
+            button.enabled = page != i;
+            buttonList.add(button);
+        }
+    }
+
+    private void addAuraControls(int left, int top) {
         buttonList.add(
             new GuiSmallButton(
-                BTN_TAB_MOVEMENT,
+                BTN_BREEDING_TOGGLE,
                 left + 8,
-                top + 26,
-                58,
+                top + 80,
+                184,
                 18,
-                tr("futa_gtnh.swift_step.gui.tab.movement")));
-        buttonList.add(
-            new GuiSmallButton(BTN_TAB_GROWTH, left + 71, top + 26, 58, 18, tr("futa_gtnh.swift_step.gui.tab.growth")));
-        buttonList.add(
-            new GuiSmallButton(
-                BTN_TAB_RECOVERY,
-                left + 134,
-                top + 26,
-                58,
-                18,
-                tr("futa_gtnh.swift_step.gui.tab.recovery")));
-        for (Object object : buttonList) {
-            if (!(object instanceof GuiButton)) continue;
-            GuiButton button = (GuiButton) object;
-            if (button.id == BTN_TAB_MOVEMENT + page) button.enabled = false;
+                tr("futa_gtnh.swift_step.gui.breeding") + ": "
+                    + tr(
+                        ItemSwiftStep.isBreedingAuraEnabled(charm) ? "futa_gtnh.swift_step.gui.on"
+                            : "futa_gtnh.swift_step.gui.off")));
+        addAuraSpeedRow(left, top + 106, BREED_SPEED_BASE);
+        buttonList
+            .add(new GuiSmallButton(BTN_BOTANIA_AURA_TOGGLE, left + 8, top + 170, 184, 18, botaniaAuraToggleText()));
+        addAuraSpeedRow(left, top + 196, BOTANIA_SPEED_BASE);
+    }
+
+    private void addAuraSpeedRow(int left, int y, int base) {
+        String[] labels = { "-100", "-10", "-1", "+1", "+10", "+100" };
+        for (int i = 0; i < labels.length; i++) {
+            buttonList.add(new GuiSmallButton(base + i, left + 8 + 31 * i, y, 29, 18, labels[i]));
+        }
+    }
+
+    private void drawAuraPage(int top) {
+        drawCenteredFittedString(
+            tr("futa_gtnh.swift_step.gui.breeding_rate", ItemSwiftStep.getBreedingAuraSpeed(charm)),
+            width / 2,
+            top + 132,
+            0xFFFFFF);
+        drawCenteredFittedString(tr("futa_gtnh.swift_step.gui.breeding_hint"), width / 2, top + 146, 0xAAAAAA);
+        drawCenteredFittedString(
+            tr(
+                "futa_gtnh.swift_step.gui.botania_rate",
+                ItemSwiftStep.getBotaniaAuraSpeed(charm),
+                fixed(1 + ItemSwiftStep.getBotaniaAuraSpeed(charm) / 100.0F, 2)),
+            width / 2,
+            top + 222,
+            0xFFFFFF);
+        PacketSwiftStepAuraStatus status = PacketSwiftStepAuraStatus.latest;
+        if (status == null || System.currentTimeMillis() - status.receivedAt > 3000) {
+            drawCenteredFittedString(tr("futa_gtnh.swift_step.gui.aura_waiting"), width / 2, top + 248, 0xAAAAAA);
+        } else {
+            drawCenteredFittedString(
+                tr("futa_gtnh.swift_step.gui.aura_targets", status.crops, status.crosses, status.botania),
+                width / 2,
+                top + 248,
+                0xFFFFFF);
+            drawCenteredFittedString(
+                tr("futa_gtnh.swift_step.gui.aura_work", status.updates, status.blocked),
+                width / 2,
+                top + 260,
+                0xAAAAAA);
+            drawCenteredFittedString(
+                tr(status.limited ? "futa_gtnh.swift_step.gui.aura_limited" : "futa_gtnh.swift_step.gui.aura_normal"),
+                width / 2,
+                top + 272,
+                status.limited ? 0xFFCC66 : 0xAAAAAA);
         }
     }
 
@@ -300,6 +360,8 @@ public class GuiSwiftStep extends FutaGuiScreen {
             drawMovementPage(top, left);
         } else if (page == PAGE_GROWTH) {
             drawGrowthPage(top);
+        } else if (page == PAGE_AURA) {
+            drawAuraPage(top);
         } else {
             drawRecoveryPage(top);
         }
@@ -360,7 +422,7 @@ public class GuiSwiftStep extends FutaGuiScreen {
         drawCenteredFittedString(
             EnumChatFormatting.GRAY + tr(
                 "futa_gtnh.swift_step.gui.growth_aura.botania_status",
-                fixed(1 + ItemSwiftStep.getGrowthAuraSpeed(charm) / 100.0F, 2)),
+                fixed(1 + ItemSwiftStep.getBotaniaAuraSpeed(charm) / 100.0F, 2)),
             width / 2,
             top + 92,
             0xFFFFFF);
@@ -584,6 +646,29 @@ public class GuiSwiftStep extends FutaGuiScreen {
 
     @Override
     protected void actionPerformed(GuiButton button) {
+        if (button.id == BTN_TAB_AURA) {
+            page = PAGE_AURA;
+            initGui();
+            return;
+        }
+        if (button.id == BTN_BREEDING_TOGGLE) {
+            boolean enabled = !ItemSwiftStep.isBreedingAuraEnabled(charm);
+            ItemSwiftStep.setBreedingAuraEnabled(charm, enabled);
+            NetworkHandler.INSTANCE.sendToServer(PacketSetSwiftStep.breedingAura(enabled));
+            initGui();
+            return;
+        }
+        if ((button.id >= BREED_SPEED_BASE && button.id < BREED_SPEED_BASE + 6)
+            || (button.id >= BOTANIA_SPEED_BASE && button.id < BOTANIA_SPEED_BASE + 6)) {
+            boolean breeding = button.id < BOTANIA_SPEED_BASE;
+            int[] delta = { -100, -10, -1, 1, 10, 100 };
+            int old = breeding ? ItemSwiftStep.getBreedingAuraSpeed(charm) : ItemSwiftStep.getBotaniaAuraSpeed(charm);
+            int speed = ItemSwiftStep
+                .clampGrowthAuraSpeed(old + delta[button.id - (breeding ? BREED_SPEED_BASE : BOTANIA_SPEED_BASE)]);
+            ItemSwiftStep.setIndependentAuraSpeed(charm, breeding, speed);
+            NetworkHandler.INSTANCE.sendToServer(PacketSetSwiftStep.auraSpeed(breeding, speed));
+            return;
+        }
         if (button.id == BTN_DONE) {
             mc.displayGuiScreen(null);
             return;

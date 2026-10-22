@@ -160,6 +160,10 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if ("com.futa_gtnh.mixins.MixinAgricarnation".equals(mixinClassName)) {
+            return Launch.classLoader != null && Launch.classLoader
+                .getResource("vazkii/botania/common/block/subtile/functional/SubTileAgricarnation.class") != null;
+        }
         if ("com.futa_gtnh.mixins.MixinCosmeticArmorInventoryClient".equals(mixinClassName)) {
             return Launch.classLoader != null
                 && Launch.classLoader.getResource("lain/mods/cos/client/InventoryManagerClient.class") != null;

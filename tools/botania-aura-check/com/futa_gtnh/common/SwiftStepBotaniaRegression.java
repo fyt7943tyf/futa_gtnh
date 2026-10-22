@@ -54,6 +54,7 @@ public final class SwiftStepBotaniaRegression {
     private static int checks;
 
     public static void main(String[] args) throws Exception {
+        Thread.currentThread().setContextClassLoader(net.minecraft.launchwrapper.Launch.classLoader);
         Loader.injectData(new Object[] { "7", "99", "40", "1614", "1.7.10", "9.05", new File("."), Collections.emptyList() });
         Field side = FMLRelaunchLog.class.getDeclaredField("side");
         side.setAccessible(true);
@@ -72,12 +73,26 @@ public final class SwiftStepBotaniaRegression {
         control.setAccessible(true);
         control.set(Loader.instance(), controller);
         Botania.proxy = new CommonProxy();
+        File minecraftHome = new File("build/botania-regression");
+        minecraftHome.mkdirs();
+        Field home = cpw.mods.fml.relauncher.FMLInjectionData.class.getDeclaredField("minecraftHome");
+        home.setAccessible(true);
+        home.set(null, minecraftHome);
+        net.minecraft.launchwrapper.Launch.blackboard.put("fml.deobfuscatedEnvironment", true);
+        Class<?> unsafeType = Class.forName("sun.misc.Unsafe");
+        Field unsafeField = unsafeType.getDeclaredField("theUnsafe");
+        unsafeField.setAccessible(true);
+        Object unsafe = unsafeField.get(null);
+        Field proxyField = gregtech.GTMod.class.getField("proxy");
+        proxyField.set(null, unsafeType.getMethod("allocateInstance", Class.class).invoke(unsafe, proxyField.getType()));
+        com.futa_gtnh.Config.swiftStepAuraBudgetMillis = 0;
         scheduleAndSettings();
         daisyConversion();
         poolCharging();
         poolInfusion();
         sparkTransfer();
         boundsAndBudgets();
+        SwiftStepGrowthRegression.run();
         System.out.println("Swift Step Botania regression: " + checks + " checks passed");
     }
 
@@ -111,11 +126,11 @@ public final class SwiftStepBotaniaRegression {
             PacketSetSwiftStep decoded = new PacketSetSwiftStep();
             decoded.fromBytes(wire.duplicate());
             decoded.toBytes(copied);
-            check(copied.getInt(copied.writerIndex() - 4) == 1, "Botania flag round trip");
+            check(copied.getInt(40) == 1, "Botania flag round trip");
             copied.clear();
             decoded.fromBytes(wire.slice(0, 40));
             decoded.toBytes(copied);
-            check(copied.getInt(copied.writerIndex() - 4) == -1, "old settings packet leaves Botania unchanged");
+            check(copied.getInt(40) == -1, "old settings packet leaves Botania unchanged");
             check(copied.getFloat(0) == PacketSetSwiftStep.UNCHANGED && copied.getInt(36) == -1,
                 "Botania-only packet never resets movement or recovery");
         } finally {
@@ -282,14 +297,14 @@ public final class SwiftStepBotaniaRegression {
         if (!ok) throw new AssertionError(description);
     }
 
-    private static String key(int x, int y, int z) { return x + ":" + y + ":" + z; }
+    static String key(int x, int y, int z) { return x + ":" + y + ":" + z; }
 
     private static class CountingFlower extends TileSpecialFlower {
         int calls;
         @Override public void updateEntity() { calls++; }
     }
 
-    private static final class TestWorld extends World {
+    static class TestWorld extends World {
         final Map<String, Block> blocks = new HashMap<>();
         final Map<String, TileEntity> tiles = new HashMap<>();
         long time;
@@ -330,6 +345,7 @@ public final class SwiftStepBotaniaRegression {
             }
             return found;
         }
+        @Override public void markTileEntityChunkModified(int x,int y,int z,TileEntity tile) {}
         @Override public void func_147453_f(int x, int y, int z, Block block) {}
         @Override public void playSoundEffect(double x, double y, double z, String sound, float volume, float pitch) {}
         @Override public void playAuxSFX(int effect, int x, int y, int z, int data) {}

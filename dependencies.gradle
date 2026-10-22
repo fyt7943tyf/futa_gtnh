@@ -21,6 +21,8 @@
 def lwjgl3ifyVersion = '3.0.35'
 
 dependencies {
+    // Optional Agricarnation crop-stick bridge. Concrete types are isolated behind the mixin plugin.
+    compileOnly("com.github.GTNewHorizons:Botania:1.13.36-GTNH:dev")
     // Optional CAR integration; its unchanged classes also exercise the actual client Mixin in checks.
     compileOnly("com.github.GTNewHorizons:CosmeticArmorReworked:1.0.7-GTNH:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:CosmeticArmorReworked:1.0.7-GTNH:dev")

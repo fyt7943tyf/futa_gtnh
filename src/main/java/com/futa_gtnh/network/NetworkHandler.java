@@ -25,6 +25,8 @@ public final class NetworkHandler {
     public static final int CHUNK_SIZE = 28000;
 
     public static void init() {
+        INSTANCE
+            .registerMessage(PacketSwiftStepAuraStatus.Handler.class, PacketSwiftStepAuraStatus.class, 38, Side.CLIENT);
         // 服务端 -> 客户端
         INSTANCE.registerMessage(PacketStorageSync.Handler.class, PacketStorageSync.class, 0, Side.CLIENT);
         INSTANCE.registerMessage(PacketStorageDelta.Handler.class, PacketStorageDelta.class, 1, Side.CLIENT);
