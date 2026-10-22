@@ -6,7 +6,7 @@ import com.futa_gtnh.mixins.FutaGtnhMixinPlugin;
 public final class GrowthAbsentRegression {
     public static void main(String[] args) throws Exception {
         Thread.currentThread().setContextClassLoader(net.minecraft.launchwrapper.Launch.classLoader);
-        for(String name:new String[]{"vazkii.botania.common.Botania","com.gtnewhorizon.cropsnh.CropsNH"}) {
+        for(String name:new String[]{"vazkii.botania.common.Botania","com.gtnewhorizon.cropsnh.api.ICropStickTile"}) {
             try { Class.forName(name); throw new AssertionError("optional dependency leaked: "+name); }
             catch(ClassNotFoundException expected) {}
         }

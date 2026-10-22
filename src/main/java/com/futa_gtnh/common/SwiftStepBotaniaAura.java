@@ -269,11 +269,17 @@ public final class SwiftStepBotaniaAura {
             }
             tiles.removeIf(ref -> {
                 TileEntity tile = ref.get();
-                return tile == null || tile.isInvalid();
+                if (tile == null) return true;
+                if (!tile.isInvalid()) return false;
+                discovered.remove(tile);
+                return true;
             });
             entities.removeIf(ref -> {
                 Entity entity = ref.get();
-                return entity == null || entity.isDead;
+                if (entity == null) return true;
+                if (!entity.isDead) return false;
+                discovered.remove(entity);
+                return true;
             });
         }
 

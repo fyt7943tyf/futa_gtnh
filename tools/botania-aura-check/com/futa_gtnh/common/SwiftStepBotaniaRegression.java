@@ -277,6 +277,19 @@ public final class SwiftStepBotaniaRegression {
         unloaded.loaded = false;
         SwiftStepBotaniaAura.accelerate(unloaded, 0.5, 64.5, 0.5, 8, 1000);
         check(stale.calls == 0, "unloaded blocks are never forced to tick");
+        TestWorld revivedWorld = new TestWorld();
+        CountingFlower revived = new CountingFlower();
+        revivedWorld.put(0,64,0,Blocks.yellow_flower,revived);
+        SwiftStepBotaniaAura.accelerate(revivedWorld,0.5,64.5,0.5,8,100);
+        revived.invalidate();
+        revivedWorld.time++;
+        SwiftStepBotaniaAura.accelerate(revivedWorld,0.5,64.5,0.5,8,100);
+        check(revived.calls == 1,"invalid tile is pruned without further work");
+        revived.validate();
+        revivedWorld.time++;
+        SwiftStepBotaniaAura.changed(revivedWorld,0,64,0);
+        SwiftStepBotaniaAura.accelerate(revivedWorld,0.5,64.5,0.5,8,100);
+        check(revived.calls == 2,"reactivated same tile can be rediscovered after pruning");
         TestWorld large = new TestWorld();
         List<CountingFlower> flowers = new ArrayList<>();
         for (int x = -7; x <= 7; x++) for (int z = -7; z <= 7; z++) for (int dy = 0; dy < 2; dy++) {
