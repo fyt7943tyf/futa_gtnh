@@ -345,6 +345,27 @@ public class Config {
     /** 是否注册太阳能除钙剂（右键蒸汽太阳能锅炉重置钙化进度的永久工具）。 */
     public static boolean enableSolarDescaler = true;
 
+    // ------------------------------------------------------------------
+    // IC2 反应堆布局工具
+    // ------------------------------------------------------------------
+
+    /**
+     * 是否注册 IC2 反应堆布局工具（Shift+右键记录反应堆摆放、右键打开布局档案
+     * 浏览/部署、支持一键建造流体反应堆压力容器外壳）。需要装了 IC2（GTNH 整包
+     * 必带），没装时这项无效。
+     *
+     * <p>
+     * 布局档案是<b>全服共享</b>的：存在 {@code <存档>/data/futa_gtnh_reactor_layouts.dat}，
+     * 与共享背包/小游戏助手同一套落盘保障（原子写 + .bak 回退）。
+     */
+    public static boolean enableReactorTool = true;
+
+    /**
+     * 布局档案最多保存多少条。满了之后「保存布局」会被拒绝并提示，
+     * 需要先删掉旧布局 —— 防止档案文件被无限撑大（每条布局最多 54 个带 NBT 的物品栈）。
+     */
+    public static int reactorToolMaxLayouts = 100;
+
     public static boolean enableDisassembler = true;
     public static int disassemblerMetaTileId = 32700;
 
@@ -896,6 +917,20 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             enableSolarDescaler,
             "是否注册太阳能除钙剂（右键蒸汽太阳能锅炉，重置其钙化进度；永久工具不消耗）。");
+
+        enableReactorTool = configuration.getBoolean(
+            "enableReactorTool",
+            Configuration.CATEGORY_GENERAL,
+            enableReactorTool,
+            "是否注册 IC2 反应堆布局工具（Shift+右键记录反应堆摆放配置并存入全服共享档案；右键打开档案浏览/部署到反应堆；部署时自动从玩家背包+共享背包取料）。需装 IC2。");
+
+        reactorToolMaxLayouts = configuration.getInt(
+            "reactorToolMaxLayouts",
+            Configuration.CATEGORY_GENERAL,
+            reactorToolMaxLayouts,
+            1,
+            10000,
+            "反应堆布局档案最多保存多少条。满了之后保存新布局会被拒绝，需要先删旧的。");
 
         enableDisassembler = configuration.getBoolean(
             "enableDisassembler",

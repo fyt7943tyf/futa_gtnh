@@ -26,6 +26,7 @@ import com.futa_gtnh.common.GuiHandler;
 import com.futa_gtnh.common.ModEventHandler;
 import com.futa_gtnh.item.ItemLocatorWand;
 import com.futa_gtnh.item.ItemMinigameHelper;
+import com.futa_gtnh.item.ItemReactorLayoutTool;
 import com.futa_gtnh.item.ItemSolarDescaler;
 import com.futa_gtnh.item.ItemSwiftStep;
 import com.futa_gtnh.network.NetworkHandler;
@@ -75,6 +76,9 @@ public class CommonProxy {
     /** 太阳能除钙剂。 */
     public static ItemSolarDescaler solarDescaler;
 
+    /** IC2 反应堆布局工具。没装 IC2 或配置关闭时为 null。 */
+    public static com.futa_gtnh.item.ItemReactorLayoutTool reactorLayoutTool;
+
     /**
      * AE2 共享背包存储元件（物品通道）。没装 AE2 或配置关闭时为 null。
      * 元件物品类不引用任何 AE 类型（实现隔离在 com.futa_gtnh.ae2 包的 handler 侧），
@@ -110,6 +114,7 @@ public class CommonProxy {
         registerMinigameHelper();
         registerLootMachine();
         registerSolarDescaler();
+        registerReactorTool();
         registerAe2Cells();
         registerRecipes();
 
@@ -358,6 +363,28 @@ public class CommonProxy {
     }
 
     /**
+     * 注册 IC2 反应堆布局工具。
+     *
+     * <p>
+     * <b>物品类不引用任何 IC2 类型</b>（目标识别全在 {@code Ic2ReactorCompat} 里做）。
+     * GTNH 整包必带 IC2（GT 的前置），这里的可用性守卫只是防御 ——
+     * 没装 IC2 的怪环境里物品干脆不注册，启动日志里现形。
+     */
+    private void registerReactorTool() {
+        if (!Config.enableReactorTool) return;
+
+        if (!com.futa_gtnh.reactor.Ic2ReactorCompat.isAvailable()) {
+            FutaGtnhMod.LOG.info("没有检测到 IC2，跳过反应堆布局工具的注册");
+            return;
+        }
+
+        reactorLayoutTool = new ItemReactorLayoutTool();
+        GameRegistry.registerItem(reactorLayoutTool, ItemReactorLayoutTool.NAME);
+        FutaGtnhMod.reactorLayoutTool = reactorLayoutTool;
+        FutaGtnhMod.LOG.info("已注册 IC2 反应堆布局工具");
+    }
+
+    /**
      * 注册 AE2 共享背包存储元件（物品 / 流体两件套）。
      *
      * <p>
@@ -487,6 +514,16 @@ public class CommonProxy {
                     new Object[] { " B ", "BIB", " B ", 'B', new ItemStack(Items.dye, 1, 15), 'I', "ingotIron" }));
         }
 
+        // IC2 反应堆布局工具：钢板×4 + 纸×2 + 钻石。
+        // 「钢板」对应反应堆结构材料，「纸」对应图纸（记录/复刻），「钻石」对应精密仪器的档次。
+        // plateSteel / gemDiamond 都走矿物词典（GT 保证注册，AE 无线配方与迅步同款用法）。
+        if (reactorLayoutTool != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(reactorLayoutTool, 1),
+                    new Object[] { "SPS", "PGP", "SPS", 'S', "plateSteel", 'P', Items.paper, 'G', "gemDiamond" }));
+        }
+
         // AE2 共享背包存储元件两件套：玻璃 + 萤石紫水晶 + 中心（箱子=物品 / 桶=流体）。
         // 骨架和共享终端配方同构（末影珍珠 → 萤石紫水晶）：ME 网络的通用材料
         // 对应「接入 AE」，中心物品对应通道。整个配方只在 AE2 在场时注册
@@ -542,6 +579,18 @@ public class CommonProxy {
      * 所以这里连坐标都不需要。
      */
     public void openMinigameHelperGui() {
+        // 服务端不做任何事
+    }
+
+    /**
+     * 打开反应堆布局档案浏览器。只有 {@link ClientProxy} 覆写了它。
+     *
+     * <p>
+     * 和 {@link #openMinigameHelperGui} 同一个理由：纯客户端 GuiScreen，没有
+     * Container。{@code hasTarget} 表示打开时带着一个部署目标（右键点中的反应堆
+     * 坐标）；不带目标的空中右键是纯管理模式。
+     */
+    public void openReactorLayoutGui(boolean hasTarget, int x, int y, int z) {
         // 服务端不做任何事
     }
 

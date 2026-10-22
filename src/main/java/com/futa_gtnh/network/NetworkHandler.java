@@ -90,5 +90,16 @@ public final class NetworkHandler {
         // 存储总线：放置/加面请求。客户端 onItemUseFirst 返回 true 时原生 C08 不会发送，
         // 所以用独立包把这次右键带到服务端。
         INSTANCE.registerMessage(PacketStorageBusUse.Handler.class, PacketStorageBusUse.class, 36, Side.SERVER);
+        // IC2 反应堆布局工具：Shift 右键记录（C2S）/ 浏览器动作（C2S）/
+        // 布局列表（S2C，分片）/ 单条预览（S2C）。
+        INSTANCE.registerMessage(PacketReactorToolUse.Handler.class, PacketReactorToolUse.class, 37, Side.SERVER);
+        INSTANCE
+            .registerMessage(PacketReactorLayoutAction.Handler.class, PacketReactorLayoutAction.class, 38, Side.SERVER);
+        INSTANCE.registerMessage(PacketReactorLayoutSync.Handler.class, PacketReactorLayoutSync.class, 39, Side.CLIENT);
+        INSTANCE.registerMessage(
+            PacketReactorLayoutPreview.Handler.class,
+            PacketReactorLayoutPreview.class,
+            40,
+            Side.CLIENT);
     }
 }

@@ -29,6 +29,15 @@ dependencies {
     // GTNH 的核心模组，提供 GT 的方块/物品/机器/配方 API
     compileOnly("com.github.GTNewHorizons:GT5-Unofficial:5.09.54.175:dev")
 
+    // ---- IC2 ----
+    // 反应堆布局工具要读写 IC2 核反应堆的内部网格（ic2.api.reactor.IReactor 的
+    // getItemAt/setItemAt）。这个依赖目前本来就经 GT5-U 的 POM 传递进编译类路径
+    // （GT 的 POM 里 compile 依赖 net.industrial-craft:industrialcraft-2），
+    // 但「靠传递依赖撑编译」太脆 —— GT 哪天把 IC2 从 POM 里摘掉，我们的代码
+    // 就会在毫无预兆的情况下编译失败。显式声明一份，把假设钉死。
+    // 运行时不用声明：GTNH 整包必带 IC2（GT 是 required-after 它的）。
+    compileOnly("net.industrial-craft:industrialcraft-2:2.2.828-experimental:dev")
+
     // ---- Not Enough Items（NEI）----
     // GTNH 内置的配方查看器，注册 NEI 配方/隐藏物品时需要
     compileOnly("com.github.GTNewHorizons:NotEnoughItems:2.8.144-GTNH:dev")
