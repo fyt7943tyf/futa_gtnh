@@ -45,6 +45,7 @@ tasks.register<JavaExec>("verifySharedStorageReadApi") {
 }
 
 tasks.named("check") {
+    dependsOn(tasks.named("verifyLocatorChests"))
     dependsOn(tasks.named("verifyCosmeticArmor"), tasks.named("verifyCosmeticArmorOptional"))
     dependsOn(tasks.named("verifyTerminalIo"))
     dependsOn(tasks.named("verifyProspectorChineseNames"))
@@ -56,6 +57,16 @@ tasks.named("check") {
     dependsOn(tasks.named("verifyTerminalSearch"))
     dependsOn(tasks.named("verifyTerminalNeiSearch"))
     dependsOn(tasks.named("verifyStockControls"))
+}
+
+tasks.register<JavaExec>("verifyLocatorChests") {
+    group = "verification"
+    description = "Checks placed chest orientations, inventory searches and loaded-chunk-only locator scans"
+    dependsOn(compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.locator.LocatorChestRegression")
+    classpath = files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 
 val compileCosmeticChecks = tasks.register<JavaCompile>("compileCosmeticChecks") {
