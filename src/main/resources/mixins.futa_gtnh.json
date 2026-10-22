@@ -23,6 +23,6 @@
 		"lootgames.InvokerGameMineSweeper",
 		"lootgames.InvokerGOLStage"
 	],
-	"client": ["MixinEntityRenderer", "MixinEntityPlayerSP", "MixinAutoCraftingManager"],
+	"client": ["MixinEntityRenderer", "MixinEntityPlayerSP", "MixinAutoCraftingManager", "MixinCosmeticArmorInventoryClient"],
 	"server": []
 }

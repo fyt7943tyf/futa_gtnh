@@ -29,6 +29,7 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void preInit(FMLPreInitializationEvent event) {
         super.preInit(event);
+        com.futa_gtnh.cosmetic.client.CosmeticArmorClient.register();
         RoguelikeMapClient.register();
         KeyHandler.register();
         SwiftStepClientHandler.register();
@@ -193,5 +194,10 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void onRtsToggleRejected(String reasonKey) {
         com.futa_gtnh.rts.client.RtsClientState.onServerRejected(reasonKey);
+    }
+
+    @Override
+    public void onCosmeticArmorIdentity(net.minecraft.network.INetHandler source, java.util.UUID playerId) {
+        com.futa_gtnh.cosmetic.client.CosmeticArmorClient.receiveIdentity(source, playerId);
     }
 }

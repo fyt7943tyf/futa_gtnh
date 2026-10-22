@@ -28,6 +28,15 @@ import cpw.mods.fml.relauncher.Side;
  */
 public class ModEventHandler {
 
+    @SubscribeEvent(priority = cpw.mods.fml.common.eventhandler.EventPriority.LOWEST)
+    public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.player instanceof EntityPlayerMP && cpw.mods.fml.common.Loader.isModLoaded("cosmeticarmorreworked")) {
+            EntityPlayerMP player = (EntityPlayerMP) event.player;
+            com.futa_gtnh.network.NetworkHandler.INSTANCE
+                .sendTo(new com.futa_gtnh.network.PacketCosmeticArmorIdentity(player.getUniqueID()), player);
+        }
+    }
+
     public static void register() {
         FMLCommonHandler.instance()
             .bus()

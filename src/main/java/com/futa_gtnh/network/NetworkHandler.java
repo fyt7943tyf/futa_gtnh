@@ -90,5 +90,11 @@ public final class NetworkHandler {
         // 存储总线：放置/加面请求。客户端 onItemUseFirst 返回 true 时原生 C08 不会发送，
         // 所以用独立包把这次右键带到服务端。
         INSTANCE.registerMessage(PacketStorageBusUse.Handler.class, PacketStorageBusUse.class, 36, Side.SERVER);
+        // Offline-mode servers may use a different own-player UUID from the launcher's account.
+        INSTANCE.registerMessage(
+            PacketCosmeticArmorIdentity.Handler.class,
+            PacketCosmeticArmorIdentity.class,
+            37,
+            Side.CLIENT);
     }
 }

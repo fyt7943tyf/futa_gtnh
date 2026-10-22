@@ -45,6 +45,9 @@ import cpw.mods.fml.common.registry.GameRegistry;
  */
 public class CommonProxy {
 
+    /** Client-only CAR cache alias. The server proxy has no client class references. */
+    public void onCosmeticArmorIdentity(net.minecraft.network.INetHandler source, java.util.UUID playerId) {}
+
     /** 共享终端方块。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockSharedTerminal blockSharedTerminal;
 

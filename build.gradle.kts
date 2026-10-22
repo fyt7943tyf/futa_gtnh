@@ -45,6 +45,7 @@ tasks.register<JavaExec>("verifySharedStorageReadApi") {
 }
 
 tasks.named("check") {
+    dependsOn(tasks.named("verifyCosmeticArmor"), tasks.named("verifyCosmeticArmorOptional"))
     dependsOn(tasks.named("verifyTerminalIo"))
     dependsOn(tasks.named("verifyProspectorChineseNames"))
     dependsOn(tasks.named("verifySharedStorageReadApi"))
@@ -55,6 +56,34 @@ tasks.named("check") {
     dependsOn(tasks.named("verifyTerminalSearch"))
     dependsOn(tasks.named("verifyTerminalNeiSearch"))
     dependsOn(tasks.named("verifyStockControls"))
+}
+
+val compileCosmeticChecks = tasks.register<JavaCompile>("compileCosmeticChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/cosmetic-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output + sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("cosmetic-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+for (optionalAbsent in listOf(false, true)) {
+    tasks.register<JavaExec>(if (optionalAbsent) "verifyCosmeticArmorOptional" else "verifyCosmeticArmor") {
+        group = "verification"
+        description = "Checks optional CAR UUID compatibility, real client Mixin and connection isolation"
+        dependsOn(compileCosmeticChecks, "compileProspectorChecks", "extractTerminalClickLwjgl")
+        mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+        args("--tweakClass", "com.futa_gtnh.cosmeticcheck.CosmeticCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+        systemProperty("futa.cosmetic.absent", optionalAbsent.toString())
+        classpath = files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+            files(compileCosmeticChecks.flatMap { it.destinationDirectory }) +
+            files(layout.buildDirectory.dir("prospector-check/classes")) + files("tools/cosmetic-check") +
+            (sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath).filter {
+                !optionalAbsent || !it.name.startsWith("CosmeticArmorReworked-")
+            }
+    }
 }
 
 // LaunchWrapper + real Mixin transformation, without starting a world or a graphical client.

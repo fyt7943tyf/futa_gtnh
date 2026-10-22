@@ -21,6 +21,9 @@
 def lwjgl3ifyVersion = '3.0.35'
 
 dependencies {
+    // Optional CAR integration; its unchanged classes also exercise the actual client Mixin in checks.
+    compileOnly("com.github.GTNewHorizons:CosmeticArmorReworked:1.0.7-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:CosmeticArmorReworked:1.0.7-GTNH:dev")
     // UI layer: explicitly pin the same MUI2 version used by this GT release.
     compileOnly("com.github.GTNewHorizons:ModularUI2:2.3.89-1.7.10:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.89-1.7.10:dev")
