@@ -15,9 +15,6 @@ import net.minecraftforge.fluids.Fluid;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 
-import cpw.mods.fml.common.registry.GameData;
-import cpw.mods.fml.common.registry.GameRegistry;
-
 import org.jetbrains.annotations.NotNull;
 
 import com.cleanroommc.modularui.api.drawable.IKey;
@@ -50,6 +47,8 @@ import appeng.util.item.AEFluidStack;
 import appeng.util.item.AEFluidStackType;
 import appeng.util.item.AEItemStack;
 import appeng.util.item.AEItemStackType;
+import cpw.mods.fml.common.registry.GameData;
+import cpw.mods.fml.common.registry.GameRegistry;
 import gregtech.api.GregTechAPI;
 import gregtech.api.enums.Textures;
 import gregtech.api.interfaces.ITexture;
@@ -672,14 +671,26 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
             String id = GameData.getItemRegistry()
                 .getNameForObject(prototype.getItem());
             String customName = customDisplayNameOf(prototype);
-            return "2" + INFO_SEP + count + INFO_SEP + view.capacity() + INFO_SEP + id + INFO_SEP
-                + prototype.getItemDamage() + INFO_SEP + (customName == null ? "" : customName);
+            return "2" + INFO_SEP
+                + count
+                + INFO_SEP
+                + view.capacity()
+                + INFO_SEP
+                + id
+                + INFO_SEP
+                + prototype.getItemDamage()
+                + INFO_SEP
+                + (customName == null ? "" : customName);
         }
         if (isTankItem(stack)) {
             TankContentInventory view = new TankContentInventory(stack);
             FluidStack contents = view.contents();
             if (contents == null) return "3" + INFO_SEP + view.capacity();
-            return "4" + INFO_SEP + contents.amount + INFO_SEP + view.capacity() + INFO_SEP
+            return "4" + INFO_SEP
+                + contents.amount
+                + INFO_SEP
+                + view.capacity()
+                + INFO_SEP
                 + FluidRegistry.getFluidName(contents);
         }
         return "0";
@@ -703,9 +714,8 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
             mode = Integer.parseInt(parts[0]);
             switch (mode) {
                 case 1 -> {
-                    return StatCollector.translateToLocalFormatted(
-                        "futa_gtnh.medock.chest_empty",
-                        Long.parseLong(parts[1]));
+                    return StatCollector
+                        .translateToLocalFormatted("futa_gtnh.medock.chest_empty", Long.parseLong(parts[1]));
                 }
                 case 2 -> {
                     a = Long.parseLong(parts[1]);
@@ -715,9 +725,8 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
                     return StatCollector.translateToLocalFormatted("futa_gtnh.medock.chest_info", displayName, a, b);
                 }
                 case 3 -> {
-                    return StatCollector.translateToLocalFormatted(
-                        "futa_gtnh.medock.tank_empty",
-                        Long.parseLong(parts[1]));
+                    return StatCollector
+                        .translateToLocalFormatted("futa_gtnh.medock.tank_empty", Long.parseLong(parts[1]));
                 }
                 case 4 -> {
                     a = Long.parseLong(parts[1]);

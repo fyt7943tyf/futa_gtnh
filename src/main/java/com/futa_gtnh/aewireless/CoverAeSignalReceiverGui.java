@@ -88,8 +88,9 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
         syncManager.syncValue("sender_selection", selection);
 
         // 状态行只同步原始数据，本地化在客户端做（服务端只有 en_US）。
-        IntSyncValue linkState = new IntSyncValue(() -> cover.getLinkState()
-            .ordinal());
+        IntSyncValue linkState = new IntSyncValue(
+            () -> cover.getLinkState()
+                .ordinal());
         syncManager.syncValue("link_state", linkState);
         LongSyncValue lastAmount = new LongSyncValue(cover::getLastAmount);
         syncManager.syncValue("last_amount", lastAmount);
@@ -236,8 +237,7 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
             .child(
                 IKey.dynamic(
                     () -> StatCollector.translateToLocal(
-                        cover.isFluidMode() ? "futa_gtnh.aewireless.type.fluid"
-                            : "futa_gtnh.aewireless.type.item"))
+                        cover.isFluidMode() ? "futa_gtnh.aewireless.type.fluid" : "futa_gtnh.aewireless.type.item"))
                     .asWidget()
                     .verticalCenter()
                     .marginLeft(4));
@@ -305,16 +305,15 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
             cover::setCondition).allowC2S();
         syncManager.syncValue("condition", condition);
         return row().child(
-            optionGrid().row(
-                new SelectButton()
-                    .value(LinkedBoolValue.of(condition, CoverAeSignalReceiver.ConditionMode.ABOVE))
-                    .overlay(GTGuiTextures.OVERLAY_BUTTON_REDSTONE_ON)
-                    .size(16),
-                IKey.lang("futa_gtnh.aewireless.condition.above")
-                    .asWidget())
+            optionGrid()
                 .row(
-                    new SelectButton()
-                        .value(LinkedBoolValue.of(condition, CoverAeSignalReceiver.ConditionMode.BELOW))
+                    new SelectButton().value(LinkedBoolValue.of(condition, CoverAeSignalReceiver.ConditionMode.ABOVE))
+                        .overlay(GTGuiTextures.OVERLAY_BUTTON_REDSTONE_ON)
+                        .size(16),
+                    IKey.lang("futa_gtnh.aewireless.condition.above")
+                        .asWidget())
+                .row(
+                    new SelectButton().value(LinkedBoolValue.of(condition, CoverAeSignalReceiver.ConditionMode.BELOW))
                         .overlay(GTGuiTextures.OVERLAY_BUTTON_REDSTONE_OFF)
                         .size(16),
                     IKey.lang("futa_gtnh.aewireless.condition.below")
@@ -328,16 +327,15 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
             cover::setAction).allowC2S();
         syncManager.syncValue("action", action);
         return row().child(
-            optionGrid().row(
-                new SelectButton()
-                    .value(LinkedBoolValue.of(action, CoverAeSignalReceiver.OnCondition.ENABLE))
-                    .overlay(GTGuiTextures.OVERLAY_BUTTON_CHECKMARK)
-                    .size(16),
-                IKey.lang("futa_gtnh.aewireless.action.enable")
-                    .asWidget())
+            optionGrid()
                 .row(
-                    new SelectButton()
-                        .value(LinkedBoolValue.of(action, CoverAeSignalReceiver.OnCondition.DISABLE))
+                    new SelectButton().value(LinkedBoolValue.of(action, CoverAeSignalReceiver.OnCondition.ENABLE))
+                        .overlay(GTGuiTextures.OVERLAY_BUTTON_CHECKMARK)
+                        .size(16),
+                    IKey.lang("futa_gtnh.aewireless.action.enable")
+                        .asWidget())
+                .row(
+                    new SelectButton().value(LinkedBoolValue.of(action, CoverAeSignalReceiver.OnCondition.DISABLE))
                         .overlay(GTGuiTextures.OVERLAY_BUTTON_FORBIDDEN)
                         .size(16),
                     IKey.lang("futa_gtnh.aewireless.action.disable")
@@ -365,13 +363,13 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
             cover::setLinkLost).allowC2S();
         syncManager.syncValue("link_lost", linkLost);
         return row().child(
-            optionGrid().row(
-                new SelectButton()
-                    .value(LinkedBoolValue.of(linkLost, CoverAeSignalReceiver.LinkLostBehavior.KEEP))
-                    .overlay(GTGuiTextures.OVERLAY_BUTTON_LOCK)
-                    .size(16),
-                IKey.lang("futa_gtnh.aewireless.linklost.keep")
-                    .asWidget())
+            optionGrid()
+                .row(
+                    new SelectButton().value(LinkedBoolValue.of(linkLost, CoverAeSignalReceiver.LinkLostBehavior.KEEP))
+                        .overlay(GTGuiTextures.OVERLAY_BUTTON_LOCK)
+                        .size(16),
+                    IKey.lang("futa_gtnh.aewireless.linklost.keep")
+                        .asWidget())
                 .row(
                     new SelectButton()
                         .value(LinkedBoolValue.of(linkLost, CoverAeSignalReceiver.LinkLostBehavior.ENABLE))
