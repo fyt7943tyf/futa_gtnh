@@ -17,6 +17,7 @@ import com.cleanroommc.modularui.api.drawable.IKey;
 import com.cleanroommc.modularui.factory.PosGuiData;
 import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.screen.UISettings;
+import com.cleanroommc.modularui.utils.Alignment;
 import com.cleanroommc.modularui.utils.item.IItemHandlerModifiable;
 import com.cleanroommc.modularui.utils.item.ItemStackHandler;
 import com.cleanroommc.modularui.value.sync.FluidSlotSyncHandler;
@@ -504,6 +505,7 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
                                 .size()));
                     return true;
                 }));
+        // 固定宽度居中：页码位数变化时文本位置不再左右跳动（两枚翻页按钮之间是固定区域）
         panel.child(
             IKey.dynamic(
                 () -> IKey.lang(key)
@@ -513,7 +515,9 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
                     + pages.getPages()
                         .size())
                 .asWidget()
-                .pos(30, y + 3));
+                .pos(26, y + 3)
+                .width(142)
+                .alignment(Alignment.Center));
         panel.child(
             new ButtonWidget<>().size(16)
                 .pos(170, y)

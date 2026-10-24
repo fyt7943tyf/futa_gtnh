@@ -100,7 +100,6 @@ public class GuiAeSignalTransmitter extends FutaGuiContainer {
     protected void drawGuiContainerBackgroundLayer(float partialTicks, int mouseX, int mouseY) {
         drawDefaultBackground();
         com.futa_gtnh.client.ui.FutaUiTheme.panel(guiLeft, guiTop, xSize, ySize);
-        drawRect(guiLeft + 15, guiTop + 29, guiLeft + xSize - 15, guiTop + 47, 0xFF20232B);
         if (nameField != null) nameField.drawTextBox();
     }
 
@@ -108,7 +107,7 @@ public class GuiAeSignalTransmitter extends FutaGuiContainer {
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         fontRendererObj
             .drawString(StatCollector.translateToLocal("futa_gtnh.aewireless.transmitter.title"), 16, 12, 0xE0E0E0);
-        fontRendererObj.drawString(StatCollector.translateToLocal("futa_gtnh.aewireless.name"), 16, 20, 0xD0D0D0);
+        fontRendererObj.drawString(StatCollector.translateToLocal("futa_gtnh.aewireless.name"), 16, 24, 0xD0D0D0);
         PacketAeTransmitterSnapshotText text = snapshotText();
         fontRendererObj.drawString(text.state, 16, 84, text.color);
         String list = truncate(text.list, 144);

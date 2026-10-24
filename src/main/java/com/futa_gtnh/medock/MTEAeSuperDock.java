@@ -15,6 +15,9 @@ import net.minecraftforge.fluids.Fluid;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 
+import cpw.mods.fml.common.registry.GameData;
+import cpw.mods.fml.common.registry.GameRegistry;
+
 import org.jetbrains.annotations.NotNull;
 
 import com.cleanroommc.modularui.api.drawable.IKey;
@@ -635,53 +638,113 @@ public class MTEAeSuperDock extends MTETieredMachineBlock
         panel.child(
             IKey.lang("futa_gtnh.medock.priority")
                 .asWidget()
-                .pos(100, 44)
-                .scale(0.8f));
-        StringSyncValue info = new StringSyncValue(this::infoLine);
+                .pos(100, 44));
+        StringSyncValue info = new StringSyncValue(this::encodeInfoLine);
         sync.syncValue("info", info);
         panel.child(
-            IKey.dynamic(info::getStringValue)
+            IKey.dynamic(() -> localizeInfoLine(info.getStringValue()))
                 .asWidget()
-                .pos(8, 60)
-                .scale(0.9f));
+                .pos(8, 60));
         panel.child(
             IKey.lang("futa_gtnh.medock.hint")
                 .asWidget()
                 .pos(8, 76)
-                .scale(0.7f));
+                .scale(0.8f));
         return panel;
     }
 
-    /** 界面信息行（服务端算，客户端显示）：容器类型 / 容量 / 当前内容。 */
-    private String infoLine() {
+    /** 信息行编码的字段分隔符（不可见控制字符，不撞数据）。 */
+    private static final char INFO_SEP = '\u001F';
+
+    /**
+     * 服务端：把信息行要显示的<b>原始数据</b>编码同步——本地化留给客户端，
+     * 专用服务端只加载 en_US，服务端拼好的句子同步给中文客户端就是英文。
+     * 格式：模式 + 变长字段（数量/容量/物品注册名/元数据/自定义名/流体名）。
+     */
+    private String encodeInfoLine() {
         ItemStack stack = containerStack();
-        if (stack == null) return StatCollector.translateToLocal("futa_gtnh.medock.empty");
+        if (stack == null) return "0";
         if (isChestItem(stack)) {
             ChestContentInventory view = new ChestContentInventory(stack);
             ItemStack prototype = view.prototype();
             long count = view.count();
-            if (prototype == null || count <= 0) {
-                return StatCollector.translateToLocalFormatted("futa_gtnh.medock.chest_empty", view.capacity());
-            }
-            return StatCollector.translateToLocalFormatted(
-                "futa_gtnh.medock.chest_info",
-                prototype.getDisplayName(),
-                count,
-                view.capacity());
+            if (prototype == null || count <= 0) return "1" + INFO_SEP + view.capacity();
+            String id = GameData.getItemRegistry()
+                .getNameForObject(prototype.getItem());
+            String customName = customDisplayNameOf(prototype);
+            return "2" + INFO_SEP + count + INFO_SEP + view.capacity() + INFO_SEP + id + INFO_SEP
+                + prototype.getItemDamage() + INFO_SEP + (customName == null ? "" : customName);
         }
         if (isTankItem(stack)) {
             TankContentInventory view = new TankContentInventory(stack);
             FluidStack contents = view.contents();
-            if (contents == null) {
-                return StatCollector.translateToLocalFormatted("futa_gtnh.medock.tank_empty", view.capacity());
-            }
-            return StatCollector.translateToLocalFormatted(
-                "futa_gtnh.medock.tank_info",
-                contents.getLocalizedName(),
-                contents.amount,
-                view.capacity());
+            if (contents == null) return "3" + INFO_SEP + view.capacity();
+            return "4" + INFO_SEP + contents.amount + INFO_SEP + view.capacity() + INFO_SEP
+                + FluidRegistry.getFluidName(contents);
         }
-        return StatCollector.translateToLocal("futa_gtnh.medock.empty");
+        return "0";
+    }
+
+    /** 物品 NBT 里玩家自定义的显示名——语言无关的字面量，可以原样跨端传；没有则 null。 */
+    private static String customDisplayNameOf(ItemStack stack) {
+        if (!stack.hasTagCompound()) return null;
+        String name = stack.stackTagCompound.getCompoundTag("display")
+            .getString("Name");
+        return name == null || name.isEmpty() ? null : name;
+    }
+
+    /** 客户端：解码 {@link #encodeInfoLine} 的原始数据并本地化成信息行文本。 */
+    private static String localizeInfoLine(String encoded) {
+        if (encoded == null || encoded.isEmpty()) return StatCollector.translateToLocal("futa_gtnh.medock.empty");
+        String[] parts = encoded.split(String.valueOf(INFO_SEP));
+        int mode;
+        long a, b;
+        try {
+            mode = Integer.parseInt(parts[0]);
+            switch (mode) {
+                case 1 -> {
+                    return StatCollector.translateToLocalFormatted(
+                        "futa_gtnh.medock.chest_empty",
+                        Long.parseLong(parts[1]));
+                }
+                case 2 -> {
+                    a = Long.parseLong(parts[1]);
+                    b = Long.parseLong(parts[2]);
+                    ItemStack prototype = decodePrototype(parts[3], Integer.parseInt(parts[4]), parts[5]);
+                    String displayName = prototype != null ? prototype.getDisplayName() : parts[3];
+                    return StatCollector.translateToLocalFormatted("futa_gtnh.medock.chest_info", displayName, a, b);
+                }
+                case 3 -> {
+                    return StatCollector.translateToLocalFormatted(
+                        "futa_gtnh.medock.tank_empty",
+                        Long.parseLong(parts[1]));
+                }
+                case 4 -> {
+                    a = Long.parseLong(parts[1]);
+                    b = Long.parseLong(parts[2]);
+                    Fluid fluid = FluidRegistry.getFluid(parts[3]);
+                    String name = fluid == null ? parts[3] : new FluidStack(fluid, 0).getLocalizedName();
+                    return StatCollector.translateToLocalFormatted("futa_gtnh.medock.tank_info", name, a, b);
+                }
+                default -> {
+                    return StatCollector.translateToLocal("futa_gtnh.medock.empty");
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // 编码对不上（跨版本等）：退回「空」，不崩界面
+            return StatCollector.translateToLocal("futa_gtnh.medock.empty");
+        }
+    }
+
+    /** 客户端：按注册名/元数据/自定义名重建物品原型（只用于取显示名；取不到返回 null）。 */
+    private static ItemStack decodePrototype(String registryName, int meta, String customName) {
+        int split = registryName.indexOf(':');
+        if (split <= 0) return null;
+        Item item = GameRegistry.findItem(registryName.substring(0, split), registryName.substring(split + 1));
+        if (item == null) return null;
+        ItemStack stack = new ItemStack(item, 1, meta);
+        if (customName != null && !customName.isEmpty()) stack.setStackDisplayName(customName);
+        return stack;
     }
 
     private com.cleanroommc.modularui.utils.item.IItemHandlerModifiable getInventoryHandlerForUi() {

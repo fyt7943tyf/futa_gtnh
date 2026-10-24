@@ -461,7 +461,7 @@ futa_gtnh.aewireless.sender=Transmitter
 futa_gtnh.aewireless.sender.none=(none selected)
 futa_gtnh.aewireless.type.item=Watch item
 futa_gtnh.aewireless.type.fluid=Watch fluid
-futa_gtnh.aewireless.monitor=Left: item (NEI drag) Right: fluid (click with filled container)
+futa_gtnh.aewireless.monitor=Left: item (NEI drag) · Right: fluid (container)
 futa_gtnh.aewireless.threshold=Threshold
 futa_gtnh.aewireless.condition.above=Trigger when stored >= threshold
 futa_gtnh.aewireless.condition.below=Trigger when stored <= threshold
