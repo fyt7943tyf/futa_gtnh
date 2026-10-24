@@ -53,6 +53,22 @@ public class PacketSetSwiftStep implements IMessage {
     private int foodRecoveryEnabled;
     private int recoverySpeed;
     private int botaniaAuraEnabled = GROWTH_AURA_UNCHANGED;
+    private int breedingAuraEnabled = GROWTH_AURA_UNCHANGED;
+    private int breedingAuraSpeed = GROWTH_AURA_UNCHANGED;
+    private int botaniaAuraSpeed = GROWTH_AURA_UNCHANGED;
+
+    public static PacketSetSwiftStep breedingAura(boolean enabled) {
+        PacketSetSwiftStep packet = new PacketSetSwiftStep(UNCHANGED, UNCHANGED);
+        packet.breedingAuraEnabled = enabled ? 1 : 0;
+        return packet;
+    }
+
+    public static PacketSetSwiftStep auraSpeed(boolean breeding, int speed) {
+        PacketSetSwiftStep packet = new PacketSetSwiftStep(UNCHANGED, UNCHANGED);
+        if (breeding) packet.breedingAuraSpeed = speed;
+        else packet.botaniaAuraSpeed = speed;
+        return packet;
+    }
 
     public static PacketSetSwiftStep botaniaAura(boolean enabled) {
         PacketSetSwiftStep packet = new PacketSetSwiftStep(UNCHANGED, UNCHANGED);
@@ -130,6 +146,9 @@ public class PacketSetSwiftStep implements IMessage {
         foodRecoveryEnabled = buf.readInt();
         recoverySpeed = buf.readInt();
         botaniaAuraEnabled = buf.readableBytes() >= 4 ? buf.readInt() : GROWTH_AURA_UNCHANGED;
+        breedingAuraEnabled = buf.readableBytes() >= 4 ? buf.readInt() : GROWTH_AURA_UNCHANGED;
+        breedingAuraSpeed = buf.readableBytes() >= 4 ? buf.readInt() : GROWTH_AURA_UNCHANGED;
+        botaniaAuraSpeed = buf.readableBytes() >= 4 ? buf.readInt() : GROWTH_AURA_UNCHANGED;
     }
 
     @Override
@@ -145,6 +164,9 @@ public class PacketSetSwiftStep implements IMessage {
         buf.writeInt(foodRecoveryEnabled);
         buf.writeInt(recoverySpeed);
         buf.writeInt(botaniaAuraEnabled);
+        buf.writeInt(breedingAuraEnabled);
+        buf.writeInt(breedingAuraSpeed);
+        buf.writeInt(botaniaAuraSpeed);
     }
 
     public static class Handler implements IMessageHandler<PacketSetSwiftStep, IMessage> {
@@ -189,6 +211,15 @@ public class PacketSetSwiftStep implements IMessage {
             }
             if (message.botaniaAuraEnabled != GROWTH_AURA_UNCHANGED) {
                 ItemSwiftStep.setBotaniaAuraEnabled(held, message.botaniaAuraEnabled == 1);
+            }
+            if (message.breedingAuraEnabled != GROWTH_AURA_UNCHANGED) {
+                ItemSwiftStep.setBreedingAuraEnabled(held, message.breedingAuraEnabled == 1);
+            }
+            if (message.breedingAuraSpeed != GROWTH_AURA_UNCHANGED) {
+                ItemSwiftStep.setIndependentAuraSpeed(held, true, message.breedingAuraSpeed);
+            }
+            if (message.botaniaAuraSpeed != GROWTH_AURA_UNCHANGED) {
+                ItemSwiftStep.setIndependentAuraSpeed(held, false, message.botaniaAuraSpeed);
             }
             return null;
         }

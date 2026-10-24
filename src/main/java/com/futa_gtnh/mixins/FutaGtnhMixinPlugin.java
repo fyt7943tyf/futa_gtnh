@@ -160,6 +160,14 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if ("com.futa_gtnh.mixins.MixinAgricarnation".equals(mixinClassName)) {
+            return Launch.classLoader != null && Launch.classLoader
+                .getResource("vazkii/botania/common/block/subtile/functional/SubTileAgricarnation.class") != null;
+        }
+        if ("com.futa_gtnh.mixins.MixinCosmeticArmorInventoryClient".equals(mixinClassName)) {
+            return Launch.classLoader != null
+                && Launch.classLoader.getResource("lain/mods/cos/client/InventoryManagerClient.class") != null;
+        }
         // GregTech is required by this mod; this hook must not depend on optional TinkersConstruct.
         if ("com.futa_gtnh.mixins.MixinProspectingPacket".equals(mixinClassName)) return true;
         if (mixinClassName.startsWith("com.futa_gtnh.mixins.MixinShimmerGT")) return true;

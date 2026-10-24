@@ -28,7 +28,37 @@ import cpw.mods.fml.relauncher.Side;
  */
 public class ModEventHandler {
 
+    @SubscribeEvent(priority = cpw.mods.fml.common.eventhandler.EventPriority.LOWEST)
+    public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.player instanceof EntityPlayerMP && cpw.mods.fml.common.Loader.isModLoaded("cosmeticarmorreworked")) {
+            EntityPlayerMP player = (EntityPlayerMP) event.player;
+            com.futa_gtnh.network.NetworkHandler.INSTANCE
+                .sendTo(new com.futa_gtnh.network.PacketCosmeticArmorIdentity(player.getUniqueID()), player);
+        }
+    }
+
+    @SubscribeEvent
+    public void onWorldTick(TickEvent.WorldTickEvent event) {
+        if (event.side == Side.SERVER && event.phase == TickEvent.Phase.END) SwiftStepGrowthAura.tickWorld(event.world);
+    }
+
+    @SubscribeEvent
+    public void onBlockPlaced(net.minecraftforge.event.world.BlockEvent.PlaceEvent event) {
+        SwiftStepGrowthAura.changed(event.world, event.x, event.y, event.z);
+    }
+
+    @SubscribeEvent
+    public void onBlockBroken(net.minecraftforge.event.world.BlockEvent.BreakEvent event) {
+        SwiftStepGrowthAura.changed(event.world, event.x, event.y, event.z);
+    }
+
+    @SubscribeEvent
+    public void onWorldUnload(net.minecraftforge.event.world.WorldEvent.Unload event) {
+        if (!event.world.isRemote) SwiftStepGrowthAura.forget(event.world);
+    }
+
     public static void register() {
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(new ModEventHandler());
         FMLCommonHandler.instance()
             .bus()
             .register(new ModEventHandler());
@@ -66,6 +96,7 @@ public class ModEventHandler {
     public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.player instanceof EntityPlayerMP) {
             EntityPlayerMP player = (EntityPlayerMP) event.player;
+            SwiftStepGrowthAura.forget(player);
             StorageActionHandler.forget(player);
             // 寻物任务和结果也一起清掉：任务里存着 World 引用，
             // 玩家走了还留着的话，那个 World 就没法被回收了

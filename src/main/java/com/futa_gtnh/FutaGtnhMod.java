@@ -196,6 +196,7 @@ public class FutaGtnhMod {
     /** 服务端停止前落盘。此时各维度还没被卸载，写文件是安全的。 */
     @Mod.EventHandler
     public void serverStopping(FMLServerStoppingEvent event) {
+        com.futa_gtnh.common.SwiftStepGrowthAura.clear();
         com.futa_gtnh.network.ServerActions.clear();
         SharedStorageManager.onServerStopping();
         com.futa_gtnh.lootassist.LootassistManager.onServerStopping();

@@ -196,6 +196,9 @@ public class Config {
      */
     public static double swiftStepMaxMultiplier = 16.0D;
 
+    /** Soft work-time limit per dimension/tick; the hard operation cap remains active at zero. */
+    public static int swiftStepAuraBudgetMillis = 3;
+
     // ------------------------------------------------------------------
     // 寻物魔杖
     // ------------------------------------------------------------------
@@ -977,6 +980,13 @@ public class Config {
             enableSwiftStep,
             "是否注册迅步饰品（需要装了 Baubles；没装的话这一项无效）。");
 
+        swiftStepAuraBudgetMillis = configuration.getInt(
+            "swiftStepAuraBudgetMillis",
+            "swiftStep",
+            swiftStepAuraBudgetMillis,
+            0,
+            20,
+            "每维度每 tick 的加速工作软预算（毫秒）；0 仅禁用时间限制，仍保留次数上限。");
         swiftStepMaxMultiplier = configuration.getFloat(
             "swiftStepMaxMultiplier",
             Configuration.CATEGORY_GENERAL,

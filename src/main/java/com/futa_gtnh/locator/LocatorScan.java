@@ -363,6 +363,7 @@ public final class LocatorScan {
      *
      * <p>
      * 先试精确相等 —— 这条对绝大多数方块就是全部逻辑。
+     * 箱子的世界元数据保存朝向，按掉落物变体归一后比较，不受朝向和箱内物品影响。
      *
      * <p>
      * 对 GT 的矿石再补一条「同一种矿」的比较：GT 用元数据里的一个标志位区分
@@ -372,6 +373,9 @@ public final class LocatorScan {
      */
     private boolean metaMatches(int worldMeta) {
         if (worldMeta == meta) return true;
+        // Chest metadata stores its facing (2-5), while the selectable item has metadata 0.
+        // Compare the dropped variant after block identity is checked; contents do not matter.
+        if (block instanceof BlockChest) return block.damageDropped(worldMeta) == meta;
         if (!gtOre) return false;
 
         try {

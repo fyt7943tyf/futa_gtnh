@@ -6,8 +6,8 @@
 	"required": false,
 	"mixins": [
 		"MixinProspectingPacket",
-        "MixinShimmerGTShapedRecipe",
-        "MixinShimmerGTShapelessRecipe",
+		"MixinShimmerGTShapedRecipe",
+		"MixinShimmerGTShapelessRecipe",
 		"MixinBlockReed",
 		"MixinEntityItem",
 		"MixinContainer",
@@ -21,8 +21,14 @@
 		"lootgames.MixinGameOfLight",
 		"lootgames.MixinGameSudoku",
 		"lootgames.InvokerGameMineSweeper",
-		"lootgames.InvokerGOLStage"
+		"lootgames.InvokerGOLStage",
+		"MixinAgricarnation"
 	],
-	"client": ["MixinEntityRenderer", "MixinEntityPlayerSP", "MixinAutoCraftingManager"],
+	"client": [
+		"MixinEntityRenderer",
+		"MixinEntityPlayerSP",
+		"MixinAutoCraftingManager",
+		"MixinCosmeticArmorInventoryClient"
+	],
 	"server": []
 }

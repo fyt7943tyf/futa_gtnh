@@ -62,6 +62,9 @@ public class ItemSwiftStep extends Item implements IBauble {
     private static final String TAG_GROWTH_AURA_RADIUS = "futa_gtnh.swift_step.growth_aura_radius";
     private static final String TAG_GROWTH_AURA_SPEED = "futa_gtnh.swift_step.growth_aura_speed";
     private static final String TAG_ANIMAL_AURA_ENABLED = "futa_gtnh.swift_step.animal_aura_enabled";
+    private static final String TAG_BREEDING_AURA_ENABLED = "futa_gtnh.swift_step.breeding_aura_enabled";
+    private static final String TAG_BREEDING_AURA_SPEED = "futa_gtnh.swift_step.breeding_aura_speed";
+    private static final String TAG_BOTANIA_AURA_SPEED = "futa_gtnh.swift_step.botania_aura_speed";
     private static final String TAG_BOTANIA_AURA_ENABLED = "futa_gtnh.swift_step.botania_aura_enabled";
     private static final String TAG_HEALTH_RECOVERY_ENABLED = "futa_gtnh.swift_step.health_recovery_enabled";
     private static final String TAG_FOOD_RECOVERY_ENABLED = "futa_gtnh.swift_step.food_recovery_enabled";
@@ -334,6 +337,46 @@ public class ItemSwiftStep extends Item implements IBauble {
     }
 
     /** 植物魔法加速独立开关；旧迅步没有此字段时保持关闭。 */
+    public static boolean isBreedingAuraEnabled(ItemStack stack) {
+        return stack != null && stack.getItem() instanceof ItemSwiftStep
+            && stack.hasTagCompound()
+            && stack.getTagCompound()
+                .getBoolean(TAG_BREEDING_AURA_ENABLED);
+    }
+
+    public static void setBreedingAuraEnabled(ItemStack stack, boolean enabled) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (!stack.hasTagCompound()) stack.setTagCompound(new NBTTagCompound());
+        stack.getTagCompound()
+            .setBoolean(TAG_BREEDING_AURA_ENABLED, enabled);
+    }
+
+    public static int getBreedingAuraSpeed(ItemStack stack) {
+        return independentAuraSpeed(stack, TAG_BREEDING_AURA_SPEED, Math.min(20, getGrowthAuraSpeed(stack)));
+    }
+
+    public static int getBotaniaAuraSpeed(ItemStack stack) {
+        return independentAuraSpeed(stack, TAG_BOTANIA_AURA_SPEED, getGrowthAuraSpeed(stack));
+    }
+
+    private static int independentAuraSpeed(ItemStack stack, String tag, int fallback) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)
+            || !stack.hasTagCompound()
+            || !stack.getTagCompound()
+                .hasKey(tag))
+            return fallback;
+        return clampGrowthAuraSpeed(
+            stack.getTagCompound()
+                .getInteger(tag));
+    }
+
+    public static void setIndependentAuraSpeed(ItemStack stack, boolean breeding, int speed) {
+        if (stack == null || !(stack.getItem() instanceof ItemSwiftStep)) return;
+        if (!stack.hasTagCompound()) stack.setTagCompound(new NBTTagCompound());
+        stack.getTagCompound()
+            .setInteger(breeding ? TAG_BREEDING_AURA_SPEED : TAG_BOTANIA_AURA_SPEED, clampGrowthAuraSpeed(speed));
+    }
+
     public static boolean isBotaniaAuraEnabled(ItemStack stack) {
         return stack != null && stack.getItem() instanceof ItemSwiftStep
             && stack.hasTagCompound()
@@ -862,7 +905,7 @@ public class ItemSwiftStep extends Item implements IBauble {
                 "item.futa_gtnh.swift_step.tooltip.botania_aura",
                 StatCollector.translateToLocal(
                     isBotaniaAuraEnabled(stack) ? "futa_gtnh.swift_step.gui.on" : "futa_gtnh.swift_step.gui.off"),
-                fixed(1 + getGrowthAuraSpeed(stack) / 100.0F, 2)));
+                fixed(1 + getBotaniaAuraSpeed(stack) / 100.0F, 2)));
         tooltip.add(
             EnumChatFormatting.GRAY + StatCollector.translateToLocalFormatted(
                 "item.futa_gtnh.swift_step.tooltip.health_recovery",

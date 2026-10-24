@@ -25,6 +25,8 @@ public final class NetworkHandler {
     public static final int CHUNK_SIZE = 28000;
 
     public static void init() {
+        INSTANCE
+            .registerMessage(PacketSwiftStepAuraStatus.Handler.class, PacketSwiftStepAuraStatus.class, 38, Side.CLIENT);
         // 服务端 -> 客户端
         INSTANCE.registerMessage(PacketStorageSync.Handler.class, PacketStorageSync.class, 0, Side.CLIENT);
         INSTANCE.registerMessage(PacketStorageDelta.Handler.class, PacketStorageDelta.class, 1, Side.CLIENT);
@@ -90,16 +92,23 @@ public final class NetworkHandler {
         // 存储总线：放置/加面请求。客户端 onItemUseFirst 返回 true 时原生 C08 不会发送，
         // 所以用独立包把这次右键带到服务端。
         INSTANCE.registerMessage(PacketStorageBusUse.Handler.class, PacketStorageBusUse.class, 36, Side.SERVER);
+        // Offline-mode servers may use a different own-player UUID from the launcher's account.
+        INSTANCE.registerMessage(
+            PacketCosmeticArmorIdentity.Handler.class,
+            PacketCosmeticArmorIdentity.class,
+            37,
+            Side.CLIENT);
         // IC2 反应堆布局工具：Shift 右键记录（C2S）/ 浏览器动作（C2S）/
         // 布局列表（S2C，分片）/ 单条预览（S2C）。
-        INSTANCE.registerMessage(PacketReactorToolUse.Handler.class, PacketReactorToolUse.class, 37, Side.SERVER);
+        // 包号 39-42：37 已被上面的离线服外观甲身份同步占用、38 是迅步光环（文件开头），顺延取空闲段。
+        INSTANCE.registerMessage(PacketReactorToolUse.Handler.class, PacketReactorToolUse.class, 39, Side.SERVER);
         INSTANCE
-            .registerMessage(PacketReactorLayoutAction.Handler.class, PacketReactorLayoutAction.class, 38, Side.SERVER);
-        INSTANCE.registerMessage(PacketReactorLayoutSync.Handler.class, PacketReactorLayoutSync.class, 39, Side.CLIENT);
+            .registerMessage(PacketReactorLayoutAction.Handler.class, PacketReactorLayoutAction.class, 40, Side.SERVER);
+        INSTANCE.registerMessage(PacketReactorLayoutSync.Handler.class, PacketReactorLayoutSync.class, 41, Side.CLIENT);
         INSTANCE.registerMessage(
             PacketReactorLayoutPreview.Handler.class,
             PacketReactorLayoutPreview.class,
-            40,
+            42,
             Side.CLIENT);
     }
 }
