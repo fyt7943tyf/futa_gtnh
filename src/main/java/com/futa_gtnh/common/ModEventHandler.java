@@ -85,6 +85,8 @@ public class ModEventHandler {
         com.futa_gtnh.rts.server.RtsHistoryManager.onServerTick();
         // 小游戏助手的渐进搜索（没装 lootgames / 没有任务时一次布尔判断的开销）
         com.futa_gtnh.lootassist.LootassistManager.onServerTick();
+        // 反应堆布局档案的定期落盘（同上，空载一次布尔判断的开销）
+        com.futa_gtnh.reactor.ReactorLayoutManager.onServerTick();
         // AE2 共享背包元件的增量推送（没装 AE2 时钩子为 null，一次判空的开销）
         com.futa_gtnh.ae2.Ae2Compat.onServerTickEnd();
     }
@@ -108,6 +110,8 @@ public class ModEventHandler {
             com.futa_gtnh.rts.server.RtsHistoryManager.forget(player.getUniqueID());
             // 助手的 viewer 表和搜索进度接收者
             com.futa_gtnh.lootassist.LootassistManager.forget(player.getUniqueID());
+            // 反应堆布局浏览器的 viewer 表
+            com.futa_gtnh.reactor.ReactorLayoutManager.forget(player.getUniqueID());
         }
     }
 

@@ -170,6 +170,21 @@ public class ClientProxy extends CommonProxy {
     }
 
     /**
+     * 反应堆布局档案浏览器。
+     *
+     * <p>
+     * 覆盖 {@link CommonProxy#openReactorLayoutGui}。纯客户端 GuiScreen：
+     * 打开时会自己向服务端要布局列表；{@code hasTarget} 表示这次打开带着
+     * 「右键点中的那台反应堆」作为部署目标（部署 / 建外壳按钮可用）。
+     */
+    @Override
+    public void openReactorLayoutGui(boolean hasTarget, int x, int y, int z) {
+        if (!Config.enableReactorTool) return;
+        Minecraft.getMinecraft()
+            .displayGuiScreen(new com.futa_gtnh.client.GuiReactorLayoutBrowser(hasTarget, x, y, z));
+    }
+
+    /**
      * 清掉追踪：本地状态 + 通知服务端。
      *
      * <p>

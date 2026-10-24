@@ -57,7 +57,10 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // 之后再读更稳妥。都是软依赖，缺席时只是不注册/不可用。
     // AE2 是矿典输出过滤的硬依赖；排在它之后也保证共享存储元件注册时
     // cell registry 已经就绪（见 com.futa_gtnh.ae2 包）。
-    dependencies = "required-after:gregtech;required-after:modularui2;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure;required-after:appliedenergistics2")
+    // after:IC2 是软依赖排序：反应堆布局工具要读 IC2 反应堆的方块实体，
+    // 排在它之后更稳妥；没装 IC2 时这条排序没有副作用（功能按缺席处理）。
+    // 大小写照抄 IC2 的 modid（GT5U 的 @Mod 里同样是 required-after:IC2）。
+    dependencies = "required-after:gregtech;required-after:modularui2;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure;after:IC2;required-after:appliedenergistics2")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";
@@ -96,6 +99,9 @@ public class FutaGtnhMod {
 
     /** 太阳能除钙剂。 */
     public static com.futa_gtnh.item.ItemSolarDescaler solarDescaler;
+
+    /** IC2 反应堆布局工具。没装 IC2 或配置关闭时为 null。 */
+    public static com.futa_gtnh.item.ItemReactorLayoutTool reactorLayoutTool;
 
     /**
      * AE2 共享背包存储元件（物品通道）。没装 AE2 或配置关闭时为 null。
@@ -158,6 +164,8 @@ public class FutaGtnhMod {
         SharedStorageManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
         // 小游戏助手的共享列表：同一个存档目录、同一套加载时机（见 lootassist 包）
         com.futa_gtnh.lootassist.LootassistManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
+        // 反应堆布局档案：同样是全服共享、跟存档走（见 reactor 包）
+        com.futa_gtnh.reactor.ReactorLayoutManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
     }
 
     /**
@@ -192,6 +200,7 @@ public class FutaGtnhMod {
         com.futa_gtnh.network.ServerActions.clear();
         SharedStorageManager.onServerStopping();
         com.futa_gtnh.lootassist.LootassistManager.onServerStopping();
+        com.futa_gtnh.reactor.ReactorLayoutManager.onServerStopping();
         // AE2 共享背包元件的运行时状态（网络注册表/镜像缓存）清空；没装 AE2 时是空操作
         com.futa_gtnh.ae2.Ae2Compat.onServerStopping();
     }

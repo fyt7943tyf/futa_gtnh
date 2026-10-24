@@ -98,5 +98,17 @@ public final class NetworkHandler {
             PacketCosmeticArmorIdentity.class,
             37,
             Side.CLIENT);
+        // IC2 反应堆布局工具：Shift 右键记录（C2S）/ 浏览器动作（C2S）/
+        // 布局列表（S2C，分片）/ 单条预览（S2C）。
+        // 包号 39-42：37 已被上面的离线服外观甲身份同步占用、38 是迅步光环（文件开头），顺延取空闲段。
+        INSTANCE.registerMessage(PacketReactorToolUse.Handler.class, PacketReactorToolUse.class, 39, Side.SERVER);
+        INSTANCE
+            .registerMessage(PacketReactorLayoutAction.Handler.class, PacketReactorLayoutAction.class, 40, Side.SERVER);
+        INSTANCE.registerMessage(PacketReactorLayoutSync.Handler.class, PacketReactorLayoutSync.class, 41, Side.CLIENT);
+        INSTANCE.registerMessage(
+            PacketReactorLayoutPreview.Handler.class,
+            PacketReactorLayoutPreview.class,
+            42,
+            Side.CLIENT);
     }
 }
