@@ -22,6 +22,7 @@ import com.futa_gtnh.shared.ItemKey;
  * {@link IInventory} / {@link IFluidHandler}，每次写入都按容器实际接受的量计数，
  * 每次抽取都以容器实际减少的量计数。区别在于它是<b>按需</b>调用的（共享终端取东西、
  * AE 网络注入、IO 节点搬运），不是每 tick 定时扫描。
+ * 抽屉的 IInventory 槽位是会自动补充的虚拟窗口，数量核对必须改用其物理存量。
  *
  * <p>
  * GT 的机器 / 输入总线 / 输入仓对 {@code getAccessibleSlotsFromSide} 常年返回空数组，
@@ -29,6 +30,9 @@ import com.futa_gtnh.shared.ItemKey;
  * {@code TileEntityIoNode} 一样对 GT 侧跳过槽位表闸门。
  */
 final class ExternalInventoryOps {
+
+    /** Bound live-world work even for very large drawers/AE requests; callers may retry the remainder. */
+    private static final int MAX_DRAWER_PASSES = 512;
 
     private ExternalInventoryOps() {}
 
@@ -85,6 +89,19 @@ final class ExternalInventoryOps {
      */
     static long insertItems(IInventory inventory, ForgeDirection side, ItemKey key, long amount) {
         if (inventory == null || key == null || amount <= 0L) return 0L;
+        boolean drawers = DrawerStorageCompat.supports(inventory);
+        long remaining = amount;
+        int passes = drawers ? MAX_DRAWER_PASSES : 1;
+        do {
+            long moved = insertItemsPass(inventory, side, key, remaining);
+            remaining -= moved;
+            // Drawer input windows are replenished after each write even while real capacity remains.
+            if (!drawers || moved <= 0L) break;
+        } while (remaining > 0L && --passes > 0);
+        return amount - remaining;
+    }
+
+    private static long insertItemsPass(IInventory inventory, ForgeDirection side, ItemKey key, long amount) {
 
         int inventoryLimit = 64;
         try {
@@ -126,11 +143,12 @@ final class ExternalInventoryOps {
                     if (room <= 0) continue;
                     int moved = (int) Math.min((long) room, remaining);
                     int beforeSize = existing.stackSize;
+                    long physicalBefore = DrawerStorageCompat.itemAmount(inventory, key);
                     ItemStack updated = existing.copy();
                     updated.stackSize += moved;
                     if (!writeSlot(inventory, slot, updated)) {
                         // 写调用抛异常时也可能已经写进去了：按实际变化记账
-                        int actual = increaseInSlot(inventory, slot, beforeSize, key, moved);
+                        int actual = increaseInSlot(inventory, slot, beforeSize, physicalBefore, key, moved);
                         remaining -= actual;
                         if (actual <= 0) {
                             if (remaining < amount) markDirty(inventory);
@@ -139,7 +157,7 @@ final class ExternalInventoryOps {
                         continue;
                     }
                     // 有些容器会收下调用但不改内容；按容器的实际变化记账，绝不凭空算收下
-                    int actual = increaseInSlot(inventory, slot, beforeSize, key, moved);
+                    int actual = increaseInSlot(inventory, slot, beforeSize, physicalBefore, key, moved);
                     if (actual <= 0) {
                         if (remaining < amount) markDirty(inventory);
                         return amount - remaining;
@@ -150,8 +168,9 @@ final class ExternalInventoryOps {
                     ItemStack prototype = key.prototype();
                     if (!canInsert(inventory, slot, prototype, side)) continue;
                     int moved = (int) Math.min((long) maxStack, remaining);
+                    long physicalBefore = DrawerStorageCompat.itemAmount(inventory, key);
                     if (!writeSlot(inventory, slot, key.prototype(moved))) {
-                        int actual = amountInSlot(inventory, slot, key, moved);
+                        int actual = increaseInSlot(inventory, slot, 0, physicalBefore, key, moved);
                         remaining -= actual;
                         if (actual <= 0) {
                             if (remaining < amount) markDirty(inventory);
@@ -159,7 +178,7 @@ final class ExternalInventoryOps {
                         }
                         continue;
                     }
-                    int actual = amountInSlot(inventory, slot, key, moved);
+                    int actual = increaseInSlot(inventory, slot, 0, physicalBefore, key, moved);
                     if (actual <= 0) {
                         if (remaining < amount) markDirty(inventory);
                         return amount - remaining;
@@ -181,6 +200,19 @@ final class ExternalInventoryOps {
      */
     static long extractItems(IInventory inventory, ForgeDirection side, ItemKey key, long amount) {
         if (inventory == null || key == null || amount <= 0L) return 0L;
+        boolean drawers = DrawerStorageCompat.supports(inventory);
+        long remaining = amount;
+        int passes = drawers ? MAX_DRAWER_PASSES : 1;
+        do {
+            long moved = extractItemsPass(inventory, side, key, remaining);
+            remaining -= moved;
+            // A drawer may return another full output stack without changing the window's stackSize.
+            if (!drawers || moved <= 0L) break;
+        } while (remaining > 0L && --passes > 0);
+        return amount - remaining;
+    }
+
+    private static long extractItemsPass(IInventory inventory, ForgeDirection side, ItemKey key, long amount) {
 
         long remaining = amount;
         int size;
@@ -202,6 +234,7 @@ final class ExternalInventoryOps {
             if (!canExtract(inventory, slot, existing, side)) continue;
 
             int sourceBefore = existing.stackSize;
+            long physicalBefore = DrawerStorageCompat.itemAmount(inventory, key);
             int want = (int) Math.min((long) sourceBefore, remaining);
             ItemStack removed;
             try {
@@ -215,7 +248,11 @@ final class ExternalInventoryOps {
                 // 容器没有按契约返回所请求的那一种物品。只有源格真的减少了才把它塞回去，
                 // 否则会把「返回了一个副本但源格没动」也补一遍，变成刷物品。
                 int afterWrong = amountInSlotRaw(inventory, slot);
-                int removedFromSlot = Math.max(0, sourceBefore - afterWrong);
+                int removedFromSlot = physicalBefore >= 0L
+                    ? (int) Math.min(
+                        Integer.MAX_VALUE,
+                        Math.max(0L, physicalBefore - DrawerStorageCompat.itemAmount(inventory, key)))
+                    : Math.max(0, sourceBefore - afterWrong);
                 if (removedFromSlot > 0) {
                     ItemStack back = removed.copy();
                     back.stackSize = Math.min(removedFromSlot, removed.stackSize);
@@ -225,10 +262,12 @@ final class ExternalInventoryOps {
             }
 
             // 再核对源格真的少了多少：有的容器会返回一个栈却不动槽位。
-            // 只按「源格实际减少量」记账 —— 这是唯一不会凭空造/吞物品的口径。
+            // 普通容器按源格减少量记账；抽屉按物理存量减少量记账，窗口可能仍显示 64。
             int afterSize = amountInSlotRaw(inventory, slot);
-            int sourceDelta = Math.max(0, sourceBefore - afterSize);
-            int taken = Math.min(Math.min(removed.stackSize, sourceDelta), want);
+            long sourceDelta = physicalBefore >= 0L
+                ? Math.max(0L, physicalBefore - DrawerStorageCompat.itemAmount(inventory, key))
+                : Math.max(0, sourceBefore - afterSize);
+            int taken = (int) Math.min(Math.min(removed.stackSize, sourceDelta), want);
             if (taken <= 0) continue;
             remaining -= taken;
             markDirty(inventory);
@@ -246,23 +285,17 @@ final class ExternalInventoryOps {
     }
 
     /** @return 写入后这一格相对 {@code beforeSize} 实际增加了多少个目标物品（0..expected） */
-    private static int increaseInSlot(IInventory inventory, int slot, int beforeSize, ItemKey key, int expected) {
+    private static int increaseInSlot(IInventory inventory, int slot, int beforeSize, long physicalBefore, ItemKey key,
+        int expected) {
+        if (physicalBefore >= 0L) {
+            long after = DrawerStorageCompat.itemAmount(inventory, key);
+            return (int) Math.max(0L, Math.min(expected, after - physicalBefore));
+        }
         try {
             ItemStack after = inventory.getStackInSlot(slot);
             if (after == null || after.getItem() == null || !key.equals(ItemKey.of(after))) return 0;
             int increase = after.stackSize - beforeSize;
             return Math.max(0, Math.min(expected, increase));
-        } catch (Throwable t) {
-            return 0;
-        }
-    }
-
-    /** @return 这一格现在是不是目标物品、最多算 {@code expected} 个 */
-    private static int amountInSlot(IInventory inventory, int slot, ItemKey key, int expected) {
-        try {
-            ItemStack after = inventory.getStackInSlot(slot);
-            if (after == null || after.getItem() == null || !key.equals(ItemKey.of(after))) return 0;
-            return Math.max(0, Math.min(expected, after.stackSize));
         } catch (Throwable t) {
             return 0;
         }

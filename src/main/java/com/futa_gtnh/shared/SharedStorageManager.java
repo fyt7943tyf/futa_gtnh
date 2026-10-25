@@ -37,6 +37,7 @@ public final class SharedStorageManager {
     private static SharedStorage storage = new SharedStorage();
     private static File worldDirectory;
     private static boolean loaded;
+    private static boolean savingBlocked;
 
     /** Published on startup; read API calls must use this server thread. */
     private static volatile Thread readApiThread;
@@ -68,6 +69,10 @@ public final class SharedStorageManager {
 
     public static boolean isLoaded() {
         return loaded;
+    }
+
+    public static boolean isSavingBlocked() {
+        return savingBlocked;
     }
 
     /** Internal implementation for SharedStorageReadApi; does not copy the warehouse. */
@@ -124,6 +129,7 @@ public final class SharedStorageManager {
         readApiGeneration = UUID.randomUUID()
             .toString();
         loaded = false;
+        savingBlocked = false;
 
         File dir = resolveWorldDirectory(server);
         if (dir == null) {
@@ -137,8 +143,10 @@ public final class SharedStorageManager {
             return;
         }
 
-        worldDirectory = dir;
+        // A failed load must never leave the previous pool writable at the new world's path.
+        worldDirectory = null;
         SharedStorage fresh = SharedStorageFile.load(dir);
+        worldDirectory = dir;
         fresh.adoptListenersFrom(storage);
         storage = fresh;
         loaded = true;
@@ -153,7 +161,7 @@ public final class SharedStorageManager {
                 .getPath());
     }
 
-    /** 服务端停止时调用：无条件落盘。 */
+    /** 服务端停止时调用：保存尚未落盘的修改。 */
     public static void onServerStopping() {
         try {
             saveNow();
@@ -183,15 +191,18 @@ public final class SharedStorageManager {
     }
 
     /** 立即落盘（若内容有改动）。 */
-    public static void saveNow() {
-        if (worldDirectory == null || !storage.isDirty()) return;
+    public static synchronized void saveNow() {
+        SharedStorage current = storage;
+        File directory = worldDirectory;
+        if (savingBlocked || directory == null || !current.isDirty()) return;
+        long savedRevision = current.getPersistenceRevision();
         long start = System.currentTimeMillis();
-        if (SharedStorageFile.save(worldDirectory, storage)) {
-            storage.markClean();
+        if (SharedStorageFile.save(directory, current)) {
+            current.markCleanIfUnchanged(savedRevision);
             FutaGtnhMod.LOG.info(
                 "共享存储已保存（{} 种物品 / {} 种流体，耗时 {} ms）",
-                storage.itemTypeCount(),
-                storage.fluidTypeCount(),
+                current.itemTypeCount(),
+                current.fluidTypeCount(),
                 System.currentTimeMillis() - start);
         }
     }
@@ -405,7 +416,15 @@ public final class SharedStorageManager {
     public static int reloadFromDisk() {
         if (!loaded || worldDirectory == null) return -1;
 
-        SharedStorage fresh = SharedStorageFile.load(worldDirectory);
+        SharedStorage fresh;
+        try {
+            fresh = SharedStorageFile.load(worldDirectory);
+        } catch (IllegalStateException error) {
+            savingBlocked = true;
+            FutaGtnhMod.LOG.error("共享存储：重新读取失败，保留当前内存库存并暂停保存；修复原文件后重新 reload 可恢复保存", error);
+            return -1;
+        }
+        savingBlocked = false;
         fresh.adoptListenersFrom(storage);
         storage = fresh;
         readApiGeneration = UUID.randomUUID()

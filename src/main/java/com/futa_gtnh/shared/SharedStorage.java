@@ -88,8 +88,13 @@ public class SharedStorage {
      * 比逐个比较条目便宜得多。
      */
     private int revision;
+    /** Content-only watermarks keep fluid transfers from rebuilding item views, and vice versa. */
+    private int itemRevision;
+    private int fluidRevision;
 
     private boolean dirty;
+    /** Only durable pool/settings/escrow mutations advance this watermark; external bus changes do not. */
+    private long persistenceRevision;
 
     /**
      * 内容变更监听器（AE2 桥用，见 {@link SharedStorageListener}）。
@@ -283,6 +288,7 @@ public class SharedStorage {
         // 用饱和加法：合计值本身溢出变负的话，/futashared info 会打印出负数，
         // 之后每一次取出还会让这个负数继续漂移
         itemTotal = saturatingAdd(itemTotal, accepted);
+        itemRevision++;
         markChanged();
         if (accepted > 0L) notifyItemChanged(key);
         return accepted;
@@ -335,6 +341,7 @@ public class SharedStorage {
             items.put(key, remaining);
         }
         itemTotal = Math.max(0L, itemTotal - taken);
+        itemRevision++;
         markChanged();
         if (taken > 0L) notifyItemChanged(key);
         return taken;
@@ -449,6 +456,7 @@ public class SharedStorage {
         long internal = existing == null ? 0L : existing.longValue();
         fluids.put(key, saturatingAdd(internal, accepted));
         fluidTotal = saturatingAdd(fluidTotal, accepted);
+        fluidRevision++;
         markChanged();
         if (accepted > 0L) notifyFluidChanged(key);
         return accepted;
@@ -489,6 +497,7 @@ public class SharedStorage {
             fluids.put(key, remaining);
         }
         fluidTotal = Math.max(0L, fluidTotal - taken);
+        fluidRevision++;
         markChanged();
         if (taken > 0L) notifyFluidChanged(key);
         return taken;
@@ -552,7 +561,7 @@ public class SharedStorage {
      * @return 只读列表；调用方不得修改列表或其中的条目
      */
     public synchronized List<Map.Entry<ItemKey, Long>> snapshotItemsCached() {
-        int currentRevision = getRevision();
+        int currentRevision = getItemRevision();
         if (itemSnapshotCache == null || itemSnapshotRevision != currentRevision) {
             itemSnapshotCache = snapshotItems();
             // 先记版本再构建：构建期间总线可能又变了，记旧版本只会让下一次多重建一次，
@@ -564,7 +573,7 @@ public class SharedStorage {
 
     /** 同 {@link #snapshotItemsCached()}，流体侧。 */
     public synchronized List<Map.Entry<FluidKey, Long>> snapshotFluidsCached() {
-        int currentRevision = getRevision();
+        int currentRevision = getFluidRevision();
         if (fluidSnapshotCache == null || fluidSnapshotRevision != currentRevision) {
             fluidSnapshotCache = snapshotFluids();
             fluidSnapshotRevision = currentRevision;
@@ -648,6 +657,14 @@ public class SharedStorage {
         return revision + StorageBusRegistry.getRevision();
     }
 
+    public synchronized int getItemRevision() {
+        return itemRevision + StorageBusRegistry.getItemRevision();
+    }
+
+    public synchronized int getFluidRevision() {
+        return fluidRevision + StorageBusRegistry.getFluidRevision();
+    }
+
     /**
      * 存储总线报告「可读库存变了」。
      *
@@ -686,6 +703,8 @@ public class SharedStorage {
         unreadableFluids.clear();
         itemTotal = 0L;
         fluidTotal = 0L;
+        itemRevision++;
+        fluidRevision++;
         markChanged();
         // 清空是结构性变化，通知监听器走全量重同步
         notifyStorageReplaced();
@@ -703,12 +722,22 @@ public class SharedStorage {
         dirty = false;
     }
 
+    synchronized long getPersistenceRevision() {
+        return persistenceRevision;
+    }
+
+    synchronized void markCleanIfUnchanged(long savedRevision) {
+        if (persistenceRevision == savedRevision) dirty = false;
+    }
+
     public synchronized void markDirty() {
+        persistenceRevision++;
         dirty = true;
     }
 
     private void markChanged() {
         revision++;
+        persistenceRevision++;
         dirty = true;
     }
 
@@ -877,6 +906,7 @@ public class SharedStorage {
         long taken = extractItem(key, amount);
         if (taken <= 0L) return null;
         craftingItems.put(key, taken);
+        markChanged();
         return new CraftingReservation(key, null, taken, craftingEpoch);
     }
 
@@ -887,6 +917,7 @@ public class SharedStorage {
         long taken = extractFluid(key, amount);
         if (taken <= 0L) return null;
         craftingFluids.put(key, taken);
+        markChanged();
         return new CraftingReservation(null, key, taken, craftingEpoch);
     }
 
@@ -1069,6 +1100,8 @@ public class SharedStorage {
      * @return 本次成功读入的条目数
      */
     public synchronized int readFromNbt(NBTTagCompound root) {
+        itemRevision++;
+        fluidRevision++;
         items.clear();
         fluids.clear();
         craftingItems.clear();

@@ -675,6 +675,17 @@ public final class InventoryExchange {
                 long taken = storage.extractFluid(key, result.consumed);
                 if (taken <= 0L) break;
 
+                // Bus mirrors may be stale. Build the container from real stock, never from the preview.
+                if (taken < result.consumed) {
+                    result = FluidContainerHelper.fill(probe, key, taken);
+                    if (result == null || result.consumed <= 0L) {
+                        storage.insertFluidManualDirect(key, taken);
+                        break;
+                    }
+                    if (result.consumed < taken) storage.insertFluidManualDirect(key, taken - result.consumed);
+                    taken = result.consumed;
+                }
+
                 ItemStack replacement = result.container;
                 replacement.stackSize = 1;
                 if (!replaceOne(inv, i, replacement)) {
@@ -843,10 +854,17 @@ public final class InventoryExchange {
             int left = cursor.stackSize - newSize;
             ItemStack empties = singleCopy(cursor);
             empties.stackSize = left;
-            if (!player.inventory.addItemStackToInventory(empties)) {
+            // InventoryPlayer may insert a prefix and still return false. Probe a detached inventory first.
+            InventoryPlayer preview = new InventoryPlayer(player);
+            for (int i = 0; i < INV_SIZE; i++) {
+                ItemStack existing = inv.mainInventory[i];
+                preview.mainInventory[i] = existing == null ? null : existing.copy();
+            }
+            if (!preview.addItemStackToInventory(empties.copy())) {
                 storage.insertFluidManual(key, taken);
                 return 0L;
             }
+            player.inventory.addItemStackToInventory(empties);
             if (remainder > 0L) {
                 // 装不满一整个容器的零头对桶这类容器不该发生（consumed 通常就是容量），
                 // 真发生了就还回去，别把它塞进一个半满的容器里

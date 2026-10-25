@@ -197,6 +197,7 @@ public class FutaGtnhMod {
     @Mod.EventHandler
     public void serverStopping(FMLServerStoppingEvent event) {
         com.futa_gtnh.common.SwiftStepGrowthAura.clear();
+        com.futa_gtnh.common.PumpFluidUpdates.clear();
         com.futa_gtnh.network.ServerActions.clear();
         SharedStorageManager.onServerStopping();
         com.futa_gtnh.lootassist.LootassistManager.onServerStopping();

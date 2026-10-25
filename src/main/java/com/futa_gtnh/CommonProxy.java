@@ -212,6 +212,7 @@ public class CommonProxy {
 
     public void serverStarting(FMLServerStartingEvent event) {
         event.registerServerCommand(new CommandSharedStorage());
+        event.registerServerCommand(new com.futa_gtnh.command.CommandFluidRefresh());
     }
 
     // ==================================================================

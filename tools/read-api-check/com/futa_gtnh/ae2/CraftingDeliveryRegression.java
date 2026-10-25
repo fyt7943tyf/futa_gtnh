@@ -24,6 +24,7 @@ import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageListener;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.shared.StorageCachePerformanceCheck;
 
 import appeng.api.config.Actionable;
 import appeng.api.networking.IGrid;
@@ -59,6 +60,7 @@ public final class CraftingDeliveryRegression {
         nestedSuppression();
         concurrentChangeQueue();
         cellChannels();
+        StorageCachePerformanceCheck.checkAeMirrorCaching();
         System.out.println("AE crafting delivery regression: " + assertions + " assertions passed");
     }
 

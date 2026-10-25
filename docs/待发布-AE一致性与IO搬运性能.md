@@ -83,3 +83,30 @@ identity hash）+ 缓存 `equals`（NBT 深比较）；空闲（目标满/无匹
 - 未起本地客户端/服务器实测；建议上线后复测 spark：
   `/spark profiler start --timeout 600 --only-ticks-over 40`，对照基线
   （重 tick 占 17.4%、`com.futa_gtnh` 占重 tick 79.2%、`ItemKey.of` 占 42.7%）。
+
+## 2026-10-25：30 秒全量采样后的缓存优化
+
+本轮依据 `OmRlhDTxTV.sparkprofile`，按 [spark 官方数据结构](https://github.com/lucko/spark/blob/master/spark-common/src/main/proto/spark/spark_sampler.proto) 离线解析，未上传服务器采样文件。
+采样跨度 30.352 秒、600 tick，间隔 4 ms；主线程累计采样 29928 ms，其中休眠约 19756 ms，
+`MinecraftServer.func_71217_p` 的执行采样为 10156 ms。本模组各调用路径去除嵌套重复计数后约 444 ms，
+约占 tick 执行采样的 4.37%（整段主线程采样的 1.48%），平均每 tick 约 0.74 ms。
+报告中的最近一分钟 TPS 约 20，平均 MSPT 约 16.72 ms；本次并非重 tick 筛选采样，不能直接与上文的 79.2% 比较。
+
+剩余可见热点包括 `TerminalIoEngine.pushFluid` 约 80 ms、`AeCellBridge.refreshItemMirror` 约 36 ms、
+`TileEntitySharedTerminal.refreshOutputKeys` 约 36 ms，均为包含子调用的采样估计，不能相加当作独占耗时。
+
+本轮改动：
+
+- 共享池和总线增加独立的物品、流体内容版本；流体变化不再使物品快照、AE 物品镜像及终端物品索引失效，反向同理。
+  设置上限仍推进原有全量版本，保持 GUI 和只读 API 的同步语义；清空、读档和切换池实例仍完整失效。
+- AE 镜像复用 IO 已经构建的共享快照，并校验池实例身份，避免同一通道重复复制及换池后的版本碰撞。
+- 只有一种流体的输出白名单直接查该种库存，不遍历整个流体仓库；多种流体仍按原有仓库顺序分配搬运额度。
+- 被动终端的筛选检查复用规范化物品键，去掉无必要的原型栈/NBT 拷贝。
+
+同机合成基准（6000 种物品、1000 次流体写入、16000 次物品缓存查询）中，预热后的物品快照重建从
+1000 次降为 0 次；该片段耗时从约 102.48 ms 降到 1.14 ms。耗时受 JVM 状态影响，回归仅断言缓存复用和
+库存结果，不以速度阈值判定通过；这不是线上 TPS 提升的测量。
+基准入口为 `StorageCachePerformanceCheck.main`，正式构建同时覆盖双通道缓存失效、总线读写模式切换、
+AE 镜像换池、单流体输出不扫描全仓、多流体顺序、吞吐和库存守恒。
+
+本轮迭代测试包保持 `version.txt` 为 1.33.2，上述缓存优化纳入 1.33.3 正式发布；存档格式和网络协议不变。线上收益需以同条件采样复核。

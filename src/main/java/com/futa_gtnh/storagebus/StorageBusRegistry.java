@@ -3,6 +3,7 @@ package com.futa_gtnh.storagebus;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -42,15 +43,34 @@ public final class StorageBusRegistry {
     private static final Object LOCK = new Object();
 
     private static final List<StorageBusLink> LINKS = new ArrayList<>();
-    /**
-     * 每条总线「上一次计入可读表时」的访问模式。
-     *
-     * <p>
-     * 不能现场读 {@code link.isReadable()}：配置改变后它已经是新值了，而聚合表里
-     * 还记着旧贡献。刷新/注销必须按这份记录扣旧账，否则只读↔只写切换会把数量
-     * 留在可读表里（或者反复扣成 0）。
-     */
-    private static final Map<StorageBusLink, Boolean> READABLE_FLAGS = new java.util.IdentityHashMap<>();
+    /** Immutable accounting snapshots, separate from each link's live mirror. */
+    private static final Map<StorageBusLink, Contribution> CONTRIBUTIONS = new IdentityHashMap<>();
+    /** Multiple faces on the same tile expose one physical inventory, not separate copies. */
+    private static final Map<TileEntity, TargetStock> TARGETS = new IdentityHashMap<>();
+
+    private static final class Contribution {
+
+        final TileEntity target;
+        final boolean readable;
+        final Map<ItemKey, Long> items;
+        final Map<FluidKey, Long> fluids;
+
+        Contribution(StorageBusLink link) {
+            target = link.targetTile();
+            readable = link.isReadable();
+            items = toItemMap(link.itemSnapshot());
+            fluids = toFluidMap(link.fluidSnapshot());
+        }
+    }
+
+    private static final class TargetStock {
+
+        final Map<StorageBusLink, Contribution> links = new LinkedHashMap<>();
+        Map<ItemKey, Long> items = new LinkedHashMap<>();
+        Map<FluidKey, Long> fluids = new LinkedHashMap<>();
+        Map<ItemKey, Long> readableItems = new LinkedHashMap<>();
+        Map<FluidKey, Long> readableFluids = new LinkedHashMap<>();
+    }
 
     /** 只包含「可读」总线贡献的聚合表，供终端 / AE / 抽取使用。 */
     private static final Map<ItemKey, Long> READABLE_ITEMS = new LinkedHashMap<>();
@@ -69,6 +89,8 @@ public final class StorageBusRegistry {
      * 只是读，不需要把整个注册表锁住。
      */
     private static volatile int revision;
+    private static volatile int itemRevision;
+    private static volatile int fluidRevision;
 
     /**
      * 有没有已登记的总线。没有时共享存储的所有读写都只做一次 volatile 读，
@@ -78,6 +100,14 @@ public final class StorageBusRegistry {
 
     public static int getRevision() {
         return revision;
+    }
+
+    public static int getItemRevision() {
+        return itemRevision;
+    }
+
+    public static int getFluidRevision() {
+        return fluidRevision;
     }
 
     /**
@@ -112,21 +142,13 @@ public final class StorageBusRegistry {
         // 扫描必须在注册表锁外做：目标容器是别的模组写的，可能很慢，
         // 也可能反过来触发一次共享存储查询。
         link.refresh();
-        List<Map.Entry<ItemKey, Long>> items = link.itemSnapshot();
-        List<Map.Entry<FluidKey, Long>> fluids = link.fluidSnapshot();
-        boolean readable = link.isReadable();
+        Contribution fresh = new Contribution(link);
 
         synchronized (LOCK) {
             if (LINKS.contains(link)) return;
             LINKS.add(link);
-            READABLE_FLAGS.put(link, Boolean.valueOf(readable));
-            addContribution(items, fluids, readable);
             enabled = true;
-            bumpRevision();
-        }
-
-        if (readable) {
-            queue(items, fluids);
+            replaceContribution(link, fresh);
         }
     }
 
@@ -134,21 +156,10 @@ public final class StorageBusRegistry {
     public static void unregister(StorageBusLink link) {
         if (link == null) return;
 
-        List<Map.Entry<ItemKey, Long>> items = link.itemSnapshot();
-        List<Map.Entry<FluidKey, Long>> fluids = link.fluidSnapshot();
-        boolean readable = false;
-
         synchronized (LOCK) {
             if (!LINKS.remove(link)) return;
-            Boolean flag = READABLE_FLAGS.remove(link);
-            readable = flag != null && flag.booleanValue();
-            removeContribution(items, fluids, readable);
+            replaceContribution(link, null);
             enabled = !LINKS.isEmpty();
-            bumpRevision();
-        }
-
-        if (readable) {
-            queue(items, fluids);
         }
     }
 
@@ -156,22 +167,9 @@ public final class StorageBusRegistry {
     public static void refresh(StorageBusLink link) {
         if (link == null) return;
 
-        List<Map.Entry<ItemKey, Long>> oldItems;
-        List<Map.Entry<FluidKey, Long>> oldFluids;
-        boolean oldReadable;
         boolean registered;
         synchronized (LOCK) {
             registered = LINKS.contains(link);
-            if (registered) {
-                oldItems = link.itemSnapshot();
-                oldFluids = link.fluidSnapshot();
-                Boolean flag = READABLE_FLAGS.get(link);
-                oldReadable = flag != null && flag.booleanValue();
-            } else {
-                oldItems = null;
-                oldFluids = null;
-                oldReadable = false;
-            }
         }
         if (!registered) {
             // 还没登记（比如刚放下的方块），直接补登记
@@ -180,38 +178,11 @@ public final class StorageBusRegistry {
         }
 
         link.refresh();
-
-        List<Map.Entry<ItemKey, Long>> newItems = link.itemSnapshot();
-        List<Map.Entry<FluidKey, Long>> newFluids = link.fluidSnapshot();
-        boolean newReadable = link.isReadable();
-
-        // 可读性变了的话，整份旧/新键都要让客户端和 AE 重新对账；否则只发真正变了的
-        Set<ItemKey> changedItems = oldReadable != newReadable ? unionItemKeys(oldItems, newItems)
-            : diffItemKeys(oldItems, newItems);
-        Set<FluidKey> changedFluids = oldReadable != newReadable ? unionFluidKeys(oldFluids, newFluids)
-            : diffFluidKeys(oldFluids, newFluids);
-        if (changedItems.isEmpty() && changedFluids.isEmpty()) {
-            // 数量没变但访问模式可能变了：把标记更新掉，否则下一次写/抽会按旧的可读性记账
-            if (oldReadable != newReadable) {
-                synchronized (LOCK) {
-                    if (LINKS.contains(link)) READABLE_FLAGS.put(link, Boolean.valueOf(newReadable));
-                }
-            }
-            return;
-        }
+        Contribution fresh = new Contribution(link);
 
         synchronized (LOCK) {
             if (!LINKS.contains(link)) return;
-            removeContribution(oldItems, oldFluids, oldReadable);
-            addContribution(newItems, newFluids, newReadable);
-            READABLE_FLAGS.put(link, Boolean.valueOf(newReadable));
-            bumpRevision();
-        }
-
-        // 只有曾经/现在可读的键才需要客户端与 AE 对账；纯只写总线的内部变化不出现在库存里
-        if (oldReadable || newReadable) {
-            queueItems(changedItems);
-            queueFluids(changedFluids);
+            replaceContribution(link, fresh);
         }
     }
 
@@ -301,7 +272,8 @@ public final class StorageBusRegistry {
     public static void clear() {
         synchronized (LOCK) {
             LINKS.clear();
-            READABLE_FLAGS.clear();
+            CONTRIBUTIONS.clear();
+            TARGETS.clear();
             READABLE_ITEMS.clear();
             READABLE_FLUIDS.clear();
             ALL_ITEMS.clear();
@@ -309,6 +281,8 @@ public final class StorageBusRegistry {
             PENDING_ITEMS.clear();
             PENDING_FLUIDS.clear();
             enabled = false;
+            itemRevision++;
+            fluidRevision++;
             bumpRevision();
         }
     }
@@ -404,7 +378,7 @@ public final class StorageBusRegistry {
                 long accepted = link.insertItem(key, remaining);
                 if (accepted <= 0L) continue;
                 remaining -= accepted;
-                noteItemChange(link, key, accepted);
+                refreshTargeting(link.targetTile());
             } catch (Throwable ignored) {
                 // 单个容器异常：继续尝试下一条总线 / 最后落进共享存储池
             }
@@ -422,7 +396,7 @@ public final class StorageBusRegistry {
                 long accepted = link.insertFluid(key, remaining);
                 if (accepted <= 0L) continue;
                 remaining -= accepted;
-                noteFluidChange(link, key, accepted);
+                refreshTargeting(link.targetTile());
             } catch (Throwable ignored) {
                 // 同上
             }
@@ -455,7 +429,7 @@ public final class StorageBusRegistry {
                 long taken = link.extractItem(key, remaining);
                 if (taken <= 0L) continue;
                 remaining -= taken;
-                noteItemChange(link, key, -taken);
+                refreshTargeting(link.targetTile());
             } catch (Throwable ignored) {
                 // 单个容器异常：继续尝试下一条总线 / 最后从共享存储池取
             }
@@ -478,7 +452,7 @@ public final class StorageBusRegistry {
                 long taken = link.extractFluid(key, remaining);
                 if (taken <= 0L) continue;
                 remaining -= taken;
-                noteFluidChange(link, key, -taken);
+                refreshTargeting(link.targetTile());
             } catch (Throwable ignored) {
                 // 同上
             }
@@ -519,32 +493,6 @@ public final class StorageBusRegistry {
         Set<FluidKey> result = new LinkedHashSet<>(PENDING_FLUIDS);
         PENDING_FLUIDS.removeAll(result);
         return result;
-    }
-
-    private static void noteItemChange(StorageBusLink link, ItemKey key, long delta) {
-        boolean readable;
-        synchronized (LOCK) {
-            if (!LINKS.contains(link)) return;
-            add(ALL_ITEMS, key, delta);
-            Boolean flag = READABLE_FLAGS.get(link);
-            readable = flag != null && flag.booleanValue();
-            if (readable) add(READABLE_ITEMS, key, delta);
-            bumpRevision();
-        }
-        if (readable) PENDING_ITEMS.add(key);
-    }
-
-    private static void noteFluidChange(StorageBusLink link, FluidKey key, long delta) {
-        boolean readable;
-        synchronized (LOCK) {
-            if (!LINKS.contains(link)) return;
-            add(ALL_FLUIDS, key, delta);
-            Boolean flag = READABLE_FLAGS.get(link);
-            readable = flag != null && flag.booleanValue();
-            if (readable) add(READABLE_FLUIDS, key, delta);
-            bumpRevision();
-        }
-        if (readable) PENDING_FLUIDS.add(key);
     }
 
     // ==================================================================
@@ -589,125 +537,71 @@ public final class StorageBusRegistry {
         return links;
     }
 
-    private static void addContribution(List<Map.Entry<ItemKey, Long>> items, List<Map.Entry<FluidKey, Long>> fluids,
-        boolean readable) {
-        for (Map.Entry<ItemKey, Long> entry : items) {
-            add(ALL_ITEMS, entry.getKey(), entry.getValue());
-            if (readable) add(READABLE_ITEMS, entry.getKey(), entry.getValue());
+    /** Called under LOCK; no world/container callbacks are made while updating the ledger. */
+    private static void replaceContribution(StorageBusLink link, Contribution fresh) {
+        Contribution old = CONTRIBUTIONS.get(link);
+        if (old != null && fresh != null
+            && old.target == fresh.target
+            && old.readable == fresh.readable
+            && old.items.equals(fresh.items)
+            && old.fluids.equals(fresh.fluids)) return;
+        if (fresh == null) CONTRIBUTIONS.remove(link);
+        else CONTRIBUTIONS.put(link, fresh);
+        TileEntity oldTarget = old == null ? null : old.target;
+        TileEntity newTarget = fresh == null ? null : fresh.target;
+        if (oldTarget != null && oldTarget != newTarget) TARGETS.get(oldTarget).links.remove(link);
+        if (newTarget != null) TARGETS.computeIfAbsent(newTarget, ignored -> new TargetStock()).links.put(link, fresh);
+        if (oldTarget != null) rebuildTarget(oldTarget);
+        if (newTarget != null && newTarget != oldTarget) rebuildTarget(newTarget);
+    }
+
+    private static void rebuildTarget(TileEntity target) {
+        TargetStock stock = TARGETS.get(target);
+        Map<ItemKey, Long> items = new LinkedHashMap<>();
+        Map<FluidKey, Long> fluids = new LinkedHashMap<>();
+        Map<ItemKey, Long> readableItems = new LinkedHashMap<>();
+        Map<FluidKey, Long> readableFluids = new LinkedHashMap<>();
+        for (Contribution contribution : stock.links.values()) {
+            mergeMaximum(items, contribution.items);
+            mergeMaximum(fluids, contribution.fluids);
+            if (contribution.readable) {
+                mergeMaximum(readableItems, contribution.items);
+                mergeMaximum(readableFluids, contribution.fluids);
+            }
         }
-        for (Map.Entry<FluidKey, Long> entry : fluids) {
-            add(ALL_FLUIDS, entry.getKey(), entry.getValue());
-            if (readable) add(READABLE_FLUIDS, entry.getKey(), entry.getValue());
-        }
+        boolean changed = updateAggregate(ALL_ITEMS, stock.items, items, null);
+        changed |= updateAggregate(ALL_FLUIDS, stock.fluids, fluids, null);
+        boolean itemsChanged = updateAggregate(READABLE_ITEMS, stock.readableItems, readableItems, PENDING_ITEMS);
+        boolean fluidsChanged = updateAggregate(READABLE_FLUIDS, stock.readableFluids, readableFluids, PENDING_FLUIDS);
+        if (itemsChanged) itemRevision++;
+        if (fluidsChanged) fluidRevision++;
+        changed |= itemsChanged || fluidsChanged;
+        stock.items = items;
+        stock.fluids = fluids;
+        stock.readableItems = readableItems;
+        stock.readableFluids = readableFluids;
+        if (stock.links.isEmpty()) TARGETS.remove(target);
+        if (changed) bumpRevision();
     }
 
-    private static void removeContribution(List<Map.Entry<ItemKey, Long>> items, List<Map.Entry<FluidKey, Long>> fluids,
-        boolean readable) {
-        for (Map.Entry<ItemKey, Long> entry : items) {
-            subtract(ALL_ITEMS, entry.getKey(), entry.getValue());
-            if (readable) subtract(READABLE_ITEMS, entry.getKey(), entry.getValue());
-        }
-        for (Map.Entry<FluidKey, Long> entry : fluids) {
-            subtract(ALL_FLUIDS, entry.getKey(), entry.getValue());
-            if (readable) subtract(READABLE_FLUIDS, entry.getKey(), entry.getValue());
-        }
+    private static <K> void mergeMaximum(Map<K, Long> target, Map<K, Long> source) {
+        // Filters may expose different keys, but aliases on one tile still refer to the same stock.
+        for (Map.Entry<K, Long> entry : source.entrySet()) target.merge(entry.getKey(), entry.getValue(), Math::max);
     }
 
-    private static void queue(List<Map.Entry<ItemKey, Long>> items, List<Map.Entry<FluidKey, Long>> fluids) {
-        for (Map.Entry<ItemKey, Long> entry : items) PENDING_ITEMS.add(entry.getKey());
-        for (Map.Entry<FluidKey, Long> entry : fluids) PENDING_FLUIDS.add(entry.getKey());
-    }
-
-    private static void queueItems(Set<ItemKey> keys) {
-        if (keys != null && !keys.isEmpty()) PENDING_ITEMS.addAll(keys);
-    }
-
-    private static void queueFluids(Set<FluidKey> keys) {
-        if (keys != null && !keys.isEmpty()) PENDING_FLUIDS.addAll(keys);
-    }
-
-    private static void add(Map<ItemKey, Long> map, ItemKey key, long amount) {
-        if (key == null || amount == 0L) return;
-        Long old = map.get(key);
-        long next = saturatingAdd(old == null ? 0L : old.longValue(), amount);
-        if (next <= 0L) {
-            map.remove(key);
-        } else {
-            map.put(key, Long.valueOf(next));
-        }
-    }
-
-    private static void add(Map<FluidKey, Long> map, FluidKey key, long amount) {
-        if (key == null || amount == 0L) return;
-        Long old = map.get(key);
-        long next = saturatingAdd(old == null ? 0L : old.longValue(), amount);
-        if (next <= 0L) {
-            map.remove(key);
-        } else {
-            map.put(key, Long.valueOf(next));
-        }
-    }
-
-    private static void subtract(Map<ItemKey, Long> map, ItemKey key, long amount) {
-        if (key == null || amount <= 0L) return;
-        Long old = map.get(key);
-        long next = Math.max(0L, (old == null ? 0L : old.longValue()) - amount);
-        if (next <= 0L) {
-            map.remove(key);
-        } else {
-            map.put(key, Long.valueOf(next));
-        }
-    }
-
-    private static void subtract(Map<FluidKey, Long> map, FluidKey key, long amount) {
-        if (key == null || amount <= 0L) return;
-        Long old = map.get(key);
-        long next = Math.max(0L, (old == null ? 0L : old.longValue()) - amount);
-        if (next <= 0L) {
-            map.remove(key);
-        } else {
-            map.put(key, Long.valueOf(next));
-        }
-    }
-
-    private static Set<ItemKey> unionItemKeys(List<Map.Entry<ItemKey, Long>> a, List<Map.Entry<ItemKey, Long>> b) {
-        Set<ItemKey> result = new LinkedHashSet<>();
-        for (Map.Entry<ItemKey, Long> entry : a) result.add(entry.getKey());
-        for (Map.Entry<ItemKey, Long> entry : b) result.add(entry.getKey());
-        return result;
-    }
-
-    private static Set<FluidKey> unionFluidKeys(List<Map.Entry<FluidKey, Long>> a, List<Map.Entry<FluidKey, Long>> b) {
-        Set<FluidKey> result = new LinkedHashSet<>();
-        for (Map.Entry<FluidKey, Long> entry : a) result.add(entry.getKey());
-        for (Map.Entry<FluidKey, Long> entry : b) result.add(entry.getKey());
-        return result;
-    }
-
-    private static Set<ItemKey> diffItemKeys(List<Map.Entry<ItemKey, Long>> before,
-        List<Map.Entry<ItemKey, Long>> after) {
-        Map<ItemKey, Long> old = toItemMap(before);
-        Map<ItemKey, Long> fresh = toItemMap(after);
-        Set<ItemKey> changed = new LinkedHashSet<>();
-        for (Map.Entry<ItemKey, Long> entry : old.entrySet()) {
-            if (!java.util.Objects.equals(entry.getValue(), fresh.get(entry.getKey()))) changed.add(entry.getKey());
-        }
-        for (Map.Entry<ItemKey, Long> entry : fresh.entrySet()) {
-            if (!java.util.Objects.equals(entry.getValue(), old.get(entry.getKey()))) changed.add(entry.getKey());
-        }
-        return changed;
-    }
-
-    private static Set<FluidKey> diffFluidKeys(List<Map.Entry<FluidKey, Long>> before,
-        List<Map.Entry<FluidKey, Long>> after) {
-        Map<FluidKey, Long> old = toFluidMap(before);
-        Map<FluidKey, Long> fresh = toFluidMap(after);
-        Set<FluidKey> changed = new LinkedHashSet<>();
-        for (Map.Entry<FluidKey, Long> entry : old.entrySet()) {
-            if (!java.util.Objects.equals(entry.getValue(), fresh.get(entry.getKey()))) changed.add(entry.getKey());
-        }
-        for (Map.Entry<FluidKey, Long> entry : fresh.entrySet()) {
-            if (!java.util.Objects.equals(entry.getValue(), old.get(entry.getKey()))) changed.add(entry.getKey());
+    private static <K> boolean updateAggregate(Map<K, Long> aggregate, Map<K, Long> before, Map<K, Long> after,
+        Set<K> pending) {
+        Set<K> keys = new LinkedHashSet<>(before.keySet());
+        keys.addAll(after.keySet());
+        boolean changed = false;
+        for (K key : keys) {
+            long delta = after.getOrDefault(key, 0L) - before.getOrDefault(key, 0L);
+            if (delta == 0L) continue;
+            long next = saturatingAdd(aggregate.getOrDefault(key, 0L), delta);
+            if (next <= 0L) aggregate.remove(key);
+            else aggregate.put(key, next);
+            if (pending != null) pending.add(key);
+            changed = true;
         }
         return changed;
     }

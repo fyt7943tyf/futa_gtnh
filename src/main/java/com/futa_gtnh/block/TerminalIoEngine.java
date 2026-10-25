@@ -17,6 +17,7 @@ import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.storagebus.DrawerStorageCompat;
 import com.futa_gtnh.storagebus.StorageBusRegistry;
 
 /**
@@ -164,6 +165,7 @@ final class TerminalIoEngine {
      * @return 这一轮是否真的搬动了东西（供空闲退避判断）
      */
     private static boolean pullItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
+        if (DrawerStorageCompat.supports(inventory)) return pullDrawerItems(inventory, side, config);
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
         boolean moved = false;
@@ -211,6 +213,33 @@ final class TerminalIoEngine {
             } catch (Throwable ignored) {
                 // 下一次周期刷新会收敛
             }
+        }
+        return moved;
+    }
+
+    private static boolean pullDrawerItems(IInventory inventory, ForgeDirection side, TerminalIoConfig config) {
+        int budget = Math.max(1, config.getItemsPerOperation());
+        SharedStorage storage = SharedStorageManager.getStorage();
+        TileEntity source = inventory instanceof TileEntity ? (TileEntity) inventory : null;
+        boolean busTarget = StorageBusRegistry.isTargetTile(source);
+        boolean moved = false;
+        for (Map.Entry<ItemKey, Long> entry : DrawerStorageCompat.snapshot(inventory)
+            .entrySet()) {
+            ItemKey key = entry.getKey();
+            long want = Math.min(budget, entry.getValue());
+            synchronized (storage) {
+                boolean counted = busTarget && StorageBusRegistry.targetCountsItem(source, key);
+                long stored = counted ? storage.insertItemManualDirect(key, want) : storage.insertItemDirect(key, want);
+                if (stored <= 0L) continue;
+                long taken = DrawerStorageCompat.extractItems(inventory, side, key, stored);
+                if (taken < stored) storage.extractItemDirect(key, stored - taken);
+                if (taken <= 0L) continue;
+                budget -= (int) taken;
+                moved = true;
+                if (busTarget) StorageBusRegistry.refreshTargeting(source);
+            }
+            SharedStorageManager.broadcastItemChange(key);
+            if (budget <= 0) break;
         }
         return moved;
     }
@@ -352,6 +381,12 @@ final class TerminalIoEngine {
     private static int insertInto(IInventory inventory, ForgeDirection side, ItemStack stack) {
         int remaining = stack == null ? 0 : stack.stackSize;
         if (remaining <= 0) return 0;
+        if (DrawerStorageCompat.supports(inventory)) {
+            int accepted = (int) DrawerStorageCompat.insertItems(inventory, side, ItemKey.of(stack), remaining);
+            if (accepted > 0 && inventory instanceof TileEntity)
+                StorageBusRegistry.refreshTargeting((TileEntity) inventory);
+            return accepted;
+        }
 
         int maxSize = Math.max(1, stack.getMaxStackSize());
         // 两趟：先并入已有的同类堆，再找空格。和原版 addItemStackToInventory 一个顺序
@@ -436,22 +471,32 @@ final class TerminalIoEngine {
 
         FluidStack preview = handler.drain(side, budget, false);
         if (preview == null || preview.getFluid() == null || preview.amount <= 0) return false;
-
-        FluidStack drained = handler.drain(side, preview.amount, true);
-        if (drained == null || drained.getFluid() == null || drained.amount <= 0) return false;
-
         SharedStorage storage = SharedStorageManager.getStorage();
         TileEntity sourceTile = handler instanceof TileEntity ? (TileEntity) handler : null;
         boolean busTarget = sourceTile != null && StorageBusRegistry.isTargetTile(sourceTile);
-        FluidKey key = FluidKey.of(drained);
+        FluidKey key = FluidKey.of(preview);
         boolean counted = busTarget && key != null && StorageBusRegistry.targetCountsFluid(sourceTile, key);
-        long stored = counted ? storage.insertFluidManualDirect(key, drained.amount)
-            : storage.insertFluidDirect(drained, drained.amount);
-        if (stored < drained.amount) {
-            // 存储顶到上限了（理论上不可能）：没存进去的那部分原样灌回去
-            int back = (int) (drained.amount - stored);
-            handler.fill(side, new FluidStack(drained.getFluid(), back), true);
-            if (stored <= 0L) return false;
+        long stored;
+        // Keep the capacity check and actual pool insertion atomic against worker-thread deposits.
+        synchronized (storage) {
+            long room = counted ? storage.fluidManualSpaceLeft(key) : storage.fluidSpaceLeft(key);
+            int want = (int) Math.min(Math.min((long) budget, preview.amount), room);
+            if (want <= 0) return false;
+            FluidStack drained = handler.drain(side, key.prototype(want), true);
+            if (drained == null || drained.getFluid() == null || drained.amount <= 0) return false;
+            FluidKey actualKey = FluidKey.of(drained);
+            if (!key.equals(actualKey)) {
+                handler.fill(side, drained, true);
+                return false;
+            }
+            stored = counted ? storage.insertFluidManualDirect(key, drained.amount)
+                : storage.insertFluidDirect(drained, drained.amount);
+            if (stored < drained.amount) {
+                FluidStack returned = drained.copy();
+                returned.amount -= (int) stored;
+                handler.fill(side, returned, true);
+                if (stored <= 0L) return false;
+            }
         }
 
         if (key != null) SharedStorageManager.broadcastFluidChange(key);
@@ -479,12 +524,20 @@ final class TerminalIoEngine {
      */
     private static boolean pushFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config,
         ForgeDirection face) {
-        if (config.getOutputFilter(face)
-            .isEmpty(true)) return false;
+        TerminalOutputFilter filter = config.getOutputFilter(face);
+        if (filter.isEmpty(true)) return false;
         int budget = Math.max(1, config.getFluidPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
+        // A single selected fluid needs one lookup, regardless of warehouse size. Multiple selections
+        // keep the original warehouse order so the first matching fluid still consumes the budget first.
+        if (filter.getFluids()
+            .size() == 1) {
+            FluidKey key = filter.getFluids()
+                .iterator()
+                .next();
+            return pushFluid(handler, side, storage, key, storage.getFluidAmount(key), budget) > 0;
+        }
         boolean moved = false;
-        TileEntity destination = handler instanceof TileEntity ? (TileEntity) handler : null;
 
         List<Map.Entry<FluidKey, Long>> snapshot = storage.snapshotFluidsCached();
         for (Map.Entry<FluidKey, Long> entry : snapshot) {
@@ -495,36 +548,32 @@ final class TerminalIoEngine {
             if (available <= 0L) continue;
             if (!config.matchesOutput(face, key)) continue;
 
-            FluidStack prototype = key.prototype();
-            if (prototype == null || prototype.getFluid() == null) continue;
-
-            while (budget > 0 && available > 0L) {
-                int want = (int) Math.min((long) budget, available);
-                // 先模拟：目标收多少我们就扣多少，不做「先扣再退」的无用功
-                int accepted = handler.fill(side, key.prototype(want), false);
-                if (accepted <= 0) break;
-
-                long taken = storage.extractFluidExcluding(key, accepted, destination);
-                if (taken <= 0L) break;
-
-                int filled = handler.fill(side, key.prototype(taken), true);
-                if (filled < taken) {
-                    // 目标中途不收了：没灌进去的原样放回仓库。
-                    // 同样是回滚，不受上限约束、也不经过存储总线
-                    storage.insertFluidManualDirect(key, taken - filled);
-                }
-                if (filled > 0) {
-                    SharedStorageManager.broadcastFluidChange(key);
-                    moved = true;
-                }
-
-                budget -= filled;
-                available -= taken;
-                if (filled <= 0 || filled < taken) break;
-            }
-
+            int filled = pushFluid(handler, side, storage, key, available, budget);
+            moved |= filled > 0;
+            budget -= filled;
             if (budget <= 0) return moved;
         }
         return moved;
+    }
+
+    private static int pushFluid(IFluidHandler handler, ForgeDirection side, SharedStorage storage, FluidKey key,
+        long available, int budget) {
+        TileEntity destination = handler instanceof TileEntity ? (TileEntity) handler : null;
+        int total = 0;
+        while (budget > 0 && available > 0L) {
+            int want = (int) Math.min((long) budget, available);
+            int accepted = handler.fill(side, key.prototype(want), false);
+            if (accepted <= 0) break;
+            long taken = storage.extractFluidExcluding(key, accepted, destination);
+            if (taken <= 0L) break;
+            int filled = handler.fill(side, key.prototype(taken), true);
+            if (filled < taken) storage.insertFluidManualDirect(key, taken - filled);
+            if (filled > 0) SharedStorageManager.broadcastFluidChange(key);
+            total += filled;
+            budget -= filled;
+            available -= taken;
+            if (filled <= 0 || filled < taken) break;
+        }
+        return total;
     }
 }

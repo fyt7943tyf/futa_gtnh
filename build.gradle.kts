@@ -120,6 +120,29 @@ tasks.register<JavaExec>("verifyProspectorChineseNames") {
         files("tools/prospector-check") + sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 
+val compilePumpFluidChecks = tasks.register<JavaCompile>("compilePumpFluidChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/pump-fluid-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output + sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("pump-fluid-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifyPumpFluidUpdates") {
+    group = "verification"
+    description = "Checks the real GT pump Mixin, vanilla lava decay and bounded local fluid repair"
+    dependsOn(compilePumpFluidChecks, compileProspectorChecks)
+    mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+    args("--tweakClass", "com.futa_gtnh.pumpcheck.PumpCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+    classpath = files(compilePumpFluidChecks.flatMap { it.destinationDirectory }) +
+        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/pump-fluid-check") +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifyPumpFluidUpdates") }
+
 // Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.
 val compileTerminalClickChecks = tasks.register<JavaCompile>("compileTerminalClickChecks") {
     dependsOn(tasks.named("classes"))
@@ -309,6 +332,18 @@ tasks.register<JavaExec>("verifyStorageBus") {
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 tasks.named("check") { dependsOn("verifyStorageBus") }
+
+tasks.register<JavaExec>("verifyStorageBusWithoutDrawers") {
+    group = "verification"
+    description = "Checks storage bus loading and transfers without the optional Storage Drawers API"
+    dependsOn(compileStorageBusChecks)
+    mainClass.set("com.futa_gtnh.storagebus.StorageBusCheckLauncher")
+    classpath = files(compileStorageBusChecks.flatMap { it.destinationDirectory }) +
+        (sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath).filter {
+            !it.name.startsWith("StorageDrawers-")
+        }
+}
+tasks.named("check") { dependsOn("verifyStorageBusWithoutDrawers") }
 
 // Botania is optional at runtime; only these checks need its concrete classes.
 val botaniaAuraCheckDependencies = configurations.create("botaniaAuraCheckDependencies") {

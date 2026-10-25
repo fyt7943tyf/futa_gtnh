@@ -1,0 +1,7 @@
+{
+    "package": "com.futa_gtnh.mixins",
+    "compatibilityLevel": "JAVA_8",
+    "plugin": "com.futa_gtnh.mixins.FutaGtnhMixinPlugin",
+    "required": true,
+    "mixins": ["MixinGTPump"]
+}

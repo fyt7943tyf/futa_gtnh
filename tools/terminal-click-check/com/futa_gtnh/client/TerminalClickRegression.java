@@ -19,6 +19,8 @@ import net.minecraft.world.chunk.IChunkProvider;
 import net.minecraft.world.storage.SaveHandlerMP;
 
 import com.futa_gtnh.Config;
+import com.futa_gtnh.CommonProxy;
+import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.exchange.DeltaRecorder;
 import com.futa_gtnh.exchange.InventoryExchange;
 import com.futa_gtnh.inventory.ContainerSharedTerminal;
@@ -66,6 +68,9 @@ public final class TerminalClickRegression {
         };
         Config.shiftClickWithdrawAmount = 64;
         Config.displayItemBecomesFluid = false;
+        FutaGtnhMod.proxy = new CommonProxy() {
+            @Override public void notifyPlayer(net.minecraft.entity.player.EntityPlayer player, String key) {}
+        };
         scenario(mc, "five separated Shift clicks", new long[] { 10000, 11000, 12000, 13000, 14000 }, 5);
         scenario(
             mc,
@@ -76,8 +81,9 @@ public final class TerminalClickRegression {
         releaseAndOrdinaryClicks(mc);
         slotEdges(mc);
         backpackDoubleClick(mc);
+        spaceClick(mc);
         System.out.println(
-            "Terminal click regression: rapid Shift clicks, release handling, ordinary cursor collection and backpack double-click passed.");
+            "Terminal click regression: Space fill-inventory, rapid Shift clicks, release handling, ordinary cursor collection and backpack double-click passed.");
     }
 
     private static void scenario(Minecraft mc, String label, long[] times, int expected) throws Exception {
@@ -237,11 +243,172 @@ public final class TerminalClickRegression {
         }
     }
 
+    private static TestGui shortcutGui(Minecraft mc, ItemKey key, long available) throws Exception {
+        java.util.Arrays.fill(mc.thePlayer.inventory.mainInventory, null);
+        java.util.Arrays.fill(mc.thePlayer.inventory.armorInventory, null);
+        mc.thePlayer.inventory.setItemStack(null);
+        org.lwjgl.input.Keyboard.shift = false;
+        org.lwjgl.input.Keyboard.space = true;
+        org.lwjgl.input.Keyboard.alt = false;
+        org.lwjgl.Sys.now += 1000;
+        TestContainer terminal = new TestContainer(mc);
+        ItemKey other = ItemKey.of(new ItemStack(Items.gold_ingot));
+        SharedStorage store = new SharedStorage();
+        // Put an unrelated item first: the old whole-warehouse action fills the bag with this instead.
+        store.insertItem(other, 6000);
+        store.insertItem(key, available);
+        terminal.store = store;
+        terminal.displayKeys = java.util.Arrays.asList(other, key);
+        terminal.setPageDisplay(java.util.Arrays.asList(other.prototype(), key.prototype()),
+            terminal.displayKeys, java.util.Arrays.asList(null, null));
+        TestGui gui = new TestGui(terminal, store, key);
+        gui.mc = mc;
+        Field filtered = GuiSharedTerminal.class.getDeclaredField("filtered");
+        filtered.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.List<StorageViewEntry> entries = (java.util.List<StorageViewEntry>) filtered.get(gui);
+        entries.add(StorageViewEntry.ofItem(other, 6000));
+        entries.add(StorageViewEntry.ofItem(key, available));
+        return gui;
+    }
+
+    private static long inBackpack(Minecraft mc, ItemKey key) {
+        long count = 0;
+        for (ItemStack stack : mc.thePlayer.inventory.mainInventory) {
+            if (stack != null && key.equals(ItemKey.of(stack))) count += stack.stackSize;
+        }
+        return count;
+    }
+
+    private static void spaceClick(Minecraft mc) throws Exception {
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        ItemKey gold = ItemKey.of(new ItemStack(Items.gold_ingot));
+        TestGui gui = shortcutGui(mc, iron, 6000);
+        TestContainer terminal = (TestContainer) gui.inventorySlots;
+        press(gui, 1, 0);
+        release(gui, 1, 0);
+        check(inBackpack(mc, iron) == 36 * 64 && inBackpack(mc, gold) == 0,
+            "Space left-click fills all 36 inventory slots with the selected item only");
+        check(terminal.withdrawRequests == 1 && terminal.lastAmount == 0 && terminal.lastViewIndex == 1,
+            "one selected-item request asks the server to determine capacity");
+        check(gui.store.getItemAmount(iron) + inBackpack(mc, iron) == 6000 && gui.store.getItemAmount(gold) == 6000,
+            "fill preserves stock conservation and unrelated warehouse items");
+        check(mc.thePlayer.inventory.getItemStack() == null && gui.actions == 0, "Space fill does not also pick up a cursor stack");
+
+        gui = shortcutGui(mc, iron, 6000);
+        ItemStack cursor = new ItemStack(Items.diamond, 17);
+        mc.thePlayer.inventory.setItemStack(cursor);
+        press(gui, 1, 0); release(gui, 1, 0);
+        check(inBackpack(mc, iron) == 36 * 64 && mc.thePlayer.inventory.getItemStack() == cursor && cursor.stackSize == 17,
+            "AE-style Space fill works with a held cursor stack and leaves it intact");
+
+        for (net.minecraft.item.Item item : new net.minecraft.item.Item[] { Items.ender_pearl, Items.diamond_sword }) {
+            ItemKey key = ItemKey.of(new ItemStack(item));
+            gui = shortcutGui(mc, key, 6000);
+            press(gui, 1, 0); release(gui, 1, 0);
+            check(inBackpack(mc, key) == 36L * key.prototype().getMaxStackSize(), "item's 16/1 stack limit is respected");
+            for (ItemStack stack : mc.thePlayer.inventory.mainInventory)
+                check(stack.stackSize <= stack.getMaxStackSize(), "no oversized stacks");
+        }
+
+        gui = shortcutGui(mc, iron, 137);
+        press(gui, 1, 0); release(gui, 1, 0);
+        check(inBackpack(mc, iron) == 137 && gui.store.getItemAmount(iron) == 0 && inBackpack(mc, gold) == 0,
+            "insufficient selected stock does not fall back to other items");
+
+        gui = shortcutGui(mc, iron, 6000);
+        for (int i=0; i<36; i++) mc.thePlayer.inventory.mainInventory[i] = new ItemStack(Items.gold_ingot, 64);
+        mc.thePlayer.inventory.mainInventory[3] = new ItemStack(Items.iron_ingot, 32);
+        mc.thePlayer.inventory.mainInventory[10] = null;
+        mc.thePlayer.inventory.armorInventory[2] = new ItemStack(Items.iron_chestplate);
+        gui.inventorySlots.getSlot(ContainerSharedTerminal.CRAFT_START).putStack(new ItemStack(Items.diamond, 7));
+        press(gui, 1, 0); release(gui, 1, 0);
+        check(inBackpack(mc, iron) == 128 && gui.store.getItemAmount(iron) == 5904, "partial stacks topped up before remaining slot");
+        check(mc.thePlayer.inventory.armorInventory[2].getItem() == Items.iron_chestplate
+            && gui.inventorySlots.getSlot(ContainerSharedTerminal.CRAFT_START).getStack().stackSize == 7, "armor and crafting grid retained");
+        press(gui, 1, 0); release(gui, 1, 0);
+        check(gui.store.getItemAmount(iron) == 5904 && inBackpack(mc, iron) == 128, "full inventory leaves stock unchanged");
+
+        ItemStack red = new ItemStack(Items.iron_ingot);
+        red.setStackDisplayName("red");
+        ItemStack blue = new ItemStack(Items.iron_ingot, 12);
+        blue.setStackDisplayName("blue");
+        ItemKey redKey = ItemKey.of(red);
+        gui = shortcutGui(mc, redKey, 6000);
+        mc.thePlayer.inventory.mainInventory[0] = blue;
+        press(gui, 1, 0); release(gui, 1, 0);
+        check(inBackpack(mc, redKey) == 35 * 64 && mc.thePlayer.inventory.mainInventory[0] == blue && blue.stackSize == 12,
+            "different NBT stacks are not merged");
+
+        gui = shortcutGui(mc, iron, 6000);
+        terminal = (TestContainer) gui.inventorySlots;
+        org.lwjgl.input.Keyboard.shift = true;
+        Slot selected = terminal.getSlot(1);
+        gui.mouseClicked(selected.xDisplayPosition - 1, selected.yDisplayPosition - 1, 0);
+        org.lwjgl.input.Keyboard.space = false;
+        org.lwjgl.input.Keyboard.shift = false;
+        mc.thePlayer.inventory.setItemStack(new ItemStack(Items.diamond));
+        Slot main = terminal.getSlot(ContainerSharedTerminal.MAIN_START);
+        gui.mouseClickMove(main.xDisplayPosition + 4, main.yDisplayPosition + 4, 0, 20);
+        release(gui, ContainerSharedTerminal.MAIN_START, 0);
+        check(terminal.withdrawRequests == 1 && gui.actions == 0 && inBackpack(mc, iron) == 36 * 64,
+            "Space+Shift at slot border consumes drag/release after modifier and cursor changes");
+        check(mc.thePlayer.inventory.getItemStack().getItem() == Items.diamond, "asynchronous cursor change is not deposited on release");
+
+        gui = shortcutGui(mc, iron, 6000);
+        terminal = (TestContainer) gui.inventorySlots;
+        press(gui, 1, 0); // Lost release outside window.
+        press(gui, 1, 0); release(gui, 1, 0);
+        check(terminal.withdrawRequests == 2 && gui.actions == 0, "new Space press works after a missed release");
+        org.lwjgl.input.Keyboard.space = false;
+        org.lwjgl.Sys.now += 1000;
+        press(gui, 0, 0); release(gui, 0, 0);
+        check(gui.actions == 1 && mc.thePlayer.inventory.getItemStack() != null, "ordinary clicks resume after shortcut release");
+        mc.thePlayer.inventory.setItemStack(null);
+        org.lwjgl.input.Keyboard.shift = false;
+        org.lwjgl.input.Keyboard.alt = false;
+
+        gui = shortcutGui(mc, iron, 6000);
+        terminal = (TestContainer) gui.inventorySlots;
+        mc.thePlayer.inventory.mainInventory[0] = new ItemStack(Items.iron_ingot, 9);
+        mc.thePlayer.inventory.mainInventory[10] = new ItemStack(Items.iron_ingot, 25);
+        press(gui, ContainerSharedTerminal.MAIN_START, 0);
+        release(gui, ContainerSharedTerminal.MAIN_START, 0);
+        check(terminal.depositRequests == 1 && terminal.lastScope == InventoryExchange.SCOPE_MAIN
+            && mc.thePlayer.inventory.mainInventory[0].stackSize == 9
+            && mc.thePlayer.inventory.mainInventory[10] == null && gui.store.getItemAmount(iron) == 6025,
+            "Space on an empty backpack slot still deposits the main inventory and retains the hotbar");
+
+        gui = shortcutGui(mc, iron, 6000);
+        terminal = (TestContainer) gui.inventorySlots;
+        org.lwjgl.input.Keyboard.space = false;
+        org.lwjgl.input.Keyboard.control = true;
+        press(gui, 1, 0); release(gui, 1, 0);
+        check(terminal.withdrawRequests == 1 && terminal.lastAmount == 1 && inBackpack(mc, iron) == 1 && gui.actions == 0,
+            "Ctrl click still transfers exactly one and consumes release");
+        org.lwjgl.input.Keyboard.control = false;
+
+        gui = shortcutGui(mc, iron, 6000);
+        terminal = (TestContainer) gui.inventorySlots;
+        org.lwjgl.input.Keyboard.space = false;
+        org.lwjgl.input.Keyboard.alt = true;
+        press(gui, 1, 0); release(gui, 1, 0);
+        check(terminal.withdrawRequests == 1 && terminal.lastAmount == 0 && inBackpack(mc, iron) == 36 * 64,
+            "Alt click retains its matching-item bulk transfer");
+        org.lwjgl.input.Keyboard.alt = false;
+    }
+
     private static final class TestContainer extends ContainerSharedTerminal {
 
         final Minecraft mc;
         SharedStorage store;
         int matchingDeposits;
+        java.util.List<ItemKey> displayKeys;
+        int withdrawRequests;
+        int lastViewIndex;
+        long lastAmount;
+        int depositRequests;
+        int lastScope;
 
         TestContainer(Minecraft mc) {
             super(mc.thePlayer.inventory, null);
@@ -252,6 +419,26 @@ public final class TerminalClickRegression {
         public void requestDepositMatching(ItemKey key, long amount) {
             matchingDeposits++;
             InventoryExchange.depositMatching(mc.thePlayer, key, amount, store, new DeltaRecorder(store, null));
+        }
+
+        @Override
+        public void requestWithdrawFromDisplay(int index, long amount) {
+            withdrawRequests++;
+            lastViewIndex = index;
+            lastAmount = amount;
+            InventoryExchange.withdrawItem(mc.thePlayer, displayKeys.get(index), amount, store, new DeltaRecorder(store, null));
+        }
+
+        @Override
+        public void sendWithdrawAllItems() {
+            InventoryExchange.withdrawAllItems(mc.thePlayer, store, new DeltaRecorder(store, null));
+        }
+
+        @Override
+        public void sendDepositAll(int scope) {
+            depositRequests++;
+            lastScope = scope;
+            InventoryExchange.depositAll(mc.thePlayer, scope, store, new DeltaRecorder(store, null));
         }
     }
 

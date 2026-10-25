@@ -895,7 +895,7 @@ public class ContainerSharedTerminal extends Container {
             .sendToServer(PacketStorageAction.item(PacketStorageAction.WITHDRAW_ITEM_EMPTY, key, 1L));
     }
 
-    /** 发送 Bogo Sorter 的整库转移（空格+左键）。 */
+    /** 旧整库转移动作；共享条目的空格左键使用按条目取出，避免搬出其它物品。 */
     public void sendWithdrawAllItems() {
         NetworkHandler.INSTANCE.sendToServer(new PacketStorageAction(PacketStorageAction.WITHDRAW_ALL));
     }

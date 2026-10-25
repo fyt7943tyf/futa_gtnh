@@ -142,8 +142,8 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     private boolean pendingResort = true;
     /** 按钮上当前显示的自动入库状态，用来判断服务端回包后要不要重画文字 */
     private boolean autoStoreShown;
-    /** 共享格的 Shift 点击已在按下时处理，对应松开事件不再进入原版双击转移。 */
-    private int sharedShiftClickButtons;
+    /** 已在按下时派发的快捷操作，对应拖动/松开事件不再进入原版点击处理。 */
+    private int handledClickButtons;
 
     public GuiSharedTerminal(ContainerSharedTerminal container) {
         super(container);
@@ -1037,7 +1037,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
         if (mouseButton == 0 || mouseButton == 1) {
             // 若窗口外松开时丢了事件，新一次按下不能继承上一次的释放标记。
-            sharedShiftClickButtons &= ~(1 << mouseButton);
+            handledClickButtons &= ~(1 << mouseButton);
         }
         // 搜索联动按钮的右键反向循环：原版按钮只认左键，这里自己接。
         // 在 super 之前消费掉，避免这记右键继续落进容器/搜索框。
@@ -1052,7 +1052,12 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         // Inventory Bogo Sorter 的 Ctrl / Alt / Space 快捷键最终也是在这里落地。
         // 共享网格是虚拟槽位，不能让它继续走 Bogo 的本地 putStack 路径；先转换成
         // 我们自己的服务端权威动作，普通点击仍交给 GuiContainer。
-        if (handleShortcutClick(mouseX, mouseY, mouseButton)) return;
+        if (handleShortcutClick(mouseX, mouseY, mouseButton)) {
+            markClickHandled(mouseButton);
+            lastShiftClickSlot = -1;
+            lastShiftClickKey = null;
+            return;
+        }
         if (handleShiftDoubleClick(mouseX, mouseY, mouseButton)) return;
         if (handleSharedShiftClick(mouseX, mouseY, mouseButton)) return;
 
@@ -1111,11 +1116,15 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         if (index < 0) return false;
         Slot slot = container.getSlot(index);
 
-        sweepArmed = false;
-        sweepSlot = -1;
-        sharedShiftClickButtons |= 1 << mouseButton;
+        markClickHandled(mouseButton);
         handleMouseClick(slot, slot.slotNumber, mouseButton, 1);
         return true;
+    }
+
+    private void markClickHandled(int mouseButton) {
+        sweepArmed = false;
+        sweepSlot = -1;
+        handledClickButtons |= 1 << mouseButton;
     }
 
     // ==================================================================
@@ -1199,7 +1208,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     @Override
     protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
         if ((clickedMouseButton == 0 || clickedMouseButton == 1)
-            && (sharedShiftClickButtons & (1 << clickedMouseButton)) != 0) return;
+            && (handledClickButtons & (1 << clickedMouseButton)) != 0) return;
         super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
 
         if (!sweepArmed || clickedMouseButton != 0 || !isShiftKeyDown()) return;
@@ -1218,8 +1227,8 @@ public class GuiSharedTerminal extends FutaGuiContainer {
 
     @Override
     protected void mouseMovedOrUp(int mouseX, int mouseY, int state) {
-        if ((state == 0 || state == 1) && (sharedShiftClickButtons & (1 << state)) != 0) {
-            sharedShiftClickButtons &= ~(1 << state);
+        if ((state == 0 || state == 1) && (handledClickButtons & (1 << state)) != 0) {
+            handledClickButtons &= ~(1 << state);
             sweepArmed = false;
             sweepSlot = -1;
             return;
@@ -1272,24 +1281,23 @@ public class GuiSharedTerminal extends FutaGuiContainer {
     }
 
     /**
-     * 把 Bogo Sorter 的三种搬运快捷键映射成共享存储动作。
+     * 把终端的搬运快捷键映射成共享存储动作。
      *
      * <p>
-     * 物品页的空格按 Bogo 语义把共享物品尽量转入玩家背包，Alt 只转当前同类；
-     * 流体页则保留当前流体条目的填装语义。
+     * 共享物品条目的空格左键按 AE 语义，用鼠标下物品填满背包，光标上拿着物品也可使用；
+     * 流体页保留当前流体条目的填装语义，背包侧保留 Bogo 的批量存入。
      */
     private boolean handleShortcutClick(int mouseX, int mouseY, int mouseButton) {
         if (mouseButton != 0 && mouseButton != 1) return false;
         if (!isCtrlDown() && !isAltDown() && !isSpaceDown()) return false;
-        if (mc.thePlayer.inventory.getItemStack() != null) return false;
-
         StorageViewEntry entry = getHoveredEntry(mouseX, mouseY);
+        boolean fillInventory = isSpaceDown() && mouseButton == 0 && entry != null && !entry.isFluid();
+        if (mc.thePlayer.inventory.getItemStack() != null && !fillInventory) return false;
         if (entry != null) {
             int index = hoveredGhostIndex(mouseX, mouseY);
             if ((isSpaceDown() || isAltDown()) && mouseButton != 0) return false;
             if (isSpaceDown()) {
-                if (entry.isFluid()) container.requestWithdrawFromDisplay(index, 0L);
-                else container.sendWithdrawAllItems();
+                container.requestWithdrawFromDisplay(index, 0L);
                 return true;
             }
             if (isCtrlDown()) {

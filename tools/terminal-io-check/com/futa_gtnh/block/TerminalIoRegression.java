@@ -80,6 +80,8 @@ public final class TerminalIoRegression {
         checkManualSubtypeOutput();
         checkManualIdleRetry();
         checkBusAttachedFluidOutput();
+        checkFluidPullCapacity();
+        checkDirectFluidSelection();
         System.out.println("Terminal IO regression passed: " + checks + " checks");
     }
 
@@ -734,14 +736,116 @@ public final class TerminalIoRegression {
         checks++;
     }
 
+    private static void checkFluidPullCapacity() throws Exception {
+        StorageBusRegistry.clear();
+        SharedStorage storage = SharedStorageManager.getStorage();
+        storage.clear();
+        FluidKey water = FluidKey.of(FluidRegistry.WATER, null);
+        TerminalIoConfig config = new TerminalIoConfig();
+        TestTank tank = new TestTank();
+        tank.allowFill = false;
+        tank.tank.fill(water.prototype(1000), true);
+        storage.setFluidLimit(water, 0);
+        Class<?>[] signature = { IFluidHandler.class, ForgeDirection.class, TerminalIoConfig.class };
+        invoke("pullFluid", signature, tank, WEST, config);
+        check(tank.tank.getFluidAmount() == 1000 && storage.getFluidAmount(water) == 0,
+            "full storage never drains a source that cannot be refilled");
+        storage.setFluidLimit(water, 300);
+        invoke("pullFluid", signature, tank, WEST, config);
+        check(tank.tank.getFluidAmount() == 700 && storage.getFluidAmount(water) == 300,
+            "partial capacity drains only the amount that can enter the pool");
+        storage.clearFluidLimit(water);
+        invoke("pullFluid", signature, tank, WEST, config);
+        check(tank.tank.getFluidAmount() == 0 && storage.getFluidAmount(water) == 1000,
+            "drain-only source still transfers normally when capacity is available");
+        NBTTagCompound tag = new NBTTagCompound();
+        tag.setString("variant", "tagged-water");
+        FluidKey tagged = FluidKey.of(FluidRegistry.WATER, tag);
+        tank.tank.fill(tagged.prototype(1000), true);
+        storage.setFluidLimit(tagged, 200);
+        invoke("pullFluid", signature, tank, WEST, config);
+        check(storage.getFluidAmount(tagged) == 200 && tank.tank.getFluidAmount() == 800
+            && tagged.equals(FluidKey.of(tank.tank.getFluid())), "partial transfer preserves fluid NBT");
+        storage.clearFluidLimit(tagged);
+    }
+
+    private static void checkDirectFluidSelection() throws Exception {
+        StorageBusRegistry.clear();
+        Field active = SharedStorageManager.class.getDeclaredField("storage");
+        active.setAccessible(true);
+        Object previous = active.get(null);
+        ChannelCountingStorage storage = new ChannelCountingStorage();
+        FluidKey water = FluidKey.of(FluidRegistry.WATER, null);
+        FluidKey lava = FluidKey.of(FluidRegistry.LAVA, null);
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        storage.insertItemManual(iron, 100);
+        storage.insertFluidManual(water, 2000);
+        storage.insertFluidManual(lava, 4000);
+        for (int i = 0; i < 100; i++) {
+            NBTTagCompound variant = new NBTTagCompound();
+            variant.setInteger("variant", i);
+            storage.insertFluidManual(FluidKey.of(FluidRegistry.WATER, variant), 1000);
+        }
+        try {
+            active.set(null, storage);
+            TerminalIoConfig config = new TerminalIoConfig();
+            config.getOutputFilter(EAST).toggleFluid(water);
+            TestTank target = new TestTank();
+            Class<?>[] signature = { IFluidHandler.class, ForgeDirection.class, TerminalIoConfig.class, ForgeDirection.class };
+            invoke("pushFluid", signature, target, WEST, config, EAST);
+            check(target.tank.getFluidAmount() == 1000 && storage.getFluidAmount(water) == 1000,
+                "direct fluid lookup retains throughput and conservation");
+            check(storage.fluidSnapshots == 0, "one selected fluid never enumerates unrelated warehouse fluids");
+            target.tank.fill(water.prototype(3000), true);
+            invoke("pushFluid", signature, target, WEST, config, EAST);
+            check(storage.getFluidAmount(water) == 1000 && storage.fluidSnapshots == 0,
+                "full destination still avoids a full warehouse scan");
+            config.getOutputFilter(EAST).toggleFluid(lava);
+            TestTank multiple = new TestTank();
+            invoke("pushFluid", signature, multiple, WEST, config, EAST);
+            check(water.equals(FluidKey.of(multiple.tank.getFluid())) && multiple.tank.getFluidAmount() == 1000
+                && storage.getFluidAmount(lava) == 4000, "multiple fluids preserve the previous warehouse priority");
+            check(storage.fluidSnapshots == 1, "multiple fluids use the ordered snapshot fallback");
+            TileEntitySharedTerminal terminal = new TileEntitySharedTerminal();
+            terminal.getIo().setMode(EAST, false, Mode.PUSH);
+            terminal.getIo().getOutputFilter(EAST).toggleItem(iron);
+            terminal.getSizeInventory();
+            int before = storage.itemQueries;
+            storage.insertFluidManual(lava, 1);
+            terminal.getSizeInventory();
+            check(storage.itemQueries == before, "fluid changes do not rescan the terminal's item output index");
+            storage.insertItemManual(iron, 1);
+            terminal.getSizeInventory();
+            check(storage.itemQueries == before + 1, "item changes still refresh the terminal's output index");
+        } finally {
+            active.set(null, previous);
+        }
+    }
+
+    private static final class ChannelCountingStorage extends SharedStorage {
+        private int itemQueries;
+        private int fluidSnapshots;
+        @Override
+        public synchronized java.util.List<java.util.Map.Entry<ItemKey, Long>> snapshotItemsCached() {
+            itemQueries++;
+            return super.snapshotItemsCached();
+        }
+        @Override
+        public synchronized java.util.List<java.util.Map.Entry<FluidKey, Long>> snapshotFluidsCached() {
+            fluidSnapshots++;
+            return super.snapshotFluidsCached();
+        }
+    }
+
     private static final class TestTank extends TileEntity implements IFluidHandler {
         private final FluidTank tank = new FluidTank(4000);
-        public int fill(ForgeDirection from, FluidStack resource, boolean doFill) { return tank.fill(resource, doFill); }
+        private boolean allowFill = true;
+        public int fill(ForgeDirection from, FluidStack resource, boolean doFill) { return allowFill ? tank.fill(resource, doFill) : 0; }
         public FluidStack drain(ForgeDirection from, FluidStack resource, boolean doDrain) {
             return tank.getFluid() != null && tank.getFluid().isFluidEqual(resource) ? tank.drain(resource.amount, doDrain) : null;
         }
         public FluidStack drain(ForgeDirection from, int amount, boolean doDrain) { return tank.drain(amount, doDrain); }
-        public boolean canFill(ForgeDirection from, Fluid fluid) { return true; }
+        public boolean canFill(ForgeDirection from, Fluid fluid) { return allowFill; }
         public boolean canDrain(ForgeDirection from, Fluid fluid) { return true; }
         public FluidTankInfo[] getTankInfo(ForgeDirection from) { return new FluidTankInfo[] { tank.getInfo() }; }
     }

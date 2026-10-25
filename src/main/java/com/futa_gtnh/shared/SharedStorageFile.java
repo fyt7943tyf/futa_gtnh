@@ -8,6 +8,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 
@@ -53,8 +54,8 @@ public final class SharedStorageFile {
      * 读取共享存储；文件不存在时返回一个空存储。
      *
      * <p>
-     * 主文件读失败会自动尝试 {@code .bak}。两个都读不出来时<b>返回空存储并打印错误</b>，
-     * 而不是抛异常 —— 崩服比丢数据更糟，而且此时把坏文件留在原地还有人工抢救的余地。
+     * 主文件损坏时尝试 {@code .bak}。已有文件都无法读取或格式过新时抛异常，
+     * 避免把读取失败当成新仓库，并在后续保存中覆盖原文件和备份。
      */
     public static SharedStorage load(File worldDirectory) {
         SharedStorage storage = new SharedStorage();
@@ -83,12 +84,12 @@ public final class SharedStorageFile {
             return storage;
         }
 
-        if (primary.isFile()) {
-            LOG.error("共享存储：主文件和备份都无法读取，将以空存储启动。原文件保留在 {} 供人工抢救。", primary.getPath());
-        } else {
-            LOG.info("共享存储：主文件和备份都不存在，从空存储开始");
+        if (primary.exists() || backup.exists()) {
+            throw new IllegalStateException("共享存储：已有数据文件无法读取，停止载入以保护原文件和备份：" + primary.getPath());
         }
-        storage.clear();
+        LOG.info("共享存储：主文件和备份都不存在，从空存储开始");
+        // A failed primary parse may have partially populated the temporary instance.
+        storage = new SharedStorage();
         storage.markClean();
         return storage;
     }
@@ -117,11 +118,13 @@ public final class SharedStorageFile {
                     file.getName(),
                     version,
                     SharedStorage.FORMAT_VERSION);
-                return false;
+                throw new UnsupportedFormatException(file);
             }
 
             storage.readFromNbt(tag);
             return true;
+        } catch (UnsupportedFormatException e) {
+            throw e;
         } catch (Exception e) {
             LOG.error("共享存储：读取 {} 失败", file.getPath(), e);
             return false;
@@ -168,15 +171,14 @@ public final class SharedStorageFile {
             }
 
             try {
+                Files.move(
+                    tmp.toPath(),
+                    target.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                LOG.warn("共享存储：文件系统不支持原子替换，改用普通移动", e);
                 Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            } catch (IOException e) {
-                // 极少数文件系统不支持原子替换，退化成普通移动
-                LOG.warn("共享存储：原子替换失败，改用普通移动", e);
-                if (!tmp.renameTo(target)) {
-                    LOG.error("共享存储：重命名 {} -> {} 失败", tmp.getPath(), target.getPath());
-                    deleteQuietly(tmp);
-                    return false;
-                }
             }
         } catch (Exception e) {
             LOG.error("共享存储：保存失败", e);
@@ -190,6 +192,15 @@ public final class SharedStorageFile {
     private static void deleteQuietly(File file) {
         if (file.isFile() && !file.delete()) {
             LOG.warn("共享存储：无法删除临时文件 {}", file.getPath());
+        }
+    }
+
+    private static final class UnsupportedFormatException extends IllegalStateException {
+
+        private static final long serialVersionUID = 1L;
+
+        private UnsupportedFormatException(File file) {
+            super("共享存储：文件格式过新，拒绝回退到旧备份或覆盖数据：" + file.getPath());
         }
     }
 }

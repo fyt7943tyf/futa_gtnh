@@ -170,6 +170,7 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         }
         // GregTech is required by this mod; this hook must not depend on optional TinkersConstruct.
         if ("com.futa_gtnh.mixins.MixinProspectingPacket".equals(mixinClassName)) return true;
+        if ("com.futa_gtnh.mixins.MixinGTPump".equals(mixinClassName)) return true;
         if (mixinClassName.startsWith("com.futa_gtnh.mixins.MixinShimmerGT")) return true;
         if (NEI_MIXIN.equals(mixinClassName)) return neiPresent();
         // lootgames 目标的 mixin：装了 lootgames 才应用，没装连碰都不碰

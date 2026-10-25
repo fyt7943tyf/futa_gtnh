@@ -240,9 +240,10 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
     private void refreshOutputKeys() {
         SharedStorage storage = SharedStorageManager.getStorage();
+        int itemRevision = storage.getItemRevision();
         int outputRevision = io.getOutputRevision();
-        if (indexedStorage == storage && indexedRevision == storage.getRevision()
-            && indexedOutputRevision == outputRevision) return;
+        if (indexedStorage == storage && indexedRevision == itemRevision && indexedOutputRevision == outputRevision)
+            return;
         boolean hasItemOutput = false;
         for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
             if (io.getMode(face, false) == TerminalIoConfig.Mode.PUSH && !io.getOutputFilter(face)
@@ -266,7 +267,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
             }
         }
         indexedStorage = storage;
-        indexedRevision = storage.getRevision();
+        indexedRevision = itemRevision;
         indexedOutputRevision = outputRevision;
     }
 
@@ -340,7 +341,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
         ForgeDirection face = ForgeDirection.getOrientation(side);
         return key != null && faceForSlot(slot) == face
             && key.equals(ItemKey.of(stack))
-            && allowsOutput(face, key.prototype())
+            && allowsOutput(face, key)
             && visibleAmount(key) > 0;
     }
 
@@ -359,7 +360,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
             return inputLeftover == null ? null : inputLeftover.copy();
         }
         ItemKey key = keyForSlot(slot);
-        if (key == null || !allowsOutput(faceForSlot(slot), key.prototype())) return null;
+        if (key == null || !allowsOutput(faceForSlot(slot), key)) return null;
         int amount = visibleAmount(key);
         exposedAmounts.put(slot, amount);
         return amount > 0 ? key.prototype(amount) : null;
@@ -378,7 +379,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
             return out;
         }
         ItemKey key = keyForSlot(slot);
-        if (key == null || amount <= 0 || !allowsOutput(faceForSlot(slot), key.prototype())) return null;
+        if (key == null || amount <= 0 || !allowsOutput(faceForSlot(slot), key)) return null;
         int visible = visibleAmount(key);
         int exposed = exposedAmounts.containsKey(slot) ? exposedAmounts.get(slot) : visible;
         long taken = SharedStorageManager.getStorage()
@@ -444,7 +445,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
                     key.prototype()
                         .getMaxStackSize()));
         int delta = after - before;
-        if (delta < 0 && !allowsOutput(faceForSlot(slot), key.prototype())) return;
+        if (delta < 0 && !allowsOutput(faceForSlot(slot), key)) return;
         long changed = delta < 0 ? storage.extractItem(key, -delta) : storage.insertItem(key, delta);
         exposedAmounts.put(slot, delta < 0 ? before - (int) changed : before + (int) changed);
         if (changed > 0L) SharedStorageManager.broadcastItemChange(key);

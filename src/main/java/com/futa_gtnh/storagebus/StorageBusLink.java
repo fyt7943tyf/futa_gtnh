@@ -135,6 +135,13 @@ public final class StorageBusLink {
         if (!(tile instanceof IInventory) || !ExternalInventoryOps.isItemTarget(tile, targetFace())) return result;
 
         IInventory inventory = (IInventory) tile;
+        LinkedHashMap<ItemKey, Long> drawers = DrawerStorageCompat.snapshot(inventory);
+        if (drawers != null) {
+            for (Map.Entry<ItemKey, Long> entry : drawers.entrySet()) {
+                if (getConfig().allowsItem(entry.getKey())) result.put(entry.getKey(), entry.getValue());
+            }
+            return result;
+        }
         int size;
         try {
             size = inventory.getSizeInventory();

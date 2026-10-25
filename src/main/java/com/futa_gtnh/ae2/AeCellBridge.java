@@ -214,6 +214,8 @@ final class AeCellBridge {
     private static LinkedHashMap<FluidKey, IAEFluidStack> fluidMirror;
     private static int itemRevisionWatermark = -1;
     private static int fluidRevisionWatermark = -1;
+    private static SharedStorage itemMirrorStorage;
+    private static SharedStorage fluidMirrorStorage;
 
     // ==================================================================
     // 安装 / 重置
@@ -234,6 +236,8 @@ final class AeCellBridge {
         pendingFluids.clear();
         itemMirror = null;
         fluidMirror = null;
+        itemMirrorStorage = null;
+        fluidMirrorStorage = null;
         itemRevisionWatermark = -1;
         fluidRevisionWatermark = -1;
         lastPostedItems.clear();
@@ -366,11 +370,11 @@ final class AeCellBridge {
 
     private static void refreshItemMirror() {
         SharedStorage storage = SharedStorageManager.getStorage();
-        int revision = storage.getRevision();
-        if (itemMirror != null && itemRevisionWatermark == revision) return;
+        int revision = storage.getItemRevision();
+        if (itemMirror != null && itemMirrorStorage == storage && itemRevisionWatermark == revision) return;
 
         LinkedHashMap<ItemKey, IAEItemStack> fresh = new LinkedHashMap<>();
-        for (Map.Entry<ItemKey, Long> entry : storage.snapshotItems()) {
+        for (Map.Entry<ItemKey, Long> entry : storage.snapshotItemsCached()) {
             long amount = Math.min(entry.getValue(), REPORT_CAP);
             IAEItemStack cached = itemMirror == null ? null : itemMirror.get(entry.getKey());
             if (cached != null) {
@@ -388,16 +392,17 @@ final class AeCellBridge {
             fresh.put(entry.getKey(), created);
         }
         itemMirror = fresh;
+        itemMirrorStorage = storage;
         itemRevisionWatermark = revision;
     }
 
     private static void refreshFluidMirror() {
         SharedStorage storage = SharedStorageManager.getStorage();
-        int revision = storage.getRevision();
-        if (fluidMirror != null && fluidRevisionWatermark == revision) return;
+        int revision = storage.getFluidRevision();
+        if (fluidMirror != null && fluidMirrorStorage == storage && fluidRevisionWatermark == revision) return;
 
         LinkedHashMap<FluidKey, IAEFluidStack> fresh = new LinkedHashMap<>();
-        for (Map.Entry<FluidKey, Long> entry : storage.snapshotFluids()) {
+        for (Map.Entry<FluidKey, Long> entry : storage.snapshotFluidsCached()) {
             long amount = Math.min(entry.getValue(), REPORT_CAP);
             IAEFluidStack cached = fluidMirror == null ? null : fluidMirror.get(entry.getKey());
             if (cached != null) {
@@ -415,6 +420,7 @@ final class AeCellBridge {
             fresh.put(entry.getKey(), created);
         }
         fluidMirror = fresh;
+        fluidMirrorStorage = storage;
         fluidRevisionWatermark = revision;
     }
 
@@ -450,6 +456,8 @@ final class AeCellBridge {
             // 存储被结构性替换（换存档 / reload / 清空）：镜像作废 + 每个活跃网络全量重同步
             itemMirror = null;
             fluidMirror = null;
+            itemMirrorStorage = null;
+            fluidMirrorStorage = null;
             itemRevisionWatermark = -1;
             fluidRevisionWatermark = -1;
             lastPostedItems.clear();

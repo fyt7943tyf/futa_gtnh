@@ -27,6 +27,8 @@ import net.minecraft.world.chunk.IChunkProvider;
 import net.minecraft.world.storage.SaveHandlerMP;
 import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.Fluid;
+import net.minecraftforge.fluids.FluidContainerRegistry;
+import net.minecraftforge.fluids.ItemFluidContainer;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidTank;
@@ -36,6 +38,9 @@ import net.minecraftforge.oredict.OreDictionary;
 
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.client.ClientStorageBus;
+import com.futa_gtnh.exchange.DeltaRecorder;
+import com.futa_gtnh.exchange.FluidContainerHelper;
+import com.futa_gtnh.exchange.InventoryExchange;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -102,6 +107,18 @@ public final class StorageBusRegression {
         checkFilters();
         checkFluids();
         checkUnregister();
+        checkDuplicateTargets();
+        checkStaleFluidFill();
+        checkCursorContainerReturn();
+        checkExternalEscrow();
+        checkChannelCaches();
+        try {
+            Class.forName("com.jaquadro.minecraft.storagedrawers.api.storage.IDrawerGroup", false,
+                StorageBusRegression.class.getClassLoader());
+            Class.forName("com.futa_gtnh.storagebus.DrawerStorageRegression").getMethod("run").invoke(null);
+        } catch (ClassNotFoundException absent) {
+            System.out.println("Storage Drawers absent: ordinary storage bus paths passed without optional API");
+        }
 
         System.out.println("Storage bus regression passed: " + checks + " checks");
     }
@@ -584,6 +601,195 @@ public final class StorageBusRegression {
         f.bus.invalidate();
         check(f.storage.getItemAmount(iron) == 0, "unregistered bus disappears");
         check(f.target.total(iron) == 12, "unregister never deletes target contents");
+    }
+
+    private static void checkDuplicateTargets() {
+        Fixture f = Fixture.create();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        ItemKey gold = ItemKey.of(new ItemStack(Items.gold_ingot));
+        FluidKey water = FluidKey.of(new FluidStack(FluidRegistry.WATER, 1));
+        f.target.inventory.setInventorySlotContents(0, iron.prototype(64));
+        f.target.inventory.setInventorySlotContents(1, gold.prototype(8));
+        f.target.tank.fill(water.prototype(3000), true);
+        refresh(f);
+        TileEntityStorageBus other = new TileEntityStorageBus();
+        other.xCoord = 2;
+        other.setWorldObj(f.world);
+        other.addFace(WEST);
+        check(f.storage.getItemAmount(iron) == 64 && f.storage.getFluidAmount(water) == 3000,
+            "two faces on one target never double-count physical stock");
+        check(f.storage.getItemTotal() == 72 && f.storage.itemTypeCount() == 2,
+            "totals and snapshots count a shared target once");
+        check(f.storage.extractItem(iron, 31) == 31 && f.storage.getItemAmount(iron) == 33,
+            "withdraw refreshes every alias before returning");
+        check(f.storage.insertItem(iron, 12) == 12 && f.storage.getItemAmount(iron) == 45,
+            "insert refreshes every alias before returning");
+        check(f.storage.extractFluid(water, 1000) == 1000 && f.storage.getFluidAmount(water) == 2000,
+            "fluid aliases stay consistent after extraction");
+        f.storage.setItemLimit(iron, 64);
+        f.storage.setFluidLimit(water, 2500);
+        check(f.storage.insertItem(iron, 20) == 19 && f.target.total(iron) == 64,
+            "automation limit uses unique target stock");
+        check(f.storage.insertFluid(water, 700) == 500 && f.target.tank.getFluidAmount() == 2500,
+            "fluid automation limit uses unique target stock");
+        f.bus.getConfig(EAST).setItemFilter(0, iron);
+        other.getConfig(WEST).setItemFilter(0, gold);
+        StorageBusRegistry.refreshAll();
+        check(f.storage.getItemAmount(iron) == 64 && f.storage.getItemAmount(gold) == 8,
+            "disjoint alias filters retain both keys");
+        f.bus.getConfig(EAST).setAccess(StorageBusConfig.AccessMode.WRITE_ONLY);
+        refresh(f);
+        check(f.storage.getItemAmount(iron) == 0 && f.storage.itemSpaceLeft(iron) == 0,
+            "write-only alias remains hidden but still counts toward limits");
+        other.getConfig(WEST).clearItemFilters();
+        StorageBusRegistry.refresh(other.getLink(WEST));
+        check(f.storage.getItemAmount(iron) == 64 && f.storage.getFluidAmount(water) == 2500,
+            "readable alias exposes hidden target without duplicating it");
+        other.invalidate();
+        check(f.storage.getItemAmount(iron) == 0 && f.storage.getFluidAmount(water) == 0,
+            "unregister removes only the last readable alias contribution");
+        f.bus.getConfig(EAST).setAccess(StorageBusConfig.AccessMode.READ_WRITE);
+        refresh(f);
+        check(f.storage.getItemAmount(iron) == 64, "surviving alias remains available");
+        TestContainer replacement = new TestContainer();
+        replacement.setWorldObj(f.world);
+        replacement.inventory.setInventorySlotContents(0, iron.prototype(7));
+        f.world.target = replacement;
+        refresh(f);
+        check(f.storage.getItemAmount(iron) == 7, "target replacement removes the old physical inventory");
+        TestWorld separate = new TestWorld();
+        separate.target = new TestContainer();
+        separate.target.setWorldObj(separate);
+        separate.target.inventory.setInventorySlotContents(0, iron.prototype(13));
+        separate.bus = new TileEntityStorageBus();
+        separate.bus.setWorldObj(separate);
+        separate.bus.addFace(EAST);
+        check(f.storage.getItemAmount(iron) == 20, "different physical targets still sum their stock");
+        separate.bus.invalidate();
+        check(f.storage.getItemAmount(iron) == 7, "removing one target preserves the other target's contribution");
+        f.storage.clearItemLimit(iron);
+        f.storage.clearFluidLimit(water);
+    }
+
+    private static void checkStaleFluidFill() {
+        Fixture f = Fixture.create();
+        FluidKey water = FluidKey.of(new FluidStack(FluidRegistry.WATER, 1));
+        FluidContainerRegistry.registerFluidContainer(water.prototype(1000), new ItemStack(Items.water_bucket),
+            new ItemStack(Items.bucket));
+        f.target.tank.fill(water.prototype(1000), true);
+        refresh(f);
+        f.target.tank.drain(900, true);
+        TestPlayer player = new TestPlayer(f.world);
+        player.inventory.mainInventory[0] = new ItemStack(Items.bucket);
+        DeltaRecorder recorder = new DeltaRecorder(f.storage, null);
+        check(InventoryExchange.fillContainers(player, water, 1000, f.storage, recorder) == 0,
+            "stale fluid preview cannot create a full bucket from a partial extraction");
+        check(player.inventory.mainInventory[0].getItem() == Items.bucket
+            && f.storage.getFluidAmount(water) == 100,
+            "failed partial fill keeps the empty bucket and refunds every mB");
+        check(FluidContainerHelper.getFluid(player.inventory.mainInventory[0]) == null,
+            "no filled container is created by stale stock");
+        f.storage.insertFluidManualDirect(water, 900);
+        check(InventoryExchange.fillContainers(player, water, 1000, f.storage, recorder) == 1000,
+            "exact stock still fills normally after rollback");
+        check(player.inventory.mainInventory[0].getItem() == Items.water_bucket && f.storage.getFluidAmount(water) == 0,
+            "normal filling conserves total fluid");
+        Fixture partial = Fixture.create();
+        partial.target.tank.fill(water.prototype(1000), true);
+        refresh(partial);
+        partial.target.tank.drain(900, true);
+        TestPlayer partialPlayer = new TestPlayer(partial.world);
+        partialPlayer.inventory.mainInventory[0] = new ItemStack(new ItemFluidContainer(0, 1000));
+        check(InventoryExchange.fillContainers(partialPlayer, water, 1000, partial.storage,
+            new DeltaRecorder(partial.storage, null)) == 100, "flexible container fills only the actual extracted amount");
+        FluidStack contents = FluidContainerHelper.getFluid(partialPlayer.inventory.mainInventory[0]);
+        check(contents != null && contents.amount == 100 && partial.storage.getFluidAmount(water) == 0,
+            "partial container contents and storage deduction agree");
+    }
+
+    private static void checkCursorContainerReturn() {
+        Fixture f = Fixture.create();
+        StorageBusRegistry.clear();
+        FluidKey water = FluidKey.of(new FluidStack(FluidRegistry.WATER, 1));
+        f.storage.insertFluidManual(water, 1000);
+        TestPlayer player = new TestPlayer(f.world);
+        for (int i = 0; i < 36; i++) player.inventory.mainInventory[i] = new ItemStack(Items.stone_axe);
+        player.inventory.mainInventory[0] = new ItemStack(Items.bucket, 15);
+        player.inventory.setItemStack(new ItemStack(Items.bucket, 4));
+        DeltaRecorder recorder = new DeltaRecorder(f.storage, null);
+        check(InventoryExchange.fillCursorContainer(player, water, 1000, f.storage, recorder) == 0,
+            "partial empty-container return aborts before editing real inventory");
+        check(player.inventory.mainInventory[0].stackSize == 15 && player.inventory.getItemStack().stackSize == 4
+            && f.storage.getFluidAmount(water) == 1000,
+            "failed cursor fill preserves all 19 empty buckets and every mB");
+        player.inventory.mainInventory[1] = null;
+        check(InventoryExchange.fillCursorContainer(player, water, 1000, f.storage, recorder) == 1000,
+            "cursor fill succeeds when all remaining empties fit");
+        check(player.inventory.getItemStack().getItem() == Items.water_bucket
+            && player.inventory.getItemStack().stackSize == 1
+            && player.inventory.mainInventory[0].stackSize == 16
+            && player.inventory.mainInventory[1].stackSize == 2
+            && f.storage.getFluidAmount(water) == 0,
+            "successful partial cursor fill conserves containers and fluid");
+    }
+
+    private static void checkExternalEscrow() {
+        Fixture f = Fixture.create();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        FluidKey water = FluidKey.of(new FluidStack(FluidRegistry.WATER, 1));
+        f.target.inventory.setInventorySlotContents(0, iron.prototype(64));
+        f.target.tank.fill(water.prototype(1000), true);
+        refresh(f);
+        f.storage.markClean();
+        SharedStorage.CraftingReservation items = f.storage.reserveItemForCrafting(iron, 10);
+        check(items != null && f.storage.isDirty(), "bus-only item reservation marks durable escrow dirty");
+        f.storage.markClean();
+        SharedStorage.CraftingReservation fluids = f.storage.reserveFluidForCrafting(water, 100);
+        check(fluids != null && f.storage.isDirty(), "bus-only fluid reservation marks durable escrow dirty");
+        SharedStorage restored = new SharedStorage();
+        restored.readFromNbt(f.storage.writeToNbt());
+        check(restored.snapshotCraftingItems().get(0).getValue() == 10L
+            && restored.snapshotCraftingFluids().get(0).getValue() == 100L,
+            "uncertain external reservations survive serialization");
+        items.finish(10);
+        fluids.finish(100);
+        check(f.storage.getItemAmount(iron) == 64 && f.storage.getFluidAmount(water) == 1000,
+            "successful reservation refunds still conserve external stock");
+    }
+
+    private static void checkChannelCaches() {
+        Fixture f = Fixture.create();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        FluidKey water = FluidKey.of(FluidRegistry.WATER, null);
+        f.target.inventory.setInventorySlotContents(0, iron.prototype(10));
+        f.target.tank.fill(water.prototype(1000), true);
+        refresh(f);
+        Object items = f.storage.snapshotItemsCached();
+        Object fluids = f.storage.snapshotFluidsCached();
+        f.target.tank.fill(water.prototype(100), true);
+        refresh(f);
+        check(f.storage.snapshotItemsCached() == items && f.storage.snapshotFluidsCached() != fluids,
+            "fluid bus refresh does not invalidate item snapshots");
+        fluids = f.storage.snapshotFluidsCached();
+        f.target.inventory.setInventorySlotContents(0, iron.prototype(11));
+        refresh(f);
+        check(f.storage.snapshotFluidsCached() == fluids && f.storage.snapshotItemsCached() != items,
+            "item bus refresh does not invalidate fluid snapshots");
+        f.bus.getConfig(EAST).setAccess(StorageBusConfig.AccessMode.WRITE_ONLY);
+        refresh(f);
+        check(f.storage.snapshotItemsCached().isEmpty() && f.storage.snapshotFluidsCached().isEmpty(),
+            "access-mode changes invalidate the affected readable channels");
+        items = f.storage.snapshotItemsCached();
+        fluids = f.storage.snapshotFluidsCached();
+        f.target.tank.fill(water.prototype(100), true);
+        refresh(f);
+        check(f.storage.snapshotItemsCached() == items && f.storage.snapshotFluidsCached() == fluids,
+            "hidden stock changes preserve both readable caches");
+        f.bus.getConfig(EAST).setAccess(StorageBusConfig.AccessMode.READ_WRITE);
+        refresh(f);
+        check(f.storage.snapshotItemsCached().get(0).getValue() == 11L
+            && f.storage.snapshotFluidsCached().get(0).getValue() == 1200L,
+            "restoring read access exposes fresh stock in both channels");
     }
 
     // ==================================================================

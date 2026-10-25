@@ -39,7 +39,10 @@ public class ModEventHandler {
 
     @SubscribeEvent
     public void onWorldTick(TickEvent.WorldTickEvent event) {
-        if (event.side == Side.SERVER && event.phase == TickEvent.Phase.END) SwiftStepGrowthAura.tickWorld(event.world);
+        if (event.side == Side.SERVER && event.phase == TickEvent.Phase.END) {
+            SwiftStepGrowthAura.tickWorld(event.world);
+            PumpFluidUpdates.tickWorld(event.world);
+        }
     }
 
     @SubscribeEvent
@@ -54,7 +57,10 @@ public class ModEventHandler {
 
     @SubscribeEvent
     public void onWorldUnload(net.minecraftforge.event.world.WorldEvent.Unload event) {
-        if (!event.world.isRemote) SwiftStepGrowthAura.forget(event.world);
+        if (!event.world.isRemote) {
+            SwiftStepGrowthAura.forget(event.world);
+            PumpFluidUpdates.forget(event.world);
+        }
     }
 
     public static void register() {

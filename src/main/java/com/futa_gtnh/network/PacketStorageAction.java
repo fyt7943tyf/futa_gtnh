@@ -98,7 +98,7 @@ public class PacketStorageAction implements IMessage {
     /** 取出一个物品，并且只放进玩家的空槽位（Inventory Bogo Sorter 的 Ctrl+右键）。 */
     public static final byte WITHDRAW_ITEM_EMPTY = 23;
 
-    /** 把共享存储中的物品尽量全部转移到玩家背包（Inventory Bogo Sorter 的空格+左键）。 */
+    /** 旧客户端的整库转移动作；保留协议编号，新版空格左键使用带物品键的 WITHDRAW_ITEM。 */
     public static final byte WITHDRAW_ALL = 24;
 
     // ---- 终端 ----

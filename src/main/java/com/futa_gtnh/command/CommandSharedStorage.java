@@ -107,6 +107,10 @@ public class CommandSharedStorage extends CommandBase {
 
             case "save":
                 if (!requireOp(sender)) return;
+                if (SharedStorageManager.isSavingBlocked()) {
+                    reply(sender, EnumChatFormatting.RED + "读取失败后已暂停保存以保护原文件；修复数据文件后请重新 reload。");
+                    return;
+                }
                 SharedStorageManager.saveNow();
                 reply(sender, EnumChatFormatting.GREEN + "共享存储已保存。");
                 break;
@@ -161,6 +165,9 @@ public class CommandSharedStorage extends CommandBase {
         reply(
             sender,
             EnumChatFormatting.YELLOW + "待写盘改动：" + EnumChatFormatting.WHITE + (storage.isDirty() ? "有" : "无"));
+        if (SharedStorageManager.isSavingBlocked()) {
+            reply(sender, EnumChatFormatting.RED + "读取失败后已暂停保存；修复数据文件后请重新 reload。");
+        }
     }
 
     /**

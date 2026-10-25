@@ -235,6 +235,8 @@ public final class SharedStorageReadApiRegression {
                     .getGeneration()),
             "restart changes generation");
         SharedStorageManager.onServerStopping();
+        SharedStoragePersistenceRegression.run();
+        StorageCachePerformanceCheck.run();
         System.out.println("SharedStorageReadApi regression checks passed");
     }
 
