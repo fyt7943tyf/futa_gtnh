@@ -40,6 +40,17 @@ public final class SupplySource {
         return id;
     }
 
+    public boolean hasPosition() {
+        return (kind == AE_BUS || kind == IO || kind == AE_MACHINE) && x > -29_999_856
+            && x < 29_999_856
+            && z > -29_999_856
+            && z < 29_999_856
+            && y >= 0
+            && y < 4096
+            && side >= -1
+            && side < 6;
+    }
+
     public NBTTagCompound write() {
         NBTTagCompound tag = new NBTTagCompound();
         tag.setInteger("kind", kind);

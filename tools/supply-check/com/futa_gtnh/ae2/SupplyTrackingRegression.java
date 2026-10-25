@@ -78,6 +78,7 @@ public final class SupplyTrackingRegression {
         realCellAndBoundary();
         optimizedAttribution();
         com.futa_gtnh.supply.SupplyIoRegression.run();
+        com.futa_gtnh.supply.SupplyNavigationRegression.run();
         System.out.println("AE supply tracking: " + checks + " checks passed (real bus Mixin and shared-cell accounting)");
     }
 

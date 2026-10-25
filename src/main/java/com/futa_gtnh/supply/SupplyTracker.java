@@ -178,6 +178,7 @@ public final class SupplyTracker {
         NBTTagCompound tag = new NBTTagCompound();
         tag.setBoolean("enabled", enabled());
         tag.setBoolean("writable", writable);
+        tag.setBoolean("teleportEnabled", enabled() && Config.enableSupplyTeleport);
         tag.setLong("age", clock);
         Watch watch = WATCHES.get(key);
         tag.setLong("threshold", watch == null ? -1 : watch.threshold);

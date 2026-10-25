@@ -16,6 +16,7 @@ public class Config {
     public static boolean enableDebugLogging = false;
     /** Bounded AE/IO inlet accounting; no history is collected while disabled. */
     public static boolean enableSupplyTracking = true;
+    public static boolean enableSupplyTeleport = true;
 
     // ------------------------------------------------------------------
     // 访问控制
@@ -670,6 +671,11 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             enableSupplyTracking,
             "启用原料领用追踪和低库存提醒。仅在实际 AE/IO 搬运时累加，保留最近一小时的分钟汇总。");
+        enableSupplyTeleport = configuration.getBoolean(
+            "enableSupplyTeleport",
+            Configuration.CATEGORY_GENERAL,
+            enableSupplyTeleport,
+            "允许从原料追踪页面传送到已记录的设备附近（可跨已加载维度）。只寻找现成安全落点，不开洞；每人间隔至少5秒。");
 
         guiSortMode = configuration.getInt(
             "guiSortMode",

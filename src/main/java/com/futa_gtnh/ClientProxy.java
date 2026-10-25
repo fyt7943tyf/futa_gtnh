@@ -61,6 +61,7 @@ public class ClientProxy extends CommonProxy {
         // 世界渲染事件在 MinecraftForge.EVENT_BUS 上，不在 FML 的那条总线上。
         // 挂错了不会报错，只会永远收不到事件 —— 光渲染器会安静地什么都不画。
         MinecraftForge.EVENT_BUS.register(new LocatorBeamRenderer());
+        MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.client.SupplyHighlightRenderer());
         MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.rts.client.RtsOverlayRenderer());
 
         // 俯瞰模式的客户端 tick（相机推进/守卫）。TickEvent 在 FML 总线上，

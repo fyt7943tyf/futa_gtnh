@@ -19,7 +19,7 @@ import io.netty.buffer.ByteBuf;
 /** On-demand, rate-limited telemetry/settings request, bound to the player's current terminal window. */
 public final class PacketSupplyRequest implements IMessage {
 
-    public static final int QUERY = 0, RENAME = 1, WATCH = 2;
+    public static final int QUERY = 0, RENAME = 1, WATCH = 2, TELEPORT = 3;
     private static final Map<UUID, long[]> LAST = new HashMap<>();
     public int window, sequence, operation, minutes = 10, sourcePage, watchPage, listMode;
     public NBTTagCompound key;
@@ -46,7 +46,7 @@ public final class PacketSupplyRequest implements IMessage {
         source = ByteBufUtils.readUTF8String(buf);
         name = ByteBufUtils.readUTF8String(buf);
         key = ByteBufUtils.readTag(buf);
-        valid = operation <= WATCH && listMode <= 2
+        valid = operation <= TELEPORT && listMode <= 2
             && source.length() <= 160
             && name.length() <= 96
             && (key == null || key.toString()
@@ -94,11 +94,12 @@ public final class PacketSupplyRequest implements IMessage {
             long now = System.nanoTime();
             synchronized (LAST) {
                 long[] last = LAST.get(player.getUniqueID());
-                int slot = message.operation == QUERY ? 0 : 1;
-                if (last != null && now - last[slot] < (slot == 0 ? 1_000_000_000L : 250_000_000L)) return null;
+                int slot = message.operation == QUERY ? 0 : message.operation == TELEPORT ? 2 : 1;
+                long interval = slot == 0 ? 1_000_000_000L : slot == 2 ? 5_000_000_000L : 250_000_000L;
+                if (last != null && last[slot] != 0 && now - last[slot] < interval) return null;
                 if (LAST.size() >= 256) LAST.clear();
                 if (last == null) {
-                    last = new long[2];
+                    last = new long[3];
                     LAST.put(player.getUniqueID(), last);
                 }
                 last[slot] = now;
@@ -107,6 +108,15 @@ public final class PacketSupplyRequest implements IMessage {
                 if (!authorized(player, message.window)
                     || !SupplyClients.supports(player.getUniqueID(), player.playerNetServerHandler)) return;
                 Object key = SupplyTracker.readKey(message.key);
+                if (message.operation == TELEPORT) {
+                    NBTTagCompound result = new NBTTagCompound();
+                    result.setTag(
+                        "navigate",
+                        com.futa_gtnh.supply.SupplyNavigation.navigate(player, key, message.source));
+                    NetworkHandler.INSTANCE
+                        .sendTo(new PacketSupplySnapshot(message.window, message.sequence, result), player);
+                    return;
+                }
                 boolean okay = true;
                 if (message.operation == RENAME) okay = SupplyTracker.rename(message.source, message.name);
                 else if (message.operation == WATCH)

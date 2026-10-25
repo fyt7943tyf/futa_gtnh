@@ -130,6 +130,11 @@ public final class SupplyLedgerRegression {
             && SupplyTracker.readKey(decoded.key).equals(SupplyTracker.readKey(request.key)),"request exact key/window/sequence/long round trip");
         Field valid=PacketSupplyRequest.class.getDeclaredField("valid"); valid.setAccessible(true);
         check(valid.getBoolean(decoded),"valid request accepted");
+        request.operation=PacketSupplyRequest.TELEPORT;request.source=source(1).id();
+        buf=Unpooled.buffer();request.toBytes(buf);decoded=new PacketSupplyRequest();decoded.fromBytes(buf);buf.release();
+        check(valid.getBoolean(decoded) && decoded.operation==3 && decoded.source.equals(source(1).id()),"teleport extends the existing request layout with only a recorded source id");
+        request.operation=4;buf=Unpooled.buffer();request.toBytes(buf);decoded=new PacketSupplyRequest();decoded.fromBytes(buf);buf.release();
+        check(!valid.getBoolean(decoded),"unknown future operation rejected");
         buf=Unpooled.buffer().writeZero(8193); decoded=new PacketSupplyRequest(); decoded.fromBytes(buf); buf.release();
         check(!valid.getBoolean(decoded),"oversized request rejected before NBT parsing");
         buf=Unpooled.buffer().writeZero(29); decoded=new PacketSupplyRequest(); decoded.fromBytes(buf); buf.release();

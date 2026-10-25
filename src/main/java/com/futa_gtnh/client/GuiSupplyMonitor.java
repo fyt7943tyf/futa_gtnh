@@ -41,6 +41,8 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
         watchPage;
     private int minutes = 10, ticks, lastRevision = -1, requested, applied, editMode;
     private long lastRequest;
+    private long lastTeleport;
+    private PacketSupplySnapshot handledNavigation;
     private boolean listDirty = true;
     private boolean queryPending;
 
@@ -85,9 +87,12 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
         button(9, listWidth + 44, panelHeight - 26, 34, tr("rename"));
         button(10, listWidth + 80, panelHeight - 26, 34, tr("coords"));
         button(11, panelWidth - 48, panelHeight - 26, 38, tr("done"));
+        button(13, listWidth + 8, panelHeight - 70, 64, tr("highlight"));
+        button(14, listWidth + 74, panelHeight - 70, 64, tr("teleport"));
         Keyboard.enableRepeatEvents(true);
         listDirty = true;
         request(PacketSupplyRequest.QUERY, "", "", -1);
+        updateButtons();
     }
 
     private void button(int id, int x, int y, int size, String text) {
@@ -104,6 +109,15 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
         if (editor != null) editor.updateCursorCounter();
         ticks++;
         PacketSupplySnapshot response = ClientSupplyState.response();
+        PacketSupplySnapshot navigation = ClientSupplyState.navigation();
+        if (navigation != null && navigation != handledNavigation
+            && navigation.window == container.windowId
+            && navigation.sequence == requested) {
+            handledNavigation = navigation;
+            error = tr(
+                navigation.data.getCompoundTag("navigate")
+                    .getString("message"));
+        }
         if (response != null && response.window == container.windowId
             && response.sequence == requested
             && response.sequence != applied) {
@@ -173,6 +187,13 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
             else if (b.id == 10)
                 b.enabled &= selectedSource != null && selectedSource.getInteger("kind") != SupplySource.UNKNOWN
                     && selectedSource.getInteger("kind") != SupplySource.PLAYER;
+            else if (b.id == 13 || b.id == 14) {
+                SupplySource source = selectedSource == null ? null : SupplySource.read(selectedSource);
+                b.enabled &= source != null && source.hasPosition();
+                if (b.id == 13) b.displayString = tr(SupplyHighlight.selected(source) ? "clearHighlight" : "highlight");
+                else b.enabled &= data.getBoolean("teleportEnabled")
+                    && System.currentTimeMillis() - lastTeleport >= 5000;
+            }
         }
     }
 
@@ -232,6 +253,21 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
                 break;
             case 11:
                 close();
+                break;
+            case 13:
+                SupplySource source = SupplySource.read(selectedSource);
+                if (SupplyHighlight.selected(source)) {
+                    SupplyHighlight.clear();
+                    error = tr("highlightCleared");
+                } else {
+                    SupplyHighlight.show(source);
+                    error = tr("highlighted");
+                }
+                break;
+            case 14:
+                lastTeleport = System.currentTimeMillis();
+                error = tr("travelling");
+                request(PacketSupplyRequest.TELEPORT, selectedSource.getString("id"), "", -1);
                 break;
             default:
                 break;
@@ -307,7 +343,7 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
                 : tr("sampling");
             text(trend, x, 56, available, rate < 0 ? 0xFFCC77 : 0xAAAAAA);
             text(tr("totals", data.getLong("outgoing"), data.getLong("incoming")), x, 68, available, 0xAAAAAA);
-            text(tr("sources"), x, 85, available, 0xDDDDDD);
+            text(data.getLong("dropped") > 0 ? tr("capped") : tr("sources"), x, 85, available, 0xDDDDDD);
             NBTTagList sources = data.getTagList("sources", 10);
             sourceScroll = Math.max(0, Math.min(sourceScroll, sources.tagCount() - visibleSourceRows()));
             for (int row = 0; row < visibleSourceRows() && row + sourceScroll < sources.tagCount(); row++) {
@@ -346,7 +382,6 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
             listWidth - 58,
             0xAAAAAA);
         if (!data.getBoolean("enabled")) text(tr("disabled"), x, 99, available, 0xFF7777);
-        if (data.getLong("dropped") > 0) text(tr("capped"), x, panelHeight - 62, available, 0xFFAA55);
         if (error != null) text(error, 8, panelHeight - 9, panelWidth - 16, 0xFFAA55);
         if (editMode != 0) drawEditor();
         else if (mode >= 2 && mouseX >= left + 8
@@ -354,11 +389,20 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
             && mouseY >= top + 44
             && mouseY < top + 58)
             drawHoveringText(java.util.Collections.singletonList(tr("pageSearch")), mouseX, mouseY, fontRendererObj);
+        else if (mouseY >= top + panelHeight - 70 && mouseY < top + panelHeight - 54
+            && mouseX >= left + listWidth + 8
+            && mouseX < left + listWidth + 138)
+            drawHoveringText(
+                java.util.Collections
+                    .singletonList(tr(mouseX < left + listWidth + 74 ? "highlightTip" : "teleportTip")),
+                mouseX,
+                mouseY,
+                fontRendererObj);
         else drawSourceTooltip(mouseX, mouseY);
     }
 
     private int visibleSourceRows() {
-        return Math.max(1, Math.min(8, (panelHeight - 144) / 17));
+        return Math.max(1, Math.min(8, (panelHeight - 166) / 17));
     }
 
     private static Object key(StorageViewEntry entry) {

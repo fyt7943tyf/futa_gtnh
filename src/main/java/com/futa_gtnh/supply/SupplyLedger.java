@@ -73,6 +73,14 @@ public final class SupplyLedger {
         return sources.get(id);
     }
 
+    /** Navigation accepts only a source actually recorded for this exact resource within the last hour. */
+    public synchronized SupplySource source(Object key, String id, long minute) {
+        SupplySource source = sources.get(id);
+        Entry entry = entries.get(key);
+        Ring ring = source == null || entry == null ? null : entry.bySource.get(source);
+        return ring != null && minute >= ring.lastMinute && minute - ring.lastMinute < MINUTES ? source : null;
+    }
+
     public synchronized int keyCount() {
         return entries.size();
     }

@@ -20,6 +20,8 @@ import cpw.mods.fml.common.network.FMLNetworkEvent;
 public final class ClientSupplyState {
 
     private static volatile PacketSupplySnapshot response;
+    private static volatile PacketSupplySnapshot navigation;
+    private static PacketSupplySnapshot handledNavigation;
     private static int sequence;
     private static volatile net.minecraft.network.INetHandler connection;
     private static volatile boolean supported;
@@ -33,12 +35,17 @@ public final class ClientSupplyState {
             supported = true;
             return;
         }
-        if (packet.data.hasKey("alert", 10)) ALERTS.offer(packet.data.getCompoundTag("alert"));
+        if (packet.data.hasKey("navigate", 10)) navigation = packet;
+        else if (packet.data.hasKey("alert", 10)) ALERTS.offer(packet.data.getCompoundTag("alert"));
         else response = packet;
     }
 
     public static PacketSupplySnapshot response() {
         return response;
+    }
+
+    public static PacketSupplySnapshot navigation() {
+        return navigation;
     }
 
     public static boolean supported() {
@@ -64,10 +71,22 @@ public final class ClientSupplyState {
             connection = mc.getNetHandler();
             supported = false;
             response = null;
+            navigation = null;
+            handledNavigation = null;
+            SupplyHighlight.clear();
             ALERTS.clear();
             com.futa_gtnh.network.NetworkHandler.INSTANCE.sendToServer(
                 new com.futa_gtnh.network.PacketStorageAction(
                     com.futa_gtnh.network.PacketStorageAction.SUPPLY_CLIENT_READY));
+        }
+        PacketSupplySnapshot arrival = navigation;
+        if (arrival != null && arrival != handledNavigation) {
+            handledNavigation = arrival;
+            NBTTagCompound result = arrival.data.getCompoundTag("navigate");
+            if (result.hasKey("target", 10))
+                SupplyHighlight.show(com.futa_gtnh.supply.SupplySource.read(result.getCompoundTag("target")));
+            mc.thePlayer
+                .addChatMessage(new ChatComponentTranslation("futa_gtnh.supply." + result.getString("message")));
         }
         if (ALERTS.isEmpty()) return;
         for (int i = 0; i < 4; i++) {
@@ -92,6 +111,9 @@ public final class ClientSupplyState {
     public void disconnected(FMLNetworkEvent.ClientDisconnectionFromServerEvent event) {
         ALERTS.clear();
         response = null;
+        navigation = null;
+        handledNavigation = null;
+        SupplyHighlight.clear();
         supported = false;
         connection = null;
     }

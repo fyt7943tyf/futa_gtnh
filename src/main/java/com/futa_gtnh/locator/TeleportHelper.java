@@ -175,6 +175,45 @@ public final class TeleportHelper {
         return findSafeSpot(world, cx, cy, cz, HORIZONTAL_RADIUS, VERTICAL_RADIUS);
     }
 
+    /** Factory navigation: bounded nearby search, no excavation, and full collision/hazard checks. */
+    public static int[] findSafeSpotNearby(World world, net.minecraft.entity.Entity player, int cx, int cy, int cz) {
+        IChunkProvider provider = world.getChunkProvider();
+        if (provider == null) return null;
+        int[] best = null;
+        long bestDistance = Long.MAX_VALUE;
+        for (int dx = -NEAR_HORIZONTAL_RADIUS; dx <= NEAR_HORIZONTAL_RADIUS; dx++) {
+            for (int dz = -NEAR_HORIZONTAL_RADIUS; dz <= NEAR_HORIZONTAL_RADIUS; dz++) {
+                int x = cx + dx, z = cz + dz;
+                // World collision checks inspect neighboring columns. Do not load them implicitly.
+                if (!provider.chunkExists((x - 1) >> 4, (z - 1) >> 4)
+                    || !provider.chunkExists((x + 1) >> 4, (z - 1) >> 4)
+                    || !provider.chunkExists((x - 1) >> 4, (z + 1) >> 4)
+                    || !provider.chunkExists((x + 1) >> 4, (z + 1) >> 4)) continue;
+                for (int dy = -NEAR_VERTICAL_RADIUS; dy <= NEAR_VERTICAL_RADIUS; dy++) {
+                    long distance = (long) dx * dx + (long) dy * dy + (long) dz * dz;
+                    if (distance >= bestDistance) continue;
+                    int y = cy + dy;
+                    if (!isSafeStandingSpot(world, x, y, z) || liquidAround(world, x, y, z)) continue;
+                    if (world.getBlock(x, y - 1, z) == Blocks.cactus || world.getBlock(x, y, z) == Blocks.portal
+                        || world.getBlock(x, y, z) == Blocks.end_portal) continue;
+                    double half = Math.max(0.3D, player.width / 2D);
+                    net.minecraft.util.AxisAlignedBB body = net.minecraft.util.AxisAlignedBB.getBoundingBox(
+                        x + 0.5D - half,
+                        y,
+                        z + 0.5D - half,
+                        x + 0.5D + half,
+                        y + Math.max(1.8D, player.height),
+                        z + 0.5D + half);
+                    if (!world.getCollidingBoundingBoxes(player, body)
+                        .isEmpty()) continue;
+                    bestDistance = distance;
+                    best = new int[] { x, y, z };
+                }
+            }
+        }
+        return best;
+    }
+
     private static int[] findSafeSpot(World world, int cx, int cy, int cz, int horizontal, int vertical) {
         IChunkProvider provider = world.getChunkProvider();
         if (provider == null) return null;

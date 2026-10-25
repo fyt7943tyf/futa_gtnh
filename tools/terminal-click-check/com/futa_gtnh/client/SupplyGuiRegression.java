@@ -52,6 +52,14 @@ public final class SupplyGuiRegression {
         net.minecraft.network.INetHandler stale=(net.minecraft.network.INetHandler)java.lang.reflect.Proxy.newProxyInstance(
             SupplyGuiRegression.class.getClassLoader(),new Class<?>[]{net.minecraft.network.INetHandler.class},(proxy,method,args)->null);
         field(ClientSupplyState.class,"connection").set(null,active);
+        SupplySource marker=new SupplySource(SupplySource.AE_MACHINE,-1,-1,64,16,3,"");
+        SupplyHighlight.show(marker);
+        check(SupplyHighlight.selected(marker) && SupplyHighlight.label().contains("-1, 64, 16"),"highlight retains the exact dimension and fallback-device position");
+        SupplyHighlight.show(SupplySource.UNIDENTIFIED);
+        check(SupplyHighlight.selected(marker),"unknown coordinates cannot replace a valid world marker");
+        field(SupplyHighlight.class,"expires").setLong(null,System.nanoTime()-1);
+        check(SupplyHighlight.target()==null,"world marker expires without any world polling");
+        SupplyHighlight.show(marker);
         NBTTagCompound ready=new NBTTagCompound(); ready.setBoolean("ready",true);
         ClientSupplyState.receive(stale,new com.futa_gtnh.network.PacketSupplySnapshot(-2,0,ready));
         check(!ClientSupplyState.supported(),"old connection cannot acknowledge a new server's capability");
@@ -61,9 +69,15 @@ public final class SupplyGuiRegression {
         check(ClientSupplyState.response()==null,"old connection response cannot leak into the current GUI");
         ClientSupplyState.receive(active,new com.futa_gtnh.network.PacketSupplySnapshot(1,2,new NBTTagCompound()));
         check(ClientSupplyState.response().sequence==2,"current connection response reaches the GUI mailbox");
+        NBTTagCompound travel=new NBTTagCompound();travel.setTag("navigate",new NBTTagCompound());
+        ClientSupplyState.receive(stale,new com.futa_gtnh.network.PacketSupplySnapshot(1,3,travel));
+        check(ClientSupplyState.navigation()==null,"old connection cannot install a navigation result");
+        ClientSupplyState.receive(active,new com.futa_gtnh.network.PacketSupplySnapshot(1,4,travel));
+        check(ClientSupplyState.navigation().sequence==4,"navigation uses a separate mailbox even if normal snapshots arrive");
         java.lang.reflect.Constructor<ClientSupplyState> constructor=ClientSupplyState.class.getDeclaredConstructor();
         constructor.setAccessible(true); constructor.newInstance().disconnected(null);
-        check(!ClientSupplyState.supported() && ClientSupplyState.response()==null,"disconnect clears capability and snapshots");
+        check(!ClientSupplyState.supported() && ClientSupplyState.response()==null && ClientSupplyState.navigation()==null
+            && SupplyHighlight.target()==null,"disconnect clears capability, responses and world marker");
     }
     private static void runSize(Minecraft mc,int width,int height) throws Exception {
         ContainerSharedTerminal container=new ContainerSharedTerminal(mc.thePlayer.inventory,null);
@@ -96,6 +110,18 @@ public final class SupplyGuiRegression {
         int listWidth=(Integer)get(gui,"listWidth");
         gui.mouseClicked(left+listWidth+10,top+102,0);
         check(get(gui,"selectedSource")!=null,"real source row click selects inlet");
+        invoke(gui,"updateButtons");
+        check(button(buttons,13).enabled && button(buttons,14).enabled,"located sources allow highlight and server-supported teleport");
+        gui.actionPerformed(button(buttons,13));invoke(gui,"updateButtons");
+        check(SupplyHighlight.target()!=null,"highlight action selects a world marker without sending a packet");
+        gui.actionPerformed(button(buttons,13));
+        check(SupplyHighlight.target()==null,"highlight action toggles off the selected marker");
+        set(gui,"selectedSource",SupplySource.UNIDENTIFIED.write());invoke(gui,"updateButtons");
+        check(!button(buttons,13).enabled && !button(buttons,14).enabled,"unidentified sources never offer fake-coordinate navigation");
+        set(gui,"selectedSource",data.getTagList("sources",10).getCompoundTagAt(0));
+        data.setBoolean("teleportEnabled",false);invoke(gui,"updateButtons");
+        check(button(buttons,13).enabled && !button(buttons,14).enabled,"old servers and server opt-out keep client highlighting available");
+        data.setBoolean("teleportEnabled",true);
         invoke(gui,"updateButtons"); gui.actionPerformed(button(buttons,9));
         check((Integer)get(gui,"editMode")==2,"rename opens a modal editor");
         NBTTagCompound empty=data(); empty.setTag("sources",new NBTTagList()); apply(gui,empty);
@@ -120,6 +146,7 @@ public final class SupplyGuiRegression {
     private static NBTTagCompound data() {
         NBTTagCompound data=new NBTTagCompound(); data.setBoolean("enabled",true); data.setBoolean("writable",true); data.setBoolean("okay",true);
         data.setInteger("watchPages",2); data.setInteger("sourcePages",1); data.setLong("threshold",-1);
+        data.setBoolean("teleportEnabled",true);
         NBTTagList watched=new NBTTagList();
         for(int i=0;i<8;i++) watched.appendTag(SupplyTracker.writeKey(ItemKey.of(new ItemStack(Items.dye,1,i))));
         data.setTag("watches",watched);
@@ -130,6 +157,7 @@ public final class SupplyGuiRegression {
     }
     private static Field field(Class<?> type,String name) throws Exception { Field f=type.getDeclaredField(name);f.setAccessible(true);return f; }
     private static Object get(Object object,String name) throws Exception { return field(GuiSupplyMonitor.class,name).get(object); }
+    private static void set(Object object,String name,Object value) throws Exception { field(GuiSupplyMonitor.class,name).set(object,value); }
     private static void invoke(Object object,String name) throws Exception { Method m=GuiSupplyMonitor.class.getDeclaredMethod(name);m.setAccessible(true);m.invoke(object); }
     private static void apply(GuiSupplyMonitor gui,NBTTagCompound data) throws Exception {
         Method m=GuiSupplyMonitor.class.getDeclaredMethod("apply",NBTTagCompound.class);m.setAccessible(true);m.invoke(gui,data);
