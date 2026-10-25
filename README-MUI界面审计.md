@@ -60,6 +60,7 @@
 | 9 | 单界面字号四档（0.7/0.8/0.9/1.0） | `MTEAeSuperDock` L639/L646/L651 | 收敛两档：标题/优先级/信息 1.0、提示 0.8 | ☑ |
 | 10 | 页码动态文本夹在固定按钮间，右侧间隙随内容宽窄跳动 | `MTELVDisassembler.pageButtons()` L507-516 | 页码文本固定宽度居中 | ☑ |
 | 11 | 标题与副标题零行距；输入框双重描边（drawRect + SLOT 贴图） | `GuiAeSignalTransmitter` L110-111/L103 | 副标题下移；删 drawRect | ☑ |
+| 13 | **追记（1.33.2 后实测）**：第 8 项的 `verticalCenter()` 修法不彻底——三个选项组首行与类型行仍偏上。真因是行被 `Flow + positionRow` 嵌套：Flow 对交叉轴居中会跳过尺寸未算好的子控件，`verticalCenter()`（= `topRel(0.5)` 相对锚点）又与 Flow 的居中互相打架 | `CoverAeSignalReceiverGui` | **1.33.4**：选项组 Grid 直挂列（参数逐字对齐 `CoverControlsWorkGui`，单元格数学居中）；类型行改 GT 液体模式同款图标开关 + tooltip，文字不再贴按钮摆 | ☑ |
 
 ### 明确不做（仅记录）
 
