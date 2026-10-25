@@ -459,6 +459,7 @@ futa_gtnh.aewireless.apply=Apply
 futa_gtnh.aewireless.visible=Team-visible transmitters:
 futa_gtnh.aewireless.sender=Transmitter
 futa_gtnh.aewireless.sender.none=(none selected)
+futa_gtnh.aewireless.type=Watch type
 futa_gtnh.aewireless.type.item=Watch item
 futa_gtnh.aewireless.type.fluid=Watch fluid
 futa_gtnh.aewireless.monitor=Left: item (NEI drag) · Right: fluid (container)

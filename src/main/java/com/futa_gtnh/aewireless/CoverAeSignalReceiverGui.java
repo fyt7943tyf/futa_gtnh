@@ -96,13 +96,13 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
         syncManager.syncValue("last_amount", lastAmount);
 
         column.child(positionRow(createSenderRow(senderList, selection)))
-            .child(positionRow(createTypeRow(syncManager)))
+            .child(createTypeGrid(syncManager))
             .child(positionRow(createMonitorRow()))
             .child(positionRow(createThresholdRow(syncManager)))
-            .child(positionRow(createConditionRow(syncManager)))
-            .child(positionRow(createActionRow(syncManager)))
+            .child(createConditionGrid(syncManager))
+            .child(createActionGrid(syncManager))
             .child(positionRow(createIntervalRow(syncManager)))
-            .child(positionRow(createLinkLostRow(syncManager)))
+            .child(createLinkLostGrid(syncManager))
             .child(positionRow(createStatusRow(linkState, lastAmount)));
     }
 
@@ -225,22 +225,24 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
     // 监听配置
     // ------------------------------------------------------------------
 
-    private Flow createTypeRow(PanelSyncManager syncManager) {
+    /**
+     * 监听类型行。GT 液体模式按钮同款：图标开关 + tooltip 说明，文字不再贴着按钮摆（Flow 行内
+     * 「文字 + 16px 按钮」的组合在动态文本下会被布局跳过居中——见 1.33.2 的截图反馈）。
+     * 放进 Grid，单元格按 (height - area.height) / 2 数学居中，稳定。
+     */
+    private Grid createTypeGrid(PanelSyncManager syncManager) {
         BooleanSyncValue fluidMode = new BooleanSyncValue(cover::isFluidMode, cover::setFluidMode).allowC2S();
         syncManager.syncValue("fluid_mode", fluidMode);
-        // 物品/流体是一对模式，不是开/关——图标用 GT 的液体模式对，不用勾叉。
-        return row().child(
+        return optionGrid().row(
             new ToggleButton().value(fluidMode)
                 .overlay(true, GTGuiTextures.OVERLAY_BUTTON_LIQUIDMODE)
                 .overlay(false, GTGuiTextures.OVERLAY_BUTTON_LIQUIDMODE_OFF)
-                .size(16))
-            .child(
-                IKey.dynamic(
-                    () -> StatCollector.translateToLocal(
-                        cover.isFluidMode() ? "futa_gtnh.aewireless.type.fluid" : "futa_gtnh.aewireless.type.item"))
-                    .asWidget()
-                    .verticalCenter()
-                    .marginLeft(4));
+                .tooltipBuilder(true, t -> t.addLine(StatCollector.translateToLocal("futa_gtnh.aewireless.type.fluid")))
+                .tooltipBuilder(false, t -> t.addLine(StatCollector.translateToLocal("futa_gtnh.aewireless.type.item")))
+                .size(16),
+            IKey.lang("futa_gtnh.aewireless.type")
+                .asWidget())
+            .marginBottom(4);
     }
 
     /** 物品用幽灵槽（NEI 可拖），流体用幽灵流体槽（手持容器点击）。 */
@@ -288,9 +290,13 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
                     .verticalCenter());
     }
 
-    /** GT 覆盖板模板的选项组网格：元素边距显式归零/归一，垂直居中。 */
+    /**
+     * GT 覆盖板模板的选项组网格（对齐 CoverControlsWorkGui）：直挂列，不套 Flow/positionRow——
+     * 外层 Flow 的交叉轴居中对尺寸未算好的子控件会被跳过，嵌套是 1.33.2 截图里首行错位的成因。
+     */
     private static Grid optionGrid() {
-        return new Grid().coverChildren()
+        return new Grid().marginLeft(WIDGET_MARGIN)
+            .coverChildren()
             .minElementMarginRight(WIDGET_MARGIN)
             .minElementMarginBottom(2)
             .minElementMarginTop(0)
@@ -298,48 +304,48 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
             .alignment(Alignment.CenterLeft);
     }
 
-    private Flow createConditionRow(PanelSyncManager syncManager) {
+    private Grid createConditionGrid(PanelSyncManager syncManager) {
         EnumSyncValue<CoverAeSignalReceiver.ConditionMode, ?> condition = new EnumSyncValue<>(
             CoverAeSignalReceiver.ConditionMode.class,
             cover::getCondition,
             cover::setCondition).allowC2S();
         syncManager.syncValue("condition", condition);
-        return row().child(
-            optionGrid()
-                .row(
-                    new SelectButton().value(LinkedBoolValue.of(condition, CoverAeSignalReceiver.ConditionMode.ABOVE))
-                        .overlay(GTGuiTextures.OVERLAY_BUTTON_REDSTONE_ON)
-                        .size(16),
-                    IKey.lang("futa_gtnh.aewireless.condition.above")
-                        .asWidget())
-                .row(
-                    new SelectButton().value(LinkedBoolValue.of(condition, CoverAeSignalReceiver.ConditionMode.BELOW))
-                        .overlay(GTGuiTextures.OVERLAY_BUTTON_REDSTONE_OFF)
-                        .size(16),
-                    IKey.lang("futa_gtnh.aewireless.condition.below")
-                        .asWidget()));
+        return optionGrid()
+            .row(
+                new SelectButton().value(LinkedBoolValue.of(condition, CoverAeSignalReceiver.ConditionMode.ABOVE))
+                    .overlay(GTGuiTextures.OVERLAY_BUTTON_REDSTONE_ON)
+                    .size(16),
+                IKey.lang("futa_gtnh.aewireless.condition.above")
+                    .asWidget())
+            .row(
+                new SelectButton().value(LinkedBoolValue.of(condition, CoverAeSignalReceiver.ConditionMode.BELOW))
+                    .overlay(GTGuiTextures.OVERLAY_BUTTON_REDSTONE_OFF)
+                    .size(16),
+                IKey.lang("futa_gtnh.aewireless.condition.below")
+                    .asWidget())
+            .marginBottom(4);
     }
 
-    private Flow createActionRow(PanelSyncManager syncManager) {
+    private Grid createActionGrid(PanelSyncManager syncManager) {
         EnumSyncValue<CoverAeSignalReceiver.OnCondition, ?> action = new EnumSyncValue<>(
             CoverAeSignalReceiver.OnCondition.class,
             cover::getAction,
             cover::setAction).allowC2S();
         syncManager.syncValue("action", action);
-        return row().child(
-            optionGrid()
-                .row(
-                    new SelectButton().value(LinkedBoolValue.of(action, CoverAeSignalReceiver.OnCondition.ENABLE))
-                        .overlay(GTGuiTextures.OVERLAY_BUTTON_CHECKMARK)
-                        .size(16),
-                    IKey.lang("futa_gtnh.aewireless.action.enable")
-                        .asWidget())
-                .row(
-                    new SelectButton().value(LinkedBoolValue.of(action, CoverAeSignalReceiver.OnCondition.DISABLE))
-                        .overlay(GTGuiTextures.OVERLAY_BUTTON_FORBIDDEN)
-                        .size(16),
-                    IKey.lang("futa_gtnh.aewireless.action.disable")
-                        .asWidget()));
+        return optionGrid()
+            .row(
+                new SelectButton().value(LinkedBoolValue.of(action, CoverAeSignalReceiver.OnCondition.ENABLE))
+                    .overlay(GTGuiTextures.OVERLAY_BUTTON_CHECKMARK)
+                    .size(16),
+                IKey.lang("futa_gtnh.aewireless.action.enable")
+                    .asWidget())
+            .row(
+                new SelectButton().value(LinkedBoolValue.of(action, CoverAeSignalReceiver.OnCondition.DISABLE))
+                    .overlay(GTGuiTextures.OVERLAY_BUTTON_FORBIDDEN)
+                    .size(16),
+                IKey.lang("futa_gtnh.aewireless.action.disable")
+                    .asWidget())
+            .marginBottom(4);
     }
 
     private Flow createIntervalRow(PanelSyncManager syncManager) {
@@ -356,34 +362,32 @@ public class CoverAeSignalReceiverGui extends CoverBaseGui<CoverAeSignalReceiver
                     .verticalCenter());
     }
 
-    private Flow createLinkLostRow(PanelSyncManager syncManager) {
+    private Grid createLinkLostGrid(PanelSyncManager syncManager) {
         EnumSyncValue<CoverAeSignalReceiver.LinkLostBehavior, ?> linkLost = new EnumSyncValue<>(
             CoverAeSignalReceiver.LinkLostBehavior.class,
             cover::getLinkLost,
             cover::setLinkLost).allowC2S();
         syncManager.syncValue("link_lost", linkLost);
-        return row().child(
-            optionGrid()
-                .row(
-                    new SelectButton().value(LinkedBoolValue.of(linkLost, CoverAeSignalReceiver.LinkLostBehavior.KEEP))
-                        .overlay(GTGuiTextures.OVERLAY_BUTTON_LOCK)
-                        .size(16),
-                    IKey.lang("futa_gtnh.aewireless.linklost.keep")
-                        .asWidget())
-                .row(
-                    new SelectButton()
-                        .value(LinkedBoolValue.of(linkLost, CoverAeSignalReceiver.LinkLostBehavior.ENABLE))
-                        .overlay(GTGuiTextures.OVERLAY_BUTTON_CHECKMARK)
-                        .size(16),
-                    IKey.lang("futa_gtnh.aewireless.linklost.enable")
-                        .asWidget())
-                .row(
-                    new SelectButton()
-                        .value(LinkedBoolValue.of(linkLost, CoverAeSignalReceiver.LinkLostBehavior.DISABLE))
-                        .overlay(GTGuiTextures.OVERLAY_BUTTON_FORBIDDEN)
-                        .size(16),
-                    IKey.lang("futa_gtnh.aewireless.linklost.disable")
-                        .asWidget()));
+        return optionGrid()
+            .row(
+                new SelectButton().value(LinkedBoolValue.of(linkLost, CoverAeSignalReceiver.LinkLostBehavior.KEEP))
+                    .overlay(GTGuiTextures.OVERLAY_BUTTON_LOCK)
+                    .size(16),
+                IKey.lang("futa_gtnh.aewireless.linklost.keep")
+                    .asWidget())
+            .row(
+                new SelectButton().value(LinkedBoolValue.of(linkLost, CoverAeSignalReceiver.LinkLostBehavior.ENABLE))
+                    .overlay(GTGuiTextures.OVERLAY_BUTTON_CHECKMARK)
+                    .size(16),
+                IKey.lang("futa_gtnh.aewireless.linklost.enable")
+                    .asWidget())
+            .row(
+                new SelectButton().value(LinkedBoolValue.of(linkLost, CoverAeSignalReceiver.LinkLostBehavior.DISABLE))
+                    .overlay(GTGuiTextures.OVERLAY_BUTTON_FORBIDDEN)
+                    .size(16),
+                IKey.lang("futa_gtnh.aewireless.linklost.disable")
+                    .asWidget())
+            .marginBottom(4);
     }
 
     // ------------------------------------------------------------------
