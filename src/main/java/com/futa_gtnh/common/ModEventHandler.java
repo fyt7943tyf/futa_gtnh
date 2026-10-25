@@ -76,6 +76,7 @@ public class ModEventHandler {
         if (event.phase != TickEvent.Phase.END) return;
         com.futa_gtnh.network.ServerActions.tick();
         SharedStorageManager.onServerTick();
+        com.futa_gtnh.supply.SupplyTracker.onServerTick();
         // 存储总线：把这一 tick 里相邻容器的变化统一广播给终端 / AE。
         // 必须排在 AE 桥的 tick 末推送之前 —— 那个钩子会消费这里排队的键。
         com.futa_gtnh.storagebus.StorageBusRegistry.onServerTickEnd();
@@ -104,6 +105,8 @@ public class ModEventHandler {
             EntityPlayerMP player = (EntityPlayerMP) event.player;
             SwiftStepGrowthAura.forget(player);
             StorageActionHandler.forget(player);
+            com.futa_gtnh.network.PacketSupplyRequest.forget(player.getUniqueID());
+            com.futa_gtnh.network.SupplyClients.forget(player.getUniqueID(), player.playerNetServerHandler);
             // 寻物任务和结果也一起清掉：任务里存着 World 引用，
             // 玩家走了还留着的话，那个 World 就没法被回收了
             LocatorManager.forget(player.getUniqueID());

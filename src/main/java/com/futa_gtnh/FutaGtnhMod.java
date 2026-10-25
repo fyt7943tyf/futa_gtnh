@@ -162,6 +162,9 @@ public class FutaGtnhMod {
     @Mod.EventHandler
     public void serverStarted(FMLServerStartedEvent event) {
         SharedStorageManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
+        com.futa_gtnh.supply.SupplyTracker.start(net.minecraft.server.MinecraftServer.getServer());
+        com.futa_gtnh.ae2.AeSupplyTracking.clear();
+        com.futa_gtnh.network.SupplyClients.clear();
         // 小游戏助手的共享列表：同一个存档目录、同一套加载时机（见 lootassist 包）
         com.futa_gtnh.lootassist.LootassistManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
         // 反应堆布局档案：同样是全服共享、跟存档走（见 reactor 包）
@@ -198,7 +201,11 @@ public class FutaGtnhMod {
     public void serverStopping(FMLServerStoppingEvent event) {
         com.futa_gtnh.common.SwiftStepGrowthAura.clear();
         com.futa_gtnh.common.PumpFluidUpdates.clear();
+        com.futa_gtnh.supply.SupplyTracker.stop();
+        com.futa_gtnh.ae2.AeSupplyTracking.clear();
         com.futa_gtnh.network.ServerActions.clear();
+        com.futa_gtnh.network.PacketSupplyRequest.clear();
+        com.futa_gtnh.network.SupplyClients.clear();
         SharedStorageManager.onServerStopping();
         com.futa_gtnh.lootassist.LootassistManager.onServerStopping();
         com.futa_gtnh.reactor.ReactorLayoutManager.onServerStopping();

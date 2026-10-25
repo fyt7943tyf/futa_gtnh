@@ -27,8 +27,15 @@ import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 public class ClientProxy extends CommonProxy {
 
     @Override
+    public void onSupplySnapshot(net.minecraft.network.INetHandler source,
+        com.futa_gtnh.network.PacketSupplySnapshot packet) {
+        com.futa_gtnh.client.ClientSupplyState.receive(source, packet);
+    }
+
+    @Override
     public void preInit(FMLPreInitializationEvent event) {
         super.preInit(event);
+        com.futa_gtnh.client.ClientSupplyState.register();
         com.futa_gtnh.cosmetic.client.CosmeticArmorClient.register();
         RoguelikeMapClient.register();
         KeyHandler.register();

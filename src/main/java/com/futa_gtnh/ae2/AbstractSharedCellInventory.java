@@ -129,6 +129,8 @@ abstract class AbstractSharedCellInventory<StackType extends IAEStack<StackType>
         if (mode == Actionable.MODULATE) {
             long accepted = AeCellBridge.suppressed(() -> insertStorage(key, input.getStackSize()));
             if (accepted <= 0) return input;
+            if (com.futa_gtnh.supply.SupplyTracker.enabled())
+                AeSupplyTracking.record(key, accepted, true, src, currentGrid());
             broadcastChange(key);
             noteOwnWrite(key);
             if (accepted >= input.getStackSize()) return null;
@@ -150,6 +152,8 @@ abstract class AbstractSharedCellInventory<StackType extends IAEStack<StackType>
         if (mode == Actionable.MODULATE) {
             long taken = AeCellBridge.suppressed(() -> extractStorage(key, request.getStackSize()));
             if (taken <= 0) return null;
+            if (com.futa_gtnh.supply.SupplyTracker.enabled())
+                AeSupplyTracking.record(key, taken, false, src, currentGrid());
             broadcastChange(key);
             noteOwnWrite(key);
             return copyWithSize(request, taken);

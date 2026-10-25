@@ -110,5 +110,7 @@ public final class NetworkHandler {
             PacketReactorLayoutPreview.class,
             42,
             Side.CLIENT);
+        INSTANCE.registerMessage(PacketSupplyRequest.Handler.class, PacketSupplyRequest.class, 43, Side.SERVER);
+        INSTANCE.registerMessage(PacketSupplySnapshot.Handler.class, PacketSupplySnapshot.class, 44, Side.CLIENT);
     }
 }

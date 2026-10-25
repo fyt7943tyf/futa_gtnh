@@ -49,6 +49,9 @@ public class CommonProxy {
     /** Client-only CAR cache alias. The server proxy has no client class references. */
     public void onCosmeticArmorIdentity(net.minecraft.network.INetHandler source, java.util.UUID playerId) {}
 
+    public void onSupplySnapshot(net.minecraft.network.INetHandler source,
+        com.futa_gtnh.network.PacketSupplySnapshot packet) {}
+
     /** 共享终端方块。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockSharedTerminal blockSharedTerminal;
 

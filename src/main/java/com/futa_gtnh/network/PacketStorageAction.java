@@ -174,6 +174,8 @@ public class PacketStorageAction implements IMessage {
 
     /** NEI 书签清单批量取物；keyTag 为 items 列表，invSlot 为发起请求的窗口编号。 */
     public static final byte WITHDRAW_BOOKMARK_ITEMS = 35;
+    /** Safe capability opt-in on the existing channel; old servers ignore this unknown action. */
+    public static final byte SUPPLY_CLIENT_READY = 36;
 
     public static final byte KIND_ITEM = 0;
     public static final byte KIND_FLUID = 1;

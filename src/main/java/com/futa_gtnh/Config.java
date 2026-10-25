@@ -14,6 +14,8 @@ import net.minecraftforge.common.config.Configuration;
 public class Config {
 
     public static boolean enableDebugLogging = false;
+    /** Bounded AE/IO inlet accounting; no history is collected while disabled. */
+    public static boolean enableSupplyTracking = true;
 
     // ------------------------------------------------------------------
     // 访问控制
@@ -663,6 +665,11 @@ public class Config {
 
         enableDebugLogging = configuration
             .getBoolean("enableDebugLogging", Configuration.CATEGORY_GENERAL, enableDebugLogging, "打开后会输出更多调试日志");
+        enableSupplyTracking = configuration.getBoolean(
+            "enableSupplyTracking",
+            Configuration.CATEGORY_GENERAL,
+            enableSupplyTracking,
+            "启用原料领用追踪和低库存提醒。仅在实际 AE/IO 搬运时累加，保留最近一小时的分钟汇总。");
 
         guiSortMode = configuration.getInt(
             "guiSortMode",

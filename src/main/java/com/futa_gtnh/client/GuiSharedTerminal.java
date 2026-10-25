@@ -82,6 +82,7 @@ public class GuiSharedTerminal extends FutaGuiContainer {
      */
     private static final int BTN_SEARCH_MODE = 12;
     private static final int BTN_STORAGE_LIMITS = 13;
+    private static final int BTN_SUPPLY = 14;
 
     private static final int TAB_ITEMS = 0;
     private static final int TAB_FLUIDS = 1;
@@ -284,18 +285,20 @@ public class GuiSharedTerminal extends FutaGuiContainer {
                     BTN_TERMINAL_IO,
                     guiLeft + 172,
                     guiTop + 5,
-                    27,
+                    16,
                     14,
                     tr("futa_gtnh.gui.store.terminal_io.short")));
         }
         buttonList.add(
             new GuiSmallButton(
                 BTN_STORAGE_LIMITS,
-                guiLeft + (container.getTerminal() == null ? 172 : 201),
+                guiLeft + 190,
                 guiTop + 5,
-                container.getTerminal() == null ? 56 : 27,
+                18,
                 14,
                 tr("futa_gtnh.gui.limits.button")));
+        buttonList
+            .add(new GuiSmallButton(BTN_SUPPLY, guiLeft + 210, guiTop + 5, 18, 14, tr("futa_gtnh.supply.button")));
 
         updateTabStates();
         viewDirty = true;
@@ -1526,6 +1529,9 @@ public class GuiSharedTerminal extends FutaGuiContainer {
                 break;
             case BTN_STORAGE_LIMITS:
                 GuiStorageLimits.open(container);
+                break;
+            case BTN_SUPPLY:
+                GuiSupplyMonitor.open(container);
                 break;
             case BTN_DRAIN:
                 container.sendDrainContainers();

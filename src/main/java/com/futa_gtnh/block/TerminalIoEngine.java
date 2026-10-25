@@ -205,6 +205,7 @@ final class TerminalIoEngine {
 
             SharedStorageManager.broadcastItemChange(key);
             budget -= (int) stored;
+            com.futa_gtnh.supply.SupplyTracker.recordIo(key, sourceTile, side, stored, true);
             moved = true;
         }
         if (busTarget && moved) {
@@ -235,6 +236,7 @@ final class TerminalIoEngine {
                 if (taken < stored) storage.extractItemDirect(key, stored - taken);
                 if (taken <= 0L) continue;
                 budget -= (int) taken;
+                com.futa_gtnh.supply.SupplyTracker.recordIo(key, source, side, taken, true);
                 moved = true;
                 if (busTarget) StorageBusRegistry.refreshTargeting(source);
             }
@@ -338,6 +340,7 @@ final class TerminalIoEngine {
             budget -= accepted;
             available -= taken;
             moved += accepted;
+            com.futa_gtnh.supply.SupplyTracker.recordIo(key, destination, side, accepted, false);
             if (accepted < taken) break;
         }
         return moved;
@@ -352,8 +355,10 @@ final class TerminalIoEngine {
      */
     private static int freeSpaceFor(IInventory inventory, ForgeDirection side, ItemStack prototype, int limit) {
         int space = 0;
-        int maxSize = Math.max(1, prototype.getMaxStackSize());
-        int stopAt = Math.max(1, Math.min(limit, maxSize * 512));
+        int maxSize = Math
+            .min(Math.max(1, prototype.getMaxStackSize()), Math.max(0, inventory.getInventoryStackLimit()));
+        if (maxSize == 0) return 0;
+        int stopAt = Math.max(1, (int) Math.min((long) limit, (long) maxSize * 512L));
 
         for (int slot = 0; slot < inventory.getSizeInventory(); slot++) {
             ItemStack existing = inventory.getStackInSlot(slot);
@@ -388,7 +393,8 @@ final class TerminalIoEngine {
             return accepted;
         }
 
-        int maxSize = Math.max(1, stack.getMaxStackSize());
+        int maxSize = Math.min(Math.max(1, stack.getMaxStackSize()), Math.max(0, inventory.getInventoryStackLimit()));
+        if (maxSize == 0) return 0;
         // 两趟：先并入已有的同类堆，再找空格。和原版 addItemStackToInventory 一个顺序
         for (int pass = 0; pass < 2 && remaining > 0; pass++) {
             for (int slot = 0; slot < inventory.getSizeInventory() && remaining > 0; slot++) {
@@ -400,19 +406,30 @@ final class TerminalIoEngine {
                     int room = Math.min(maxSize, existing.getMaxStackSize()) - existing.stackSize;
                     if (room <= 0) continue;
                     int moved = Math.min(room, remaining);
-                    existing.stackSize += moved;
-                    inventory.setInventorySlotContents(slot, existing);
-                    remaining -= moved;
+                    int before = existing.stackSize;
+                    ItemStack merged = withSize(existing, before + moved);
+                    inventory.setInventorySlotContents(slot, merged);
+                    int actual = insertedAmount(inventory, slot, stack, before, moved);
+                    remaining -= actual;
+                    if (actual < moved) return stack.stackSize - remaining;
                 } else {
                     if (existing != null && existing.getItem() != null && existing.stackSize > 0) continue;
                     if (!canInsert(inventory, slot, stack, side)) continue;
                     int moved = Math.min(maxSize, remaining);
                     inventory.setInventorySlotContents(slot, withSize(stack, moved));
-                    remaining -= moved;
+                    int actual = insertedAmount(inventory, slot, stack, 0, moved);
+                    remaining -= actual;
+                    if (actual < moved) return stack.stackSize - remaining;
                 }
             }
         }
         return stack.stackSize - remaining;
+    }
+
+    private static int insertedAmount(IInventory inventory, int slot, ItemStack expected, int before, int requested) {
+        ItemStack after = inventory.getStackInSlot(slot);
+        return after == null || !sameItem(after, expected) ? 0
+            : (int) Math.max(0L, Math.min((long) requested, (long) after.stackSize - before));
     }
 
     private static boolean sameItem(ItemStack a, ItemStack b) {
@@ -499,6 +516,7 @@ final class TerminalIoEngine {
             }
         }
 
+        com.futa_gtnh.supply.SupplyTracker.recordIo(key, sourceTile, side, stored, true);
         if (key != null) SharedStorageManager.broadcastFluidChange(key);
         if (busTarget) {
             try {
@@ -570,6 +588,7 @@ final class TerminalIoEngine {
             if (filled < taken) storage.insertFluidManualDirect(key, taken - filled);
             if (filled > 0) SharedStorageManager.broadcastFluidChange(key);
             total += filled;
+            com.futa_gtnh.supply.SupplyTracker.recordIo(key, destination, side, filled, false);
             budget -= filled;
             available -= taken;
             if (filled <= 0 || filled < taken) break;

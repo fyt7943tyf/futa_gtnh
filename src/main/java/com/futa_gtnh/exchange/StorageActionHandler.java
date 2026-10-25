@@ -67,6 +67,18 @@ public final class StorageActionHandler {
 
     public static void handle(EntityPlayerMP player, PacketStorageAction packet) {
         if (player == null || packet == null) return;
+        if (packet.getAction() == PacketStorageAction.SUPPLY_CLIENT_READY) {
+            com.futa_gtnh.network.ServerActions.enqueue(() -> {
+                if (com.futa_gtnh.network.SupplyClients.supports(player.getUniqueID(), player.playerNetServerHandler))
+                    return;
+                com.futa_gtnh.network.SupplyClients.register(player.getUniqueID(), player.playerNetServerHandler);
+                net.minecraft.nbt.NBTTagCompound ready = new net.minecraft.nbt.NBTTagCompound();
+                ready.setBoolean("ready", true);
+                com.futa_gtnh.network.NetworkHandler.INSTANCE
+                    .sendTo(new com.futa_gtnh.network.PacketSupplySnapshot(-2, 0, ready), player);
+            });
+            return;
+        }
 
         // 网络层通常不会重复投递，但 NEI 步骤是「扣料 + 合成」操作，不能把这个
         // 假设当成守恒条件。相同请求编号只回放上一次结果，不再执行一次合成。

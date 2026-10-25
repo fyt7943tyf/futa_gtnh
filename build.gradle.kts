@@ -143,6 +143,30 @@ tasks.register<JavaExec>("verifyPumpFluidUpdates") {
 }
 tasks.named("check") { dependsOn("verifyPumpFluidUpdates") }
 
+val compileSupplyChecks = tasks.register<JavaCompile>("compileSupplyChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/supply-check") { include("**/*.java") })
+    source(files("tools/terminal-io-check/appeng/core/Api.java"))
+    classpath = sourceSets["main"].output + sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("supply-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifySupplyTracking") {
+    group = "verification"
+    description = "Checks AE subnet attribution, shared IO accounting, bounded history, watches and protocol"
+    dependsOn(compileSupplyChecks, compileProspectorChecks, "extractTerminalClickLwjgl")
+    mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+    args("--tweakClass", "com.futa_gtnh.supplycheck.SupplyCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+    classpath = files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) + files(compileSupplyChecks.flatMap { it.destinationDirectory }) +
+        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/supply-check") +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifySupplyTracking") }
+
 // Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.
 val compileTerminalClickChecks = tasks.register<JavaCompile>("compileTerminalClickChecks") {
     dependsOn(tasks.named("classes"))
@@ -176,6 +200,19 @@ tasks.register<JavaExec>("verifyTerminalClicks") {
         files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
+
+tasks.register<JavaExec>("verifySupplyGui") {
+    group = "verification"
+    description = "Checks supply tracker GUI layout, zero-stock history selection and modal editors"
+    dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.client.SupplyGuiRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifySupplyGui") }
 
 tasks.register<JavaExec>("verifyBookmarkWithdrawal") {
     group = "verification"

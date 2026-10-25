@@ -186,6 +186,7 @@ public class ContainerSharedTerminal extends Container {
      * 同一时刻只可能开着一个终端界面，不需要做成每个界面独立。
      */
     private boolean fluidTabActive;
+    private boolean clientPageSwitch;
 
     /**
      * 3×3 合成栏。<b>它属于容器，不属于玩家</b> —— 这一点和很多人的直觉相反。
@@ -424,6 +425,7 @@ public class ContainerSharedTerminal extends Container {
      */
     @Override
     public void onContainerClosed(EntityPlayer player) {
+        if (clientPageSwitch && player.worldObj != null && player.worldObj.isRemote) return;
         super.onContainerClosed(player);
 
         boolean serverSide = player.worldObj != null && !player.worldObj.isRemote;
@@ -436,6 +438,17 @@ public class ContainerSharedTerminal extends Container {
             }
         }
         craftResult.setInventorySlotContents(0, null);
+    }
+
+    /** Keep client cursor/crafting state when a local auxiliary screen reuses this same server window. */
+    public void withClientPageSwitch(Runnable openScreen) {
+        boolean previous = clientPageSwitch;
+        clientPageSwitch = true;
+        try {
+            openScreen.run();
+        } finally {
+            clientPageSwitch = previous;
+        }
     }
 
     /** 产物格不参与原版的「双击收集」，和原版 {@code ContainerPlayer} 保持一致。 */

@@ -215,6 +215,22 @@ public final class StorageBusRegistry {
         return false;
     }
 
+    /** O(1) target lookup and only its own faces; telemetry must not scan every registered bus per transfer. */
+    public static boolean accountsFor(TileEntity tile, Object key) {
+        if (tile == null || !enabled) return false;
+        synchronized (LOCK) {
+            TargetStock target = TARGETS.get(tile);
+            if (target == null) return false;
+            for (StorageBusLink link : target.links.keySet()) {
+                if (key instanceof ItemKey && link.getConfig()
+                    .allowsItem((ItemKey) key)) return true;
+                if (key instanceof FluidKey && link.getConfig()
+                    .allowsFluid((FluidKey) key)) return true;
+            }
+            return false;
+        }
+    }
+
     /**
      * 目标容器里的 {@code key} 是不是已经被某条总线计入聚合库存（含只写总线）。
      * 主动 IO 从「挂在总线上的容器」抽东西进池子时，只有确实计入过的那部分
