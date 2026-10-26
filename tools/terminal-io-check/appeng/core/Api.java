@@ -35,6 +35,8 @@ public final class Api {
                     return new appeng.util.item.ItemList();
                 case "createSortedItemList":
                     return new appeng.util.item.ItemList(true);
+                case "createPrimitiveItemList":
+                    return new appeng.util.item.HashBasedItemList();
                 case "createFluidList":
                     return new appeng.util.item.FluidList();
                 case "createAEStackList":

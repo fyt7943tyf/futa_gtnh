@@ -80,6 +80,7 @@ public final class SupplyTrackingRegression {
         com.futa_gtnh.supply.SupplyIoRegression.run();
         com.futa_gtnh.supply.SupplyNavigationRegression.run();
         com.futa_gtnh.me.PublicMeRegression.run(world);
+        com.futa_gtnh.me.PublicMeNativeInventoryRegression.run(world);
         com.futa_gtnh.supply.ProductionTerminalRegression.run();
         com.futa_gtnh.supply.ProductionAttachmentsRegression.run();
         System.out.println("AE supply tracking: " + checks + " checks passed (real bus Mixin and shared-cell accounting)");

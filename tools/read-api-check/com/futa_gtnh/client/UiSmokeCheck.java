@@ -53,6 +53,7 @@ public final class UiSmokeCheck {
         com.futa_gtnh.me.PublicMeWorldSmoke.register();
         com.futa_gtnh.me.GtswnQuantumWorldSmoke.register();
         ProductionTerminalWorldSmoke.register();
+        com.futa_gtnh.me.PublicMeSubnetFlowWorldSmoke.register();
     }
 
     private void add(String name, Supplier<GuiScreen> factory) {
@@ -87,6 +88,11 @@ public final class UiSmokeCheck {
         }
         if (ProductionTerminalWorldSmoke.failure()!=null) throw new AssertionError(ProductionTerminalWorldSmoke.failure());
         if (!ProductionTerminalWorldSmoke.isComplete()) return;
+        if (com.futa_gtnh.me.PublicMeSubnetFlowWorldSmoke.failure()!=null) throw new AssertionError(com.futa_gtnh.me.PublicMeSubnetFlowWorldSmoke.failure());
+        if (!com.futa_gtnh.me.PublicMeSubnetFlowWorldSmoke.isComplete()) {
+            if(System.currentTimeMillis()-smokeWaitSince>300000L)throw new AssertionError("PUBLIC_ME_SUBNET_FLOW_SMOKE_FAILED wall-clock timeout");
+            return;
+        }
         if (capturedAll) {
             if(com.futa_gtnh.me.PublicMeWorldSmoke.isComplete() && com.futa_gtnh.me.GtswnQuantumWorldSmoke.isComplete()) {
                 System.out.println("UI_SMOKE_SUCCESS " + screens.size() + " screens");mc.shutdown();

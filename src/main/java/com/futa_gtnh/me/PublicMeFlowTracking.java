@@ -11,9 +11,13 @@ import appeng.api.networking.IGrid;
 import appeng.api.networking.security.BaseActionSource;
 import appeng.api.networking.security.MachineSource;
 import appeng.api.networking.security.ReshuffleActionSource;
+import appeng.api.networking.storage.IStorageGrid;
+import appeng.api.storage.IMEInventoryHandler;
+import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEFluidStack;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IAEStack;
+import appeng.me.cache.NetworkMonitor;
 
 /** Counts committed outer network transfers, regardless of which ME cell actually stored the contents. */
 public final class PublicMeFlowTracking {
@@ -46,6 +50,21 @@ public final class PublicMeFlowTracking {
             action.run();
             return null;
         });
+    }
+
+    /** Resolve the current public handler by identity, including requests that bypass NetworkMonitor entirely. */
+    public static IGrid inventoryGrid(IMEInventoryHandler<?> inventory) {
+        if (!SupplyTracker.enabled() || isSuppressed() || !PublicMeNetwork.isRunning()) return null;
+        try {
+            IGrid grid = PublicMeNetwork.grid();
+            if (grid == null) return null;
+            IStorageGrid storage = grid.getCache(IStorageGrid.class);
+            IMEMonitor<?> monitor = storage == null ? null : storage.getMEMonitor(inventory.getStackType());
+            return monitor instanceof NetworkMonitor<?>nativeMonitor && nativeMonitor.getHandler() == inventory ? grid
+                : null;
+        } catch (RuntimeException unavailable) {
+            return null;
+        }
     }
 
     public static void committed(IGrid grid, IAEStack<?> request, IAEStack<?> result, boolean extraction,

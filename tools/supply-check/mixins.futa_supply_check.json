@@ -3,5 +3,5 @@
     "compatibilityLevel": "JAVA_8",
     "plugin": "com.futa_gtnh.mixins.FutaGtnhMixinPlugin",
     "required": true,
-    "mixins": ["MixinAeStorageBusSupply", "MixinAeNetworkMonitorSupply", "MixinAeFluidStackNbt", "MixinGtswnQuantumTerminal", "MixinGtswnControllerConnections", "MixinGtswnQuantumNode"]
+    "mixins": ["MixinAeStorageBusSupply", "MixinAeNetworkMonitorSupply", "MixinAeNetworkInventorySupply", "MixinAeFluidStackNbt", "MixinGtswnQuantumTerminal", "MixinGtswnControllerConnections", "MixinGtswnQuantumNode"]
 }

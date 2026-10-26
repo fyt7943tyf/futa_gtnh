@@ -8,6 +8,8 @@ import java.util.function.Supplier;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraftforge.common.util.ForgeDirection;
 
+import com.futa_gtnh.shared.FluidKey;
+import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorageManager;
 import com.futa_gtnh.supply.SupplySource;
 import com.futa_gtnh.supply.SupplyTracker;
@@ -30,12 +32,14 @@ import appeng.me.helpers.IGridProxyable;
 import appeng.me.storage.StorageBusInventoryHandler;
 import appeng.parts.AEBasePart;
 import appeng.parts.misc.PartStorageBus;
+import appeng.util.item.AEFluidStackType;
+import appeng.util.item.AEItemStackType;
 
 /** Preserve cross-network inlet identity on real operations; queries and priority-list enumeration are unchanged. */
 public final class AeSupplyTracking {
 
     private static final ThreadLocal<SupplySource> INLET = new ThreadLocal<>();
-    private static final Map<BaseActionSource, CachedSource> SOURCES = new WeakHashMap<>();
+    private static final Map<BaseActionSource, CachedSource[]> SOURCES = new WeakHashMap<>();
 
     private AeSupplyTracking() {}
 
@@ -48,12 +52,15 @@ public final class AeSupplyTracking {
     public static void record(Object key, long amount, boolean incoming, BaseActionSource action, IGrid mainGrid) {
         if (!SupplyTracker.enabled() || amount <= 0 || action instanceof ReshuffleActionSource) return;
         SupplySource source = INLET.get();
-        if (source == null) source = resolve(action, mainGrid);
+        if (source == null) source = resolve(action, mainGrid, key);
         SupplyTracker.record(key, source, amount, incoming);
     }
 
-    private static SupplySource resolve(BaseActionSource action, IGrid mainGrid) {
+    private static SupplySource resolve(BaseActionSource action, IGrid mainGrid, Object key) {
         if (!SharedStorageManager.isServerThread() || action == null) return SupplySource.UNIDENTIFIED;
+        int channel = key instanceof ItemKey ? 0 : key instanceof FluidKey ? 1 : 2;
+        IAEStackType<?> stackType = channel == 0 ? AEItemStackType.ITEM_STACK_TYPE
+            : channel == 1 ? AEFluidStackType.FLUID_STACK_TYPE : null;
         IGrid origin = null;
         if (action instanceof MachineSource) {
             try {
@@ -62,7 +69,8 @@ public final class AeSupplyTracking {
                 origin = node == null ? null : node.getGrid();
             } catch (RuntimeException ignored) {}
         }
-        CachedSource cache = SOURCES.get(action);
+        CachedSource[] channels = SOURCES.get(action);
+        CachedSource cache = channels == null ? null : channels[channel];
         if (cache != null && cache.main.get() == mainGrid
             && cache.origin.get() == origin
             && SupplyTracker.clock() - cache.time < 30_000L) return cache.source;
@@ -95,6 +103,7 @@ public final class AeSupplyTracking {
                                 break outer;
                             }
                             PartStorageBus bus = (PartStorageBus) busNode.getMachine();
+                            if (stackType != null && bus.getStackType() != stackType) continue;
                             TileEntity tile = bus.getHost()
                                 .getTile();
                             ForgeDirection side = bus.getSide();
@@ -120,7 +129,8 @@ public final class AeSupplyTracking {
             // A detached grid/host cannot invalidate a completed inventory transfer.
         }
         if (SOURCES.size() >= 1024) SOURCES.clear();
-        SOURCES.put(action, new CachedSource(mainGrid, origin, source, SupplyTracker.clock()));
+        channels = SOURCES.computeIfAbsent(action, ignored -> new CachedSource[3]);
+        channels[channel] = new CachedSource(mainGrid, origin, source, SupplyTracker.clock());
         return source;
     }
 

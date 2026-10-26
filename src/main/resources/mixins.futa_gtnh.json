@@ -9,6 +9,7 @@
 		"MixinGTPump",
 		"MixinAeStorageBusSupply",
 		"MixinAeNetworkMonitorSupply",
+		"MixinAeNetworkInventorySupply",
 		"MixinAeFluidStackNbt",
 		"MixinGtswnQuantumTerminal",
 		"MixinGtswnControllerConnections",
