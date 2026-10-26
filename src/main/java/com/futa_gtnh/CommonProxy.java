@@ -52,6 +52,9 @@ public class CommonProxy {
     public void onSupplySnapshot(net.minecraft.network.INetHandler source,
         com.futa_gtnh.network.PacketSupplySnapshot packet) {}
 
+    public void onProductionSnapshot(net.minecraft.network.INetHandler source,
+        com.futa_gtnh.network.PacketProductionSnapshot packet) {}
+
     /** 共享终端方块。在 {@code CommonProxy#preInit} 里创建并注册。 */
     public static BlockSharedTerminal blockSharedTerminal;
 
@@ -60,6 +63,12 @@ public class CommonProxy {
 
     /** 存储总线方块（把相邻容器接进共享存储）。配置关闭时为 null。 */
     public static com.futa_gtnh.storagebus.BlockStorageBus blockStorageBus;
+
+    public void onPublicMeSnapshot(net.minecraft.network.INetHandler source,
+        com.futa_gtnh.network.PacketPublicMeSnapshot packet) {}
+
+    public static com.futa_gtnh.me.BlockPublicMeCore blockPublicMeCore;
+    public static com.futa_gtnh.me.BlockPublicMeAccess blockPublicMeAccess;
 
     /** 自选抽奖机方块。没装 Enhanced LootBags 时为 null。 */
     public static BlockLootMachine blockLootMachine;
@@ -115,6 +124,7 @@ public class CommonProxy {
         ForgeEventHandler.register();
 
         registerBlocks();
+        com.futa_gtnh.me.PublicMeNetwork.initChunkLoading();
         registerSwiftStep();
         registerLocatorWand();
         registerMinigameHelper();
@@ -215,6 +225,8 @@ public class CommonProxy {
 
     public void serverStarting(FMLServerStartingEvent event) {
         event.registerServerCommand(new CommandSharedStorage());
+        event.registerServerCommand(new com.futa_gtnh.command.CommandProductionLines());
+        event.registerServerCommand(new com.futa_gtnh.me.CommandPublicMe());
         event.registerServerCommand(new com.futa_gtnh.command.CommandFluidRefresh());
     }
 
@@ -223,6 +235,13 @@ public class CommonProxy {
     // ==================================================================
 
     private void registerBlocks() {
+        blockPublicMeCore = new com.futa_gtnh.me.BlockPublicMeCore();
+        blockPublicMeAccess = new com.futa_gtnh.me.BlockPublicMeAccess();
+        GameRegistry.registerBlock(blockPublicMeCore, com.futa_gtnh.me.BlockPublicMeCore.NAME);
+        GameRegistry.registerBlock(blockPublicMeAccess, com.futa_gtnh.me.BlockPublicMeAccess.NAME);
+        GameRegistry.registerTileEntity(com.futa_gtnh.me.TilePublicMeCore.class, FutaGtnhMod.MODID + ":public_me_core");
+        GameRegistry
+            .registerTileEntity(com.futa_gtnh.me.TilePublicMeAccess.class, FutaGtnhMod.MODID + ":public_me_access");
         blockSharedTerminal = new BlockSharedTerminal();
         GameRegistry.registerBlock(blockSharedTerminal, BlockSharedTerminal.NAME);
         GameRegistry
@@ -442,6 +461,11 @@ public class CommonProxy {
      */
     private void registerRecipes() {
         if (!Config.enableRecipe) return;
+        GameRegistry.addRecipe(
+            new ShapedOreRecipe(
+                new ItemStack(blockPublicMeAccess),
+                new Object[] { "IEI", "ECE", "IEI", 'I', "ingotIron", 'E', "enderpearl", 'C',
+                    new ItemStack(blockSharedTerminal) }));
 
         GameRegistry.addRecipe(
             new ShapedOreRecipe(

@@ -9,6 +9,10 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.item.ItemStack;
+import net.minecraft.init.Blocks;
+import net.minecraft.init.Items;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
 import net.minecraft.util.ScreenShotHelper;
 import net.minecraft.world.WorldSettings;
 import net.minecraft.world.WorldType;
@@ -40,9 +44,14 @@ public final class UiSmokeCheck {
     private int ticks;
     private int index = -1;
     private GuiScreen current;
+    private ContainerSharedTerminal sharedContainer;
+    private boolean capturedAll;
+    private long smokeWaitSince;
 
     public static void register() {
         FMLCommonHandler.instance().bus().register(new UiSmokeCheck());
+        com.futa_gtnh.me.PublicMeWorldSmoke.register();
+        com.futa_gtnh.me.GtswnQuantumWorldSmoke.register();
     }
 
     private void add(String name, Supplier<GuiScreen> factory) {
@@ -56,11 +65,31 @@ public final class UiSmokeCheck {
         if (!launched) {
             if (!(mc.currentScreen instanceof GuiMainMenu) || ++ticks < 30) return;
             launched = true; ticks = 0;
-            mc.launchIntegratedServer("FutaUiSmoke", "Futa UI smoke", new WorldSettings(12345L,
+            mc.gameSettings.pauseOnLostFocus = false;
+            mc.launchIntegratedServer(com.futa_gtnh.me.PublicMeWorldSmoke.saveName(), com.futa_gtnh.me.PublicMeWorldSmoke.worldName(), new WorldSettings(12345L,
                 WorldSettings.GameType.CREATIVE, false, false, WorldType.FLAT));
             return;
         }
         if (mc.thePlayer == null || mc.theWorld == null) return;
+        if (smokeWaitSince==0) smokeWaitSince=System.currentTimeMillis();
+        if (!com.futa_gtnh.me.PublicMeWorldSmoke.isComplete() && System.currentTimeMillis()-smokeWaitSince>180000L) {
+            throw new AssertionError("PUBLIC_ME_SMOKE_FAILED wall-clock timeout waiting for real server ticks");
+        }
+        if (com.futa_gtnh.me.PublicMeWorldSmoke.failure()!=null) {
+            throw new AssertionError(com.futa_gtnh.me.PublicMeWorldSmoke.failure());
+        }
+        if (com.futa_gtnh.me.GtswnQuantumWorldSmoke.failure()!=null) {
+            throw new AssertionError(com.futa_gtnh.me.GtswnQuantumWorldSmoke.failure());
+        }
+        if (!com.futa_gtnh.me.GtswnQuantumWorldSmoke.isComplete() && System.currentTimeMillis()-smokeWaitSince>240000L) {
+            throw new AssertionError("GTSWN_QUANTUM_SMOKE_FAILED wall-clock timeout");
+        }
+        if (capturedAll) {
+            if(com.futa_gtnh.me.PublicMeWorldSmoke.isComplete() && com.futa_gtnh.me.GtswnQuantumWorldSmoke.isComplete()) {
+                System.out.println("UI_SMOKE_SUCCESS " + screens.size() + " screens");mc.shutdown();
+            }
+            return;
+        }
         if (screens.isEmpty()) {
             // The vanilla development window is 854x480; scale 1 keeps the inventory canvas visible.
             mc.gameSettings.guiScale = 1;
@@ -71,6 +100,7 @@ public final class UiSmokeCheck {
             mc.refreshResources();
             TileEntitySharedTerminal terminal = new TileEntitySharedTerminal(); terminal.setWorldObj(mc.theWorld);
             ContainerSharedTerminal storage = new ContainerSharedTerminal(mc.thePlayer.inventory, terminal);
+            sharedContainer = storage;
             TileEntityIoNode node = new TileEntityIoNode(); node.setWorldObj(mc.theWorld);
             TileAeSignalTransmitter transmitter = new TileAeSignalTransmitter(); transmitter.setWorldObj(mc.theWorld);
             TileEntityLootMachine loot = new TileEntityLootMachine(); loot.setWorldObj(mc.theWorld);
@@ -82,6 +112,14 @@ public final class UiSmokeCheck {
                 new StorageBusConfig().writeToNbt(), "", false, false);
             add("settings", GuiClientConfig::new);
             add("terminal", () -> new GuiSharedTerminal(storage));
+            add("supply_monitor", () -> new GuiSupplyMonitor(storage));
+            add("supply_monitor_small", () -> new GuiSupplyMonitor(storage));
+            add("supply_threshold", () -> new GuiSupplyMonitor(storage));
+            add("supply_threshold_small", () -> new GuiSupplyMonitor(storage));
+            add("production_lines", () -> new GuiProductionLines(null, storage));
+            add("public_me_crafting", () -> new GuiPublicMeCrafting(storage));
+            add("production_lines_small", () -> new GuiProductionLines(null, storage));
+            add("public_me_crafting_small", () -> new GuiPublicMeCrafting(storage));
             add("limits", () -> new GuiStorageLimits(storage));
             add("terminal_io", () -> new GuiTerminalIo(storage));
             add("node", () -> new GuiIoNode(new ContainerIoNode(node, mc.thePlayer), 2));
@@ -124,10 +162,121 @@ public final class UiSmokeCheck {
     private void next(Minecraft mc) {
         ticks = 0;
         if (++index == screens.size()) {
-            System.out.println("UI_SMOKE_SUCCESS " + screens.size() + " screens");
-            mc.shutdown(); return;
+            capturedAll=true;mc.displayGuiScreen(null);return;
         }
         current = screens.get(index).get();
-        mc.displayGuiScreen(current);
+        mc.gameSettings.guiScale = names.get(index).endsWith("_small") ? 2 : 1;
+        if (current instanceof GuiProductionLines || current instanceof GuiPublicMeCrafting || current instanceof GuiSupplyMonitor) {
+            // These are explicit client-only display fixtures. No plan, metadata edit or gameplay packet is sent.
+            // Preserve the real local container lifecycle so updateScreen cannot immediately close the preview.
+            ClientProductionState.ready(null, false);
+            ClientPublicMeState.ready(null, false);
+            if(current instanceof GuiSupplyMonitor){
+                try {
+                    java.lang.reflect.Field supported=ClientSupplyState.class.getDeclaredField("supported");
+                    supported.setAccessible(true);supported.setBoolean(null,false);
+                    java.lang.reflect.Field response=ClientSupplyState.class.getDeclaredField("response");
+                    response.setAccessible(true);response.set(null,null);
+                }catch(ReflectiveOperationException failure){throw new AssertionError(failure);}
+            }
+            sharedContainer.withClientPageSwitch(() -> {
+                mc.displayGuiScreen(current);
+                mc.thePlayer.openContainer = sharedContainer;
+            });
+            if (current instanceof GuiProductionLines) productionFixture(current);
+            else if(current instanceof GuiSupplyMonitor) supplyFixture(current,names.get(index).startsWith("supply_threshold"));
+            else craftingFixture(current);
+        } else mc.displayGuiScreen(current);
+    }
+
+    private static void set(Object target,String field,Object value) {
+        try {
+            java.lang.reflect.Field member=target.getClass().getDeclaredField(field);
+            member.setAccessible(true);member.set(target,value);
+        } catch(ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+
+    private static NBTTagCompound resource(ItemStack stack,long stored,long craft,long missing) {
+        NBTTagCompound row=com.futa_gtnh.supply.SupplyTracker.writeKey(com.futa_gtnh.shared.ItemKey.of(stack));
+        row.setLong("stored",stored);row.setLong("craft",craft);row.setLong("missing",missing);return row;
+    }
+
+    private static void supplyFixture(GuiScreen screen,boolean watched) {
+        com.futa_gtnh.shared.FluidKey key=com.futa_gtnh.shared.FluidKey.of(net.minecraftforge.fluids.FluidRegistry.WATER,null);
+        NBTTagCompound data=new NBTTagCompound();
+        data.setBoolean("enabled",true);data.setBoolean("writable",true);data.setBoolean("okay",true);
+        data.setBoolean("teleportEnabled",true);data.setLong("threshold",watched?Long.MAX_VALUE:-1);
+        data.setLong("incoming",24000);data.setLong("outgoing",24000);data.setLong("stock",0);
+        data.setInteger("sourcePages",1);data.setInteger("watchPages",1);
+        NBTTagList history=new NBTTagList();history.appendTag(com.futa_gtnh.supply.SupplyTracker.writeKey(key));data.setTag("watches",history);
+        com.futa_gtnh.supply.SupplySource source=new com.futa_gtnh.supply.SupplySource(
+            com.futa_gtnh.supply.SupplySource.IO,0,120,64,220,5,"");
+        NBTTagCompound row=source.write();row.setString("id",source.id());row.setString("name","电解水产线输入 IO");
+        row.setLong("out",24000);row.setDouble("outPerMinute",2400);
+        NBTTagList sources=new NBTTagList();sources.appendTag(row);data.setTag("sources",sources);
+        try {
+            java.lang.reflect.Method apply=GuiSupplyMonitor.class.getDeclaredMethod("apply",NBTTagCompound.class);
+            apply.setAccessible(true);apply.invoke(screen,data);
+        }catch(ReflectiveOperationException failure){throw new AssertionError(failure);}
+        set(screen,"target",key);set(screen,"targetName",key.prototype().getLocalizedName());
+        set(screen,"selectedSource",row);set(screen,"error",null);
+        set(screen,"lastRequest",System.currentTimeMillis()+60000L);
+    }
+
+    private static void productionFixture(GuiScreen screen) {
+        String lineId="00000000-0000-0000-0000-000000000001";
+        NBTTagCompound data=new NBTTagCompound();
+        data.setBoolean("enabled",true);data.setBoolean("writable",true);data.setBoolean("canEdit",true);
+        data.setBoolean("hasRate",true);data.setBoolean("bucketed",true);data.setBoolean("lineFound",true);
+        data.setBoolean("sourceFound",true);data.setLong("observedMillis",600000);data.setInteger("minutes",10);
+        data.setInteger("linePages",1);data.setInteger("sourcePages",1);data.setInteger("resourcePages",1);
+        data.setString("lineId",lineId);data.setString("lineName","电路装配线");
+        NBTTagList lines=new NBTTagList();
+        String[] labels={"电路装配线","聚乙烯产线","基础金属处理"};
+        for(int i=0;i<labels.length;i++){
+            NBTTagCompound line=new NBTTagCompound();line.setString("id",String.format("00000000-0000-0000-0000-%012d",i+1));
+            line.setString("name",labels[i]);line.setInteger("sourceCount",3+i);lines.appendTag(line);
+        }
+        data.setTag("lines",lines);
+        NBTTagList sources=new NBTTagList();
+        String[] deviceNames={"组装机输入接口","成品回收接口","水冷回路"};
+        for(int i=0;i<deviceNames.length;i++) {
+            com.futa_gtnh.supply.SupplySource source=new com.futa_gtnh.supply.SupplySource(
+                i==0?com.futa_gtnh.supply.SupplySource.AE_BUS:com.futa_gtnh.supply.SupplySource.IO,0,120+i,64,220,5,"");
+            NBTTagCompound row=source.write();row.setString("id",source.id());row.setString("name",deviceNames[i]);
+            row.setString("lineId",lineId);row.setString("lineName","电路装配线");row.setBoolean("active",true);
+            row.setDouble("itemOutPerMinute",i==0?1200:0);row.setDouble("itemInPerMinute",i==1?300:0);
+            row.setDouble("fluidOutPerMinute",i==2?24000:0);row.setDouble("fluidInPerMinute",i==2?12000:0);
+            sources.appendTag(row);
+        }
+        data.setTag("sources",sources);
+        NBTTagCompound totals=new NBTTagCompound();totals.setDouble("itemOutPerMinute",1200);totals.setDouble("itemInPerMinute",300);
+        totals.setDouble("fluidOutPerMinute",24000);totals.setDouble("fluidInPerMinute",12000);data.setTag("totals",totals);
+        set(screen,"data",data);set(screen,"lineId",lineId);set(screen,"lineName","电路装配线");
+        set(screen,"allSources",false);set(screen,"status","");set(screen,"queryPending",false);
+        set(screen,"lastRequest",System.currentTimeMillis());
+    }
+
+    private static void craftingFixture(GuiScreen screen) {
+        NBTTagCompound output=resource(new ItemStack(Blocks.piston),0,0,0);
+        NBTTagCompound data=new NBTTagCompound();data.setBoolean("online",true);data.setBoolean("canCraft",true);
+        data.setInteger("catalogPages",1);data.setInteger("catalogCount",4);
+        NBTTagList catalog=new NBTTagList();catalog.appendTag(output);
+        catalog.appendTag(resource(new ItemStack(Items.repeater),0,0,0));
+        catalog.appendTag(resource(new ItemStack(Items.comparator),0,0,0));
+        catalog.appendTag(resource(new ItemStack(Blocks.hopper),0,0,0));data.setTag("catalog",catalog);
+        NBTTagCompound job=new NBTTagCompound();job.setInteger("state",2);job.setLong("bytes",4096);job.setLong("amount",64);
+        job.setString("planId","00000000-0000-0000-0000-000000000099");job.setTag("output",output);
+        job.setString("message","计划就绪，需要 4096 字节 CPU 存储；确认后提交");job.setInteger("rowPages",1);
+        NBTTagList rows=new NBTTagList();rows.appendTag(resource(new ItemStack(Items.iron_ingot),64,0,0));
+        rows.appendTag(resource(new ItemStack(Items.redstone),64,0,0));
+        rows.appendTag(resource(new ItemStack(Blocks.cobblestone),256,0,0));
+        rows.appendTag(resource(new ItemStack(Blocks.planks),0,192,0));job.setTag("rows",rows);data.setTag("job",job);
+        set(screen,"data",data);set(screen,"target",output);set(screen,"amountText","64");set(screen,"notice","");
+        set(screen,"queryPending",false);set(screen,"lastRequest",System.currentTimeMillis());
+        try {
+            java.lang.reflect.Field field=screen.getClass().getDeclaredField("amount");field.setAccessible(true);
+            ((com.futa_gtnh.client.widget.FutaSearchField)field.get(screen)).setText("64",false);
+        }catch(ReflectiveOperationException failure){throw new AssertionError(failure);}
     }
 }

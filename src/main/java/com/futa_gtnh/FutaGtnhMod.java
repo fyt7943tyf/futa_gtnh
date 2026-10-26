@@ -162,6 +162,15 @@ public class FutaGtnhMod {
     @Mod.EventHandler
     public void serverStarted(FMLServerStartedEvent event) {
         SharedStorageManager.onServerStarted(net.minecraft.server.MinecraftServer.getServer());
+        com.futa_gtnh.ae2.PublicStorageAccess.begin();
+        com.futa_gtnh.me.PublicMeNetwork.start(
+            net.minecraft.server.MinecraftServer.getServer(),
+            CommonProxy.blockPublicMeCore,
+            java.util.UUID.fromString(
+                com.futa_gtnh.shared.SharedStorageFile.getAeStorageId(SharedStorageManager.worldDirectory())),
+            Config.publicMeCoreX,
+            Config.publicMeCoreY,
+            Config.publicMeCoreZ);
         com.futa_gtnh.supply.SupplyTracker.start(net.minecraft.server.MinecraftServer.getServer());
         com.futa_gtnh.ae2.AeSupplyTracking.clear();
         com.futa_gtnh.network.SupplyClients.clear();
@@ -205,8 +214,13 @@ public class FutaGtnhMod {
         com.futa_gtnh.ae2.AeSupplyTracking.clear();
         com.futa_gtnh.network.ServerActions.clear();
         com.futa_gtnh.network.PacketSupplyRequest.clear();
+        com.futa_gtnh.network.PacketProductionRequest.clear();
+        com.futa_gtnh.network.PacketPublicMeRequest.clear();
+        com.futa_gtnh.me.PublicMeCrafting.clear();
         com.futa_gtnh.network.SupplyClients.clear();
         SharedStorageManager.onServerStopping();
+        com.futa_gtnh.ae2.PublicStorageAccess.clear();
+        com.futa_gtnh.me.PublicMeNetwork.stop();
         com.futa_gtnh.lootassist.LootassistManager.onServerStopping();
         com.futa_gtnh.reactor.ReactorLayoutManager.onServerStopping();
         // AE2 共享背包元件的运行时状态（网络注册表/镜像缓存）清空；没装 AE2 时是空操作

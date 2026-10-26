@@ -67,6 +67,10 @@ public final class SharedStorageManager {
         return storage;
     }
 
+    public static File worldDirectory() {
+        return worldDirectory;
+    }
+
     public static boolean isLoaded() {
         return loaded;
     }
@@ -79,7 +83,9 @@ public final class SharedStorageManager {
     public static SharedStorageReadStatus getReadApiStatus() {
         checkReadApiThread();
         return new SharedStorageReadStatus(
-            loaded ? SharedStorageReadStatus.State.READY : SharedStorageReadStatus.State.NOT_READY,
+            loaded && (!storage.usesNetwork() || com.futa_gtnh.me.PublicMeNetwork.isOnline())
+                ? SharedStorageReadStatus.State.READY
+                : SharedStorageReadStatus.State.NOT_READY,
             readApiGeneration,
             loaded ? storage.getRevision() : 0);
     }
@@ -87,7 +93,7 @@ public final class SharedStorageManager {
     /** Internal implementation for SharedStorageReadApi; never returns the temporary startup pool. */
     public static SharedStorageSnapshot getReadApiSnapshot() {
         checkReadApiThread();
-        if (!loaded) {
+        if (!loaded || storage.usesNetwork() && !com.futa_gtnh.me.PublicMeNetwork.isOnline()) {
             return new SharedStorageSnapshot(getReadApiStatus(), Collections.emptyList(), Collections.emptyList());
         }
         return storage.snapshotForReadApi(readApiGeneration);
@@ -133,6 +139,8 @@ public final class SharedStorageManager {
 
         File dir = resolveWorldDirectory(server);
         if (dir == null) {
+            if (server != null)
+                throw new IllegalStateException("Cannot start public ME storage without a persistent world directory");
             FutaGtnhMod.LOG.error("共享存储：拿不到主世界存档目录，本次以内存模式运行（不会写盘）");
             SharedStorage mem = new SharedStorage();
             mem.adoptListenersFrom(storage);
@@ -145,10 +153,12 @@ public final class SharedStorageManager {
 
         // A failed load must never leave the previous pool writable at the new world's path.
         worldDirectory = null;
-        SharedStorage fresh = SharedStorageFile.load(dir);
+        SharedStorage fresh = SharedStorageFile.loadForAe(dir);
         worldDirectory = dir;
+        boolean networkAttached = storage.usesNetwork();
         fresh.adoptListenersFrom(storage);
         storage = fresh;
+        if (networkAttached) com.futa_gtnh.ae2.PublicStorageAccess.begin();
         loaded = true;
         autosaveTicker = 0;
         invalidateSnapshot();
@@ -353,7 +363,7 @@ public final class SharedStorageManager {
      * 不会在存储锁里回调 AE。
      */
     public static void onExternalStorageChanged(Set<ItemKey> itemKeys, Set<FluidKey> fluidKeys) {
-        if (!loaded) return;
+        if (!loaded || storage.usesNetwork()) return;
 
         SharedStorage current = storage;
         boolean any = false;
@@ -418,15 +428,21 @@ public final class SharedStorageManager {
 
         SharedStorage fresh;
         try {
-            fresh = SharedStorageFile.load(worldDirectory);
+            fresh = SharedStorageFile.loadForAe(worldDirectory);
+            if (com.futa_gtnh.me.PublicMeNetwork.isRunning() && !com.futa_gtnh.me.PublicMeNetwork
+                .matchesStorageId(UUID.fromString(SharedStorageFile.getAeStorageId(worldDirectory)))) {
+                throw new IllegalStateException("Reload cannot replace the public ME warehouse identity");
+            }
         } catch (IllegalStateException error) {
             savingBlocked = true;
             FutaGtnhMod.LOG.error("共享存储：重新读取失败，保留当前内存库存并暂停保存；修复原文件后重新 reload 可恢复保存", error);
             return -1;
         }
         savingBlocked = false;
+        boolean networkAttached = storage.usesNetwork();
         fresh.adoptListenersFrom(storage);
         storage = fresh;
+        if (networkAttached) com.futa_gtnh.ae2.PublicStorageAccess.begin();
         readApiGeneration = UUID.randomUUID()
             .toString();
         invalidateSnapshot();

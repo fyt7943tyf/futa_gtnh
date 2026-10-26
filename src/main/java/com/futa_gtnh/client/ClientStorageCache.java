@@ -30,6 +30,16 @@ import com.futa_gtnh.shared.ItemKey;
  */
 public final class ClientStorageCache {
 
+    private static boolean publicMe, meOnline = true;
+
+    public static boolean publicMe() {
+        return publicMe;
+    }
+
+    public static boolean meOnline() {
+        return meOnline;
+    }
+
     private ClientStorageCache() {}
 
     private static final List<StorageViewEntry> ITEMS = new ArrayList<>();
@@ -211,6 +221,8 @@ public final class ClientStorageCache {
     }
 
     private static void applySnapshot(NBTTagCompound root) {
+        publicMe = root != null && root.getBoolean("publicMe");
+        meOnline = !publicMe || root.getBoolean("meOnline");
         ITEMS.clear();
         FLUIDS.clear();
         ITEM_INDEX.clear();
@@ -409,6 +421,8 @@ public final class ClientStorageCache {
 
     /** 断开连接或切换存档时清空，避免把上一个服务器的数据带过来。 */
     public static void clear() {
+        publicMe = false;
+        meOnline = true;
         ITEMS.clear();
         FLUIDS.clear();
         ITEM_INDEX.clear();

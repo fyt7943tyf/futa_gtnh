@@ -3,7 +3,9 @@ package com.futa_gtnh.shared;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -214,7 +216,13 @@ public final class SharedStorageReadApiRegression {
                 "reload changes generation");
         } finally {
             worldDirectory.set(null, null);
-            check(tempWorld.delete(), "remove empty temporary world");
+            // AE adoption establishes durable empty data and its migration marker on first load.
+            try (java.util.stream.Stream<Path> paths = Files.walk(tempWorld.toPath())) {
+                for (Path path : (Iterable<Path>) paths.sorted(Comparator.reverseOrder())::iterator) {
+                    Files.delete(path);
+                }
+            }
+            check(!tempWorld.exists(), "remove isolated temporary world and migration files");
         }
         String reloaded = SharedStorageReadApi.getStatus()
             .getGeneration();

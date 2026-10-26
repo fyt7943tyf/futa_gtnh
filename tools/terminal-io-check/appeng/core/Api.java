@@ -10,6 +10,7 @@ import appeng.api.definitions.IItemDefinition;
 import appeng.api.definitions.IItems;
 import appeng.api.features.IRegistryContainer;
 import appeng.api.features.ISpecialComparisonRegistry;
+import appeng.api.storage.IStorageHelper;
 
 /**
  * Test-only empty AE2 item definitions and comparison registry. The real core API
@@ -28,6 +29,16 @@ public final class Api {
             switch (method.getName()) {
                 case "definitions":
                     return emptyRegistry(IDefinitions.class);
+                case "storage":
+                    return emptyRegistry(IStorageHelper.class);
+                case "createItemList":
+                    return new appeng.util.item.ItemList();
+                case "createSortedItemList":
+                    return new appeng.util.item.ItemList(true);
+                case "createFluidList":
+                    return new appeng.util.item.FluidList();
+                case "createAEStackList":
+                    return new appeng.util.item.IAEStackList();
                 case "items":
                     return emptyRegistry(IItems.class);
                 case "encodedPattern":

@@ -914,7 +914,10 @@ public class GuiSharedTerminal extends FutaGuiContainer {
         // 悬停时下面又冒出同一份数字，看着像「同一个数量显示了两遍」，还容易被当成
         // 界面画重了。数量就只在格子里显示，这一行留给状态。
         String status;
-        if (container.isRemoteAccess()) {
+        if (ClientStorageCache.publicMe()) {
+            status = (ClientStorageCache.meOnline() ? EnumChatFormatting.GREEN : EnumChatFormatting.RED)
+                + tr(ClientStorageCache.meOnline() ? "futa_gtnh.me.online" : "futa_gtnh.me.offline");
+        } else if (container.isRemoteAccess()) {
             status = EnumChatFormatting.GRAY + tr("futa_gtnh.gui.status.remote");
         } else {
             status = EnumChatFormatting.GRAY + tr("futa_gtnh.gui.status.output");

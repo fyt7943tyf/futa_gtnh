@@ -40,6 +40,11 @@ public final class DrawerStorageCompat {
         return supports(inventory) ? Hook.itemAmount(inventory, key) : -1L;
     }
 
+    /** Negative means unsupported; this path deliberately never synchronizes virtual drawer slots. */
+    static long simulateItems(IInventory inventory, ForgeDirection side, ItemKey key, long amount, boolean insert) {
+        return supports(inventory) ? Hook.simulateItems(inventory, side, key, amount, insert) : -1L;
+    }
+
     public static long insertItems(IInventory inventory, ForgeDirection side, ItemKey key, long amount) {
         return ExternalInventoryOps.insertItems(inventory, side, key, amount);
     }
@@ -50,6 +55,37 @@ public final class DrawerStorageCompat {
 
     /** All optional API references stay in this lazily loaded class. */
     private static final class Hook {
+
+        static long simulateItems(IInventory inventory, ForgeDirection side, ItemKey key, long amount, boolean insert) {
+            com.jaquadro.minecraft.storagedrawers.api.storage.IDrawerGroup group = (com.jaquadro.minecraft.storagedrawers.api.storage.IDrawerGroup) inventory;
+            com.jaquadro.minecraft.storagedrawers.api.inventory.IDrawerInventory slots = group.getDrawerInventory();
+            if (slots == null) return -1L;
+            ItemStack prototype = key.prototype();
+            long remaining = amount;
+            for (int index = 0; index < group.getDrawerCount() && remaining > 0; index++) {
+                if (!group.isDrawerEnabled(index)) continue;
+                com.jaquadro.minecraft.storagedrawers.api.storage.IDrawer drawer = group.getDrawer(index);
+                if (drawer == null) continue;
+                ItemKey stored = ItemKey.of(drawer.getStoredItemPrototype());
+                int slot = slots.getInventorySlot(
+                    index,
+                    insert ? com.jaquadro.minecraft.storagedrawers.api.inventory.SlotType.INPUT
+                        : com.jaquadro.minecraft.storagedrawers.api.inventory.SlotType.OUTPUT);
+                if (slot < 0) continue;
+                long available;
+                if (insert) {
+                    if (stored != null && !key.equals(stored) || !drawer.canItemBeStored(prototype)
+                        || !ExternalInventoryOps.canInsert(inventory, slot, prototype, side)) continue;
+                    available = drawer.isEmpty() ? drawer.getMaxCapacity(prototype) : drawer.getRemainingCapacity();
+                } else {
+                    if (!key.equals(stored) || !drawer.canItemBeExtracted(prototype)
+                        || !ExternalInventoryOps.canExtract(inventory, slot, prototype, side)) continue;
+                    available = drawer.getStoredItemCount();
+                }
+                remaining -= Math.min(remaining, Math.max(0L, available));
+            }
+            return amount - remaining;
+        }
 
         private static com.jaquadro.minecraft.storagedrawers.api.storage.IDrawerGroup group(IInventory inventory) {
             com.jaquadro.minecraft.storagedrawers.api.storage.IDrawerGroup group = (com.jaquadro.minecraft.storagedrawers.api.storage.IDrawerGroup) inventory;

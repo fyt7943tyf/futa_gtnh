@@ -48,8 +48,64 @@ public class SharedStorage {
     /** 单个条目的数量上限。再往上加会饱和到这个值，多出来的部分原样退回。 */
     public static final long MAX_AMOUNT = Long.MAX_VALUE;
 
+    /** AE provider boundary: these methods address only the durable pool. */
+    public synchronized long poolItemSpace(ItemKey key, boolean manual) {
+        if (key == null) return 0;
+        long ceiling = manual ? MAX_AMOUNT : getItemLimit(key);
+        return Math.max(0, Math.max(0, ceiling - getItemAmountPool(key)) - craftingItems.getOrDefault(key, 0L));
+    }
+
+    public synchronized long poolFluidSpace(FluidKey key, boolean manual) {
+        if (key == null) return 0;
+        long ceiling = manual ? MAX_AMOUNT : getFluidLimit(key);
+        return Math.max(0, Math.max(0, ceiling - getFluidAmountPool(key)) - craftingFluids.getOrDefault(key, 0L));
+    }
+
+    public synchronized long poolInsertItem(ItemKey key, long amount, boolean manual) {
+        return insertItemPool(key, Math.min(amount, poolItemSpace(key, manual)), !manual);
+    }
+
+    public synchronized long poolInsertFluid(FluidKey key, long amount, boolean manual) {
+        return insertFluidPool(key, Math.min(amount, poolFluidSpace(key, manual)), !manual);
+    }
+
+    public synchronized long poolExtractItem(ItemKey key, long amount) {
+        return key == null || amount <= 0 ? 0 : extractItemPool(key, amount);
+    }
+
+    public synchronized long poolExtractFluid(FluidKey key, long amount) {
+        return key == null || amount <= 0 ? 0 : extractFluidPool(key, amount);
+    }
+
+    public synchronized List<Map.Entry<ItemKey, Long>> snapshotPoolItems() {
+        List<Map.Entry<ItemKey, Long>> copy = new ArrayList<>();
+        for (Map.Entry<ItemKey, Long> row : items.entrySet()) copy.add(new AbstractMap.SimpleImmutableEntry<>(row));
+        return Collections.unmodifiableList(copy);
+    }
+
+    public synchronized List<Map.Entry<FluidKey, Long>> snapshotPoolFluids() {
+        List<Map.Entry<FluidKey, Long>> copy = new ArrayList<>();
+        for (Map.Entry<FluidKey, Long> row : fluids.entrySet()) copy.add(new AbstractMap.SimpleImmutableEntry<>(row));
+        return Collections.unmodifiableList(copy);
+    }
+
     /** 存档格式版本。将来改结构时靠它做迁移。 */
     public static final int FORMAT_VERSION = 3;
+
+    private StorageNetworkAccess networkAccess;
+
+    public synchronized void setNetworkAccess(StorageNetworkAccess access) {
+        networkAccess = access;
+        revision++;
+        itemRevision++;
+        fluidRevision++;
+        itemSnapshotCache = null;
+        fluidSnapshotCache = null;
+    }
+
+    public synchronized boolean usesNetwork() {
+        return networkAccess != null;
+    }
 
     private final LinkedHashMap<ItemKey, Long> items = new LinkedHashMap<>();
     private final LinkedHashMap<FluidKey, Long> fluids = new LinkedHashMap<>();
@@ -110,6 +166,7 @@ public class SharedStorage {
     // ==================================================================
 
     public synchronized long getItemAmount(ItemKey key) {
+        if (networkAccess != null) return networkAccess.itemAmount(key);
         if (key == null) return 0L;
         Long amount = items.get(key);
         long internal = amount == null ? 0L : amount;
@@ -130,13 +187,13 @@ public class SharedStorage {
     private long itemAmountForLimit(ItemKey key) {
         Long amount = key == null ? null : items.get(key);
         long internal = amount == null ? 0L : amount;
-        return saturatingAdd(internal, StorageBusRegistry.getAllItemAmount(key));
+        return networkAccess != null ? internal : saturatingAdd(internal, StorageBusRegistry.getAllItemAmount(key));
     }
 
     private long fluidAmountForLimit(FluidKey key) {
         Long amount = key == null ? null : fluids.get(key);
         long internal = amount == null ? 0L : amount;
-        return saturatingAdd(internal, StorageBusRegistry.getAllFluidAmount(key));
+        return networkAccess != null ? internal : saturatingAdd(internal, StorageBusRegistry.getAllFluidAmount(key));
     }
 
     /**
@@ -167,6 +224,7 @@ public class SharedStorage {
      * 的方块 / 管道路径上发生，量级是「一次请求几十格」，可以接受。
      */
     public synchronized long insertItem(ItemKey key, long amount) {
+        if (networkAccess != null) return networkAccess.insertItem(key, amount, false, false);
         if (key == null || amount <= 0L) return 0L;
 
         // 上限按「池子 + 全部总线」算；只写总线的隐藏库存也计入
@@ -205,6 +263,7 @@ public class SharedStorage {
     }
 
     public synchronized long insertItemManual(ItemKey key, long amount) {
+        if (networkAccess != null) return networkAccess.insertItem(key, amount, true, false);
         if (key == null || amount <= 0L) return 0L;
         long room = itemManualSpaceLeft(key);
         if (room <= 0L) return 0L;
@@ -234,6 +293,7 @@ public class SharedStorage {
     }
 
     public long insertItemDirect(ItemKey key, long amount) {
+        if (networkAccess != null) return networkAccess.insertItem(key, amount, false, true);
         if (key == null || amount <= 0L) return 0L;
         long room = itemSpaceLeft(key);
         if (room <= 0L) return 0L;
@@ -242,6 +302,7 @@ public class SharedStorage {
 
     /** 直接进池子、且允许超出上限；用于主动搬运失败时的回滚。 */
     public long insertItemManualDirect(ItemKey key, long amount) {
+        if (networkAccess != null) return networkAccess.insertItem(key, amount, true, true);
         if (key == null || amount <= 0L) return 0L;
         long room = itemManualSpaceLeft(key);
         if (room <= 0L) return 0L;
@@ -257,6 +318,7 @@ public class SharedStorage {
 
     /** 直接从池子取，不经过存储总线；主动输出 / 回滚用 */
     public long extractItemDirect(ItemKey key, long amount) {
+        if (networkAccess != null) return networkAccess.extractItem(key, amount, null);
         if (key == null || amount <= 0L) return 0L;
         return extractItemPool(key, amount);
     }
@@ -268,6 +330,7 @@ public class SharedStorage {
     }
 
     public long extractFluidDirect(FluidKey key, long amount) {
+        if (networkAccess != null) return networkAccess.extractFluid(key, amount, null);
         if (key == null || amount <= 0L) return 0L;
         return extractFluidPool(key, amount);
     }
@@ -312,6 +375,7 @@ public class SharedStorage {
      * 又从同一个容器抽回来，形成无意义的原地搬运。池子仍然参与抽取。
      */
     public synchronized long extractItemExcluding(ItemKey key, long amount, TileEntity excluded) {
+        if (networkAccess != null) return networkAccess.extractItem(key, amount, excluded);
         if (key == null || amount <= 0L) return 0L;
 
         long remaining = amount;
@@ -373,6 +437,7 @@ public class SharedStorage {
     // ==================================================================
 
     public synchronized long getFluidAmount(FluidKey key) {
+        if (networkAccess != null) return networkAccess.fluidAmount(key);
         if (key == null) return 0L;
         Long amount = fluids.get(key);
         long internal = amount == null ? 0L : amount;
@@ -392,6 +457,7 @@ public class SharedStorage {
     }
 
     public synchronized long insertFluid(FluidKey key, long amount) {
+        if (networkAccess != null) return networkAccess.insertFluid(key, amount, false, false);
         if (key == null || amount <= 0L) return 0L;
         long room = fluidSpaceLeft(key);
         if (room <= 0L) return 0L;
@@ -409,6 +475,7 @@ public class SharedStorage {
 
     /** 玩家手动倒入流体，允许超出上限（同 {@link #insertItemManual}）。 */
     public synchronized long insertFluidManual(FluidKey key, long amount) {
+        if (networkAccess != null) return networkAccess.insertFluid(key, amount, true, false);
         if (key == null || amount <= 0L) return 0L;
         long room = fluidManualSpaceLeft(key);
         if (room <= 0L) return 0L;
@@ -430,6 +497,7 @@ public class SharedStorage {
     }
 
     public long insertFluidDirect(FluidKey key, long amount) {
+        if (networkAccess != null) return networkAccess.insertFluid(key, amount, false, true);
         if (key == null || amount <= 0L) return 0L;
         long room = fluidSpaceLeft(key);
         if (room <= 0L) return 0L;
@@ -437,6 +505,7 @@ public class SharedStorage {
     }
 
     public long insertFluidManualDirect(FluidKey key, long amount) {
+        if (networkAccess != null) return networkAccess.insertFluid(key, amount, true, true);
         if (key == null || amount <= 0L) return 0L;
         long room = fluidManualSpaceLeft(key);
         if (room <= 0L) return 0L;
@@ -468,6 +537,7 @@ public class SharedStorage {
 
     /** 同 {@link #extractItemExcluding}，但用于流体。 */
     public synchronized long extractFluidExcluding(FluidKey key, long amount, TileEntity excluded) {
+        if (networkAccess != null) return networkAccess.extractFluid(key, amount, excluded);
         if (key == null || amount <= 0L) return 0L;
 
         long remaining = amount;
@@ -512,6 +582,7 @@ public class SharedStorage {
      *         包含存储总线带来的可读库存（同一个键会合并数量）。
      */
     public synchronized List<Map.Entry<ItemKey, Long>> snapshotItems() {
+        if (networkAccess != null) return networkAccess.items();
         LinkedHashMap<ItemKey, Long> merged = new LinkedHashMap<>(items);
         for (Map.Entry<ItemKey, Long> entry : StorageBusRegistry.snapshotReadableItems()
             .entrySet()) {
@@ -527,6 +598,7 @@ public class SharedStorage {
     }
 
     public synchronized List<Map.Entry<FluidKey, Long>> snapshotFluids() {
+        if (networkAccess != null) return networkAccess.fluids();
         LinkedHashMap<FluidKey, Long> merged = new LinkedHashMap<>(fluids);
         for (Map.Entry<FluidKey, Long> entry : StorageBusRegistry.snapshotReadableFluids()
             .entrySet()) {
@@ -620,6 +692,7 @@ public class SharedStorage {
     }
 
     public synchronized int itemTypeCount() {
+        if (networkAccess != null) return snapshotItemsCached().size();
         int count = items.size();
         for (ItemKey key : StorageBusRegistry.snapshotReadableItems()
             .keySet()) {
@@ -629,6 +702,7 @@ public class SharedStorage {
     }
 
     public synchronized int fluidTypeCount() {
+        if (networkAccess != null) return snapshotFluidsCached().size();
         int count = fluids.size();
         for (FluidKey key : StorageBusRegistry.snapshotReadableFluids()
             .keySet()) {
@@ -638,10 +712,20 @@ public class SharedStorage {
     }
 
     public synchronized long getItemTotal() {
+        if (networkAccess != null) {
+            long total = 0;
+            for (Map.Entry<ItemKey, Long> row : snapshotItemsCached()) total = saturatingAdd(total, row.getValue());
+            return total;
+        }
         return saturatingAdd(itemTotal, StorageBusRegistry.readableItemTotal());
     }
 
     public synchronized long getFluidTotal() {
+        if (networkAccess != null) {
+            long total = 0;
+            for (Map.Entry<FluidKey, Long> row : snapshotFluidsCached()) total = saturatingAdd(total, row.getValue());
+            return total;
+        }
         return saturatingAdd(fluidTotal, StorageBusRegistry.readableFluidTotal());
     }
 
@@ -654,15 +738,18 @@ public class SharedStorage {
      * <b>不把共享存储标记成脏</b>：外部容器由自己的方块实体落盘。
      */
     public synchronized int getRevision() {
-        return revision + StorageBusRegistry.getRevision();
+        return revision + (networkAccess == null ? StorageBusRegistry.getRevision()
+            : networkAccess.itemRevision() + networkAccess.fluidRevision());
     }
 
     public synchronized int getItemRevision() {
-        return itemRevision + StorageBusRegistry.getItemRevision();
+        return itemRevision
+            + (networkAccess == null ? StorageBusRegistry.getItemRevision() : networkAccess.itemRevision());
     }
 
     public synchronized int getFluidRevision() {
-        return fluidRevision + StorageBusRegistry.getFluidRevision();
+        return fluidRevision
+            + (networkAccess == null ? StorageBusRegistry.getFluidRevision() : networkAccess.fluidRevision());
     }
 
     /**
@@ -873,6 +960,7 @@ public class SharedStorage {
      * @return 剩余容量；已达上限返回 0
      */
     public synchronized long itemSpaceLeft(ItemKey key) {
+        if (networkAccess != null) return networkAccess.itemSpace(key, false);
         if (key == null) return 0L;
         return Math.max(
             0L,
@@ -880,6 +968,7 @@ public class SharedStorage {
     }
 
     public synchronized long fluidSpaceLeft(FluidKey key) {
+        if (networkAccess != null) return networkAccess.fluidSpace(key, false);
         if (key == null) return 0L;
         return Math.max(
             0L,
@@ -887,13 +976,109 @@ public class SharedStorage {
     }
 
     public synchronized long itemManualSpaceLeft(ItemKey key) {
+        if (networkAccess != null) return networkAccess.itemSpace(key, true);
         if (key == null) return 0L;
         return Math.max(0L, MAX_AMOUNT - itemAmountForLimit(key) - craftingItems.getOrDefault(key, 0L));
     }
 
     public synchronized long fluidManualSpaceLeft(FluidKey key) {
+        if (networkAccess != null) return networkAccess.fluidSpace(key, true);
         if (key == null) return 0L;
         return Math.max(0L, MAX_AMOUNT - fluidAmountForLimit(key) - craftingFluids.getOrDefault(key, 0L));
+    }
+
+    public synchronized boolean hasPendingItemTransfer(ItemKey key) {
+        return key != null && craftingItems.containsKey(key);
+    }
+
+    public synchronized boolean hasPendingFluidTransfer(FluidKey key) {
+        return key != null && craftingFluids.containsKey(key);
+    }
+
+    /**
+     * Records an IO transfer before a foreign callback. Until ownership/acceptance is confirmed,
+     * this quantity is unavailable and requires operator reconciliation after an exception.
+     * This is a durable journal in the existing escrow fields, not a cross-chunk save transaction.
+     */
+    public synchronized OwnedTransfer holdOwnedItemTransfer(ItemKey key, long amount) {
+        if (key == null || amount <= 0 || craftingItems.containsKey(key)) return null;
+        craftingItems.put(key, amount);
+        markChanged();
+        return new OwnedTransfer(key, null, amount, craftingEpoch);
+    }
+
+    public synchronized OwnedTransfer holdOwnedFluidTransfer(FluidKey key, long amount) {
+        if (key == null || amount <= 0 || craftingFluids.containsKey(key)) return null;
+        craftingFluids.put(key, amount);
+        markChanged();
+        return new OwnedTransfer(null, key, amount, craftingEpoch);
+    }
+
+    public final class OwnedTransfer {
+
+        private final ItemKey item;
+        private final FluidKey fluid;
+        private final long epoch;
+        private long amount;
+        private boolean finished;
+
+        private OwnedTransfer(ItemKey item, FluidKey fluid, long amount, long epoch) {
+            this.item = item;
+            this.fluid = fluid;
+            this.amount = amount;
+            this.epoch = epoch;
+        }
+
+        /** Use only after observing the actual removal; an unreadable result leaves escrow intact. */
+        public void setOwnedAmount(long actual) {
+            synchronized (SharedStorage.this) {
+                validate();
+                if (actual < 0 || actual > amount) throw new IllegalStateException("Invalid owned transfer quantity");
+                amount = actual;
+                retain(actual);
+                markChanged();
+            }
+        }
+
+        /** Settles a known result. Rejected stock goes directly to the pool, never back through ME. */
+        public long finish(long accepted) {
+            synchronized (SharedStorage.this) {
+                validate();
+                if (accepted < 0 || accepted > amount) throw new IllegalStateException("Invalid IO acceptance");
+                long returned = amount - accepted;
+                retain(0);
+                long restored = 0;
+                long before = item != null ? getItemAmountPool(item) : getFluidAmountPool(fluid);
+                try {
+                    restored = item != null ? poolInsertItem(item, returned, true)
+                        : poolInsertFluid(fluid, returned, true);
+                } catch (RuntimeException error) {
+                    long after = item != null ? getItemAmountPool(item) : getFluidAmountPool(fluid);
+                    restored = Math.min(returned, Math.max(0, after - before));
+                    com.futa_gtnh.FutaGtnhMod.LOG.error("IO 回收监听器异常；按内部池实际变化结算，余量保留托管", error);
+                }
+                retain(returned - restored);
+                finished = true;
+                markChanged();
+                return accepted + restored;
+            }
+        }
+
+        private void validate() {
+            long held = item != null ? craftingItems.getOrDefault(item, 0L) : craftingFluids.getOrDefault(fluid, 0L);
+            if (finished || epoch != craftingEpoch || held != amount)
+                throw new IllegalStateException("Invalid or stale IO transfer");
+        }
+
+        private void retain(long held) {
+            if (item != null) {
+                if (held == 0) craftingItems.remove(item);
+                else craftingItems.put(item, held);
+            } else {
+                if (held == 0) craftingFluids.remove(fluid);
+                else craftingFluids.put(fluid, held);
+            }
+        }
     }
 
     /** A real withdrawal with a reserved rollback slot; no storage lock is held across AE callbacks. */

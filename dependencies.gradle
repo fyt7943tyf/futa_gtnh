@@ -21,6 +21,10 @@
 def lwjgl3ifyVersion = '3.0.35'
 
 dependencies {
+    // Opt-in local GTSWN 1.8.8 verification. The integration itself has no required GTSWN dependency.
+    if (project.hasProperty('gtswnCompatJar')) {
+        runtimeOnlyNonPublishable(files(project.property('gtswnCompatJar')))
+    }
     // Optional drawer bridge: real drawer counts differ from its virtual IInventory windows.
     compileOnly("com.github.GTNewHorizons:StorageDrawers:2.2.31-GTNH:dev") { transitive = false }
     // Optional Agricarnation crop-stick bridge. Concrete types are isolated behind the mixin plugin.

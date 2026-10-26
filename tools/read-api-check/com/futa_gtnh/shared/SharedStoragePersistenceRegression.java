@@ -41,6 +41,8 @@ public final class SharedStoragePersistenceRegression {
             setManagerField("loaded", oldLoaded);
             setManagerField("savingBlocked", oldBlocked);
         }
+        SharedStorageMigrationRegression.run();
+        StorageNetworkAccessRegression.run();
         System.out.println("Shared storage persistence regression passed: " + checks + " checks");
     }
 

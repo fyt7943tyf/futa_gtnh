@@ -48,7 +48,7 @@ public final class SupplyLedger {
     }
 
     public synchronized Snapshot snapshot(Object key, int minutes, long minute) {
-        int window = minutes == 60 ? 60 : 10;
+        int window = window(minutes);
         Entry entry = entries.get(key);
         Snapshot result = new Snapshot();
         result.dropped = dropped;
@@ -71,6 +71,42 @@ public final class SupplyLedger {
 
     public synchronized SupplySource source(String id) {
         return sources.get(id);
+    }
+
+    public static int window(int minutes) {
+        return minutes == 1 || minutes == 60 ? minutes : 10;
+    }
+
+    /** Snapshot only recorded transfers; querying a device never scans its world or inventory. */
+    public synchronized List<Flow> flows(int minutes, long minute) {
+        int window = window(minutes);
+        List<Flow> result = new ArrayList<>();
+        for (Map.Entry<Object, Entry> entry : entries.entrySet()) {
+            for (Map.Entry<SupplySource, Ring> pair : entry.getValue().bySource.entrySet()) {
+                long incoming = pair.getValue()
+                    .sum(minute, window, true);
+                long outgoing = pair.getValue()
+                    .sum(minute, window, false);
+                if (incoming != 0 || outgoing != 0)
+                    result.add(new Flow(entry.getKey(), pair.getKey(), incoming, outgoing));
+            }
+        }
+        return result;
+    }
+
+    public synchronized List<SupplySource> sources() {
+        return new ArrayList<>(sources.values());
+    }
+
+    public synchronized long dropped() {
+        return dropped;
+    }
+
+    /** The current minute is partial, so divide by its actual observed duration. */
+    public static long observedMillis(int minutes, long nowMillis) {
+        if (nowMillis <= 0) return 0;
+        long firstMinute = Math.max(0L, nowMillis / 60_000L - window(minutes) + 1L);
+        return nowMillis - firstMinute * 60_000L;
     }
 
     /** Navigation accepts only a source actually recorded for this exact resource within the last hour. */
@@ -183,6 +219,20 @@ public final class SupplyLedger {
 
         public long incoming, outgoing, dropped;
         public final List<Row> rows = new ArrayList<>();
+    }
+
+    public static final class Flow {
+
+        public final Object key;
+        public final SupplySource source;
+        public final long incoming, outgoing;
+
+        Flow(Object key, SupplySource source, long incoming, long outgoing) {
+            this.key = key;
+            this.source = source;
+            this.incoming = incoming;
+            this.outgoing = outgoing;
+        }
     }
 
     public static final class Row {

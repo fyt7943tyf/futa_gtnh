@@ -2,7 +2,9 @@ package com.futa_gtnh.storagebus;
 
 import java.io.File;
 import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
 import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 
 import net.minecraft.block.Block;
@@ -112,6 +114,7 @@ public final class StorageBusRegression {
         checkCursorContainerReturn();
         checkExternalEscrow();
         checkChannelCaches();
+        checkNativeProvider();
         try {
             Class.forName("com.jaquadro.minecraft.storagedrawers.api.storage.IDrawerGroup", false,
                 StorageBusRegression.class.getClassLoader());
@@ -796,6 +799,117 @@ public final class StorageBusRegression {
     // Fixture / helpers
     // ==================================================================
 
+    @SuppressWarnings("unchecked")
+    private static void checkNativeProvider() {
+        Fixture f = Fixture.create();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        f.target.inventory.setInventorySlotContents(0, iron.prototype(64));
+        f.target.tank.fill(new FluidStack(FluidRegistry.WATER, 1000), true);
+        f.bus.getConfig(EAST).setPriority(10);
+        TileEntityStorageBus alias = new TileEntityStorageBus();
+        alias.xCoord = 2;
+        alias.setWorldObj(f.world);
+        alias.addFace(WEST);
+        alias.getConfig(WEST).setPriority(20);
+        StorageBusRegistry.refreshAll();
+        appeng.api.storage.ICellProvider[] registered = new appeng.api.storage.ICellProvider[1];
+        int[] events = { 0 };
+        appeng.api.networking.storage.IStorageGrid storage = (appeng.api.networking.storage.IStorageGrid) Proxy.newProxyInstance(
+            StorageBusRegression.class.getClassLoader(), new Class<?>[] { appeng.api.networking.storage.IStorageGrid.class },
+            (proxy, method, args) -> {
+                if (method.getName().equals("registerCellProvider")) registered[0] = (appeng.api.storage.ICellProvider) args[0];
+                if (method.getName().equals("unregisterCellProvider")) registered[0] = null;
+                return null;
+            });
+        appeng.api.networking.IGrid grid = (appeng.api.networking.IGrid) Proxy.newProxyInstance(
+            StorageBusRegression.class.getClassLoader(), new Class<?>[] { appeng.api.networking.IGrid.class },
+            (proxy, method, args) -> {
+                if (method.getName().equals("getCache")) return storage;
+                if (method.getName().equals("postEvent")) events[0]++;
+                return null;
+            });
+        LegacyMeBusProvider.install(grid);
+        try {
+            check(registered[0] != null && events[0] == 1, "legacy buses register directly as an ME cell provider");
+            List<appeng.api.storage.IMEInventoryHandler> handlers = registered[0].getCellArray(appeng.util.item.AEItemStackType.ITEM_STACK_TYPE);
+            check(handlers.size() == 2 && handlers.get(0).getPriority() == 10 && handlers.get(1).getPriority() == 20,
+                "each legacy link retains its configured native ME priority");
+            appeng.api.storage.IMEInventoryHandler<appeng.api.storage.data.IAEItemStack> items = handlers.get(0);
+            appeng.api.storage.data.IAEItemStack request = appeng.util.item.AEItemStack.create(iron.prototype(32));
+            long visible = 0;
+            for (appeng.api.storage.IMEInventoryHandler<appeng.api.storage.data.IAEItemStack> handler : handlers) {
+                appeng.api.storage.data.IAEItemStack row = handler.getAvailableItem(request, 0);
+                if (row != null) visible += row.getStackSize();
+            }
+            check(visible == 64, "multiple ME handlers publish one physical target's stock only once");
+            int writes = f.target.writes;
+            check(items.extractItems(request, appeng.api.config.Actionable.SIMULATE, null).getStackSize() == 32,
+                "native extraction simulation sees live available stock");
+            check(items.injectItems(request, appeng.api.config.Actionable.SIMULATE, null) == null,
+                "native insertion simulation sees actual empty-slot room");
+            check(f.target.total(iron) == 64 && f.target.writes == writes, "item simulations never call mutators or markDirty");
+            request.setStackSize(20);
+            check(items.extractItems(request, appeng.api.config.Actionable.MODULATE, null).getStackSize() == 20
+                && f.target.total(iron) == 44, "native extraction consumes exactly the returned physical stock");
+            request.setStackSize(10);
+            check(items.injectItems(request, appeng.api.config.Actionable.MODULATE, null) == null
+                && f.target.total(iron) == 54, "native insertion counts the actually accepted physical stock");
+            LegacyMeBusProvider.tick();
+            check(events[0] == 1, "native item transfers are not reported again as external changes");
+            appeng.api.storage.IMEInventoryHandler<appeng.api.storage.data.IAEFluidStack> fluids = registered[0]
+                .getCellArray(appeng.util.item.AEFluidStackType.FLUID_STACK_TYPE).get(0);
+            appeng.api.storage.data.IAEFluidStack fluid = appeng.util.item.AEFluidStack.create(new FluidStack(FluidRegistry.WATER, 100));
+            writes = f.target.writes;
+            check(fluids.extractItems(fluid, appeng.api.config.Actionable.SIMULATE, null).getStackSize() == 100
+                && fluids.injectItems(fluid, appeng.api.config.Actionable.SIMULATE, null) == null
+                && f.target.tank.getFluidAmount() == 1000 && f.target.writes == writes,
+                "fluid simulations invoke only Forge's non-mutating operations");
+            check(fluids.extractItems(fluid, appeng.api.config.Actionable.MODULATE, null).getStackSize() == 100
+                && f.target.tank.getFluidAmount() == 900, "native fluid extraction conserves mB");
+            check(fluids.injectItems(fluid, appeng.api.config.Actionable.MODULATE, null) == null
+                && f.target.tank.getFluidAmount() == 1000, "native fluid insertion conserves mB");
+            LegacyMeBusProvider.tick();
+            check(events[0] == 1, "native fluid transfers do not cause duplicate external events");
+            f.target.inventory.setInventorySlotContents(0, iron.prototype(57));
+            StorageBusRegistry.refreshAll();
+            LegacyMeBusProvider.tick();
+            check(events[0] == 2, "a genuine external container change posts one ME cell-array update");
+            LegacyMeBusProvider.tick();
+            check(events[0] == 2, "unchanged mirrors do not post repeated ME updates");
+            f.bus.getConfig(EAST).setAccess(StorageBusConfig.AccessMode.READ_ONLY);
+            check(items.injectItems(request, appeng.api.config.Actionable.MODULATE, null) == request,
+                "old handlers refuse a configuration changed before the next tick");
+            LegacyMeBusProvider.tick();
+            items = registered[0].getCellArray(appeng.util.item.AEItemStackType.ITEM_STACK_TYPE).get(0);
+            check(items.injectItems(request, appeng.api.config.Actionable.MODULATE, null).getStackSize() == request.getStackSize(),
+                "read-only ME handlers refuse writes");
+            alias.invalidate();
+            LegacyMeBusProvider.tick();
+            f.bus.getConfig(EAST).setAccess(StorageBusConfig.AccessMode.WRITE_ONLY);
+            LegacyMeBusProvider.tick();
+            items = registered[0].getCellArray(appeng.util.item.AEItemStackType.ITEM_STACK_TYPE).get(0);
+            check(items.getAvailableItem(request, 0) == null
+                && items.extractItems(request, appeng.api.config.Actionable.MODULATE, null) == null,
+                "write-only ME handlers hide stock and refuse extraction");
+            f.bus.getConfig(EAST).setItemFilter(0, iron);
+            f.bus.getConfig(EAST).setFilterMode(StorageBusConfig.FilterMode.BLACKLIST);
+            LegacyMeBusProvider.tick();
+            items = registered[0].getCellArray(appeng.util.item.AEItemStackType.ITEM_STACK_TYPE).get(0);
+            check(items.injectItems(request, appeng.api.config.Actionable.SIMULATE, null).getStackSize() == request.getStackSize(),
+                "ME simulation honors exact legacy filters");
+            f.target.node = (appeng.api.networking.IGridNode) Proxy.newProxyInstance(
+                StorageBusRegression.class.getClassLoader(), new Class<?>[] { appeng.api.networking.IGridNode.class },
+                (proxy, method, args) -> method.getName().equals("getGrid") ? grid : null);
+            LegacyMeBusProvider.tick();
+            check(registered[0].getCellArray(appeng.util.item.AEItemStackType.ITEM_STACK_TYPE).isEmpty(),
+                "a target on the same native ME grid is excluded to prevent recursive inventories");
+        } finally {
+            LegacyMeBusProvider.clear();
+            check(registered[0] == null, "provider lifecycle unregisters from its old grid");
+            alias.invalidate();
+        }
+    }
+
     private static void refresh(Fixture fixture) {
         StorageBusRegistry.refresh(fixture.bus.getLink(EAST));
     }
@@ -837,10 +951,25 @@ public final class StorageBusRegression {
     }
 
     /** 同时提供物品和流体的假容器。 */
-    private static final class TestContainer extends TileEntity implements IInventory, IFluidHandler {
+    private static final class TestContainer extends TileEntity implements IInventory, IFluidHandler,
+        appeng.api.networking.security.IActionHost {
 
         final InventoryBasic inventory = new InventoryBasic("storage-bus-target", true, 3);
         final FluidTank tank = new FluidTank(16000);
+        int writes;
+        appeng.api.networking.IGridNode node;
+
+        @Override
+        public appeng.api.networking.IGridNode getActionableNode() { return node; }
+
+        @Override
+        public appeng.api.networking.IGridNode getGridNode(ForgeDirection side) { return node; }
+
+        @Override
+        public appeng.api.util.AECableType getCableConnectionType(ForgeDirection side) { return appeng.api.util.AECableType.NONE; }
+
+        @Override
+        public void securityBreak() {}
 
         int total(ItemKey key) {
             int total = 0;
@@ -863,6 +992,7 @@ public final class StorageBusRegression {
 
         @Override
         public ItemStack decrStackSize(int slot, int amount) {
+            writes++;
             return inventory.decrStackSize(slot, amount);
         }
 
@@ -873,6 +1003,7 @@ public final class StorageBusRegression {
 
         @Override
         public void setInventorySlotContents(int slot, ItemStack stack) {
+            writes++;
             inventory.setInventorySlotContents(slot, stack);
         }
 
@@ -892,7 +1023,7 @@ public final class StorageBusRegression {
         }
 
         @Override
-        public void markDirty() {}
+        public void markDirty() { writes++; }
 
         @Override
         public boolean isUseableByPlayer(net.minecraft.entity.player.EntityPlayer player) {
@@ -912,11 +1043,13 @@ public final class StorageBusRegression {
 
         @Override
         public int fill(ForgeDirection from, FluidStack resource, boolean doFill) {
+            if (doFill) writes++;
             return tank.fill(resource, doFill);
         }
 
         @Override
         public FluidStack drain(ForgeDirection from, FluidStack resource, boolean doDrain) {
+            if (doDrain) writes++;
             FluidStack current = tank.getFluid();
             if (current == null || resource == null || !current.isFluidEqual(resource)) return null;
             return tank.drain(resource.amount, doDrain);

@@ -1,5 +1,6 @@
 package com.futa_gtnh.mixins;
 
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -7,7 +8,9 @@ import java.util.Set;
 
 import net.minecraft.launchwrapper.Launch;
 
+import org.spongepowered.asm.lib.ClassReader;
 import org.spongepowered.asm.lib.tree.ClassNode;
+import org.spongepowered.asm.lib.tree.FieldNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 
@@ -72,6 +75,33 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
     private static boolean lootgamesPresent;
 
     private static boolean neiPresent;
+
+    private static Boolean gtswnCompatible;
+
+    /** Read the version constant without loading the optional mod or bypassing newer security implementations. */
+    private static boolean gtswnCompatible() {
+        if (gtswnCompatible != null) return gtswnCompatible;
+        if (Launch.classLoader == null) return false;
+        try (InputStream source = Launch.classLoader.getResourceAsStream("com/miaokatze/gtswn/Tags.class")) {
+            if (source == null) return false;
+            ClassNode tags = new ClassNode();
+            new ClassReader(source)
+                .accept(tags, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            for (FieldNode field : tags.fields) {
+                if (!"VERSION".equals(field.name)) continue;
+                gtswnCompatible = "v1.8.8".equals(field.value) || "1.8.8".equals(field.value);
+                if (!gtswnCompatible) org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                    .warn(
+                        "Public ME quantum integration supports GTSWN 1.8.8; integration disabled for {}",
+                        field.value);
+                return gtswnCompatible;
+            }
+        } catch (Exception error) {
+            org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                .warn("Unable to verify optional GTSWN quantum integration version", error);
+        }
+        return false;
+    }
 
     private static boolean tinkersPresent() {
         if (present) return true;
@@ -160,6 +190,11 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.startsWith("com.futa_gtnh.mixins.MixinGtswn")) {
+            return Launch.classLoader != null
+                && Launch.classLoader.getResource(targetClassName.replace('.', '/') + ".class") != null
+                && gtswnCompatible();
+        }
         if ("com.futa_gtnh.mixins.MixinAgricarnation".equals(mixinClassName)) {
             return Launch.classLoader != null && Launch.classLoader
                 .getResource("vazkii/botania/common/block/subtile/functional/SubTileAgricarnation.class") != null;
@@ -172,6 +207,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         if ("com.futa_gtnh.mixins.MixinProspectingPacket".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinGTPump".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeStorageBusSupply".equals(mixinClassName)) return true;
+        if ("com.futa_gtnh.mixins.MixinAeNetworkMonitorSupply".equals(mixinClassName)) return true;
+        if ("com.futa_gtnh.mixins.MixinAeFluidStackNbt".equals(mixinClassName)) return true;
         if (mixinClassName.startsWith("com.futa_gtnh.mixins.MixinShimmerGT")) return true;
         if (NEI_MIXIN.equals(mixinClassName)) return neiPresent();
         // lootgames 目标的 mixin：装了 lootgames 才应用，没装连碰都不碰

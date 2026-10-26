@@ -70,7 +70,13 @@ final class SharedFluidCellInventory extends AbstractSharedCellInventory<IAEFlui
 
     @Override
     public IItemList<IAEFluidStack> getAvailableItems(IItemList<IAEFluidStack> out, int iteration) {
-        if (AeCellBridge.serveContent(this)) AeCellBridge.addFluidMirror(out);
+        if (!AeCellBridge.serveContent(this)) return out;
+        if (com.futa_gtnh.me.PublicMeNetwork.isRunning()) {
+            appeng.api.storage.IMEMonitor<IAEFluidStack> monitor = com.futa_gtnh.me.PublicMeNetwork
+                .monitor(aeStackType());
+            return monitor == null ? out : monitor.getAvailableItems(out, iteration);
+        }
+        AeCellBridge.addFluidMirror(out);
         return out;
     }
 }

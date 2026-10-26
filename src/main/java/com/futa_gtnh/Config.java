@@ -66,6 +66,7 @@ public class Config {
      * 没装 AE2 时这项无论如何都不会生效，模组其余功能不受影响。
      */
     public static boolean enableAe2Cell = true;
+    public static int publicMeCoreX = 8, publicMeCoreY = 240, publicMeCoreZ = 8;
 
     /**
      * AE 网络往共享背包元件写入时，是否遵守共享背包的「存量上限」。
@@ -663,6 +664,10 @@ public class Config {
     public static void synchronizeConfiguration(File configFile) {
         configFileRef = configFile;
         Configuration configuration = new Configuration(configFile);
+        publicMeCoreX = configuration
+            .getInt("coreX", "publicME", 8, -29999000, 29999000, "首次自动建立公共ME核心的首选X；已创建世界沿用存档位置");
+        publicMeCoreY = configuration.getInt("coreY", "publicME", 240, 16, 250, "首次公共核心高度，只在空位置创建");
+        publicMeCoreZ = configuration.getInt("coreZ", "publicME", 8, -29999000, 29999000, "首次自动建立公共ME核心的首选Z");
 
         enableDebugLogging = configuration
             .getBoolean("enableDebugLogging", Configuration.CATEGORY_GENERAL, enableDebugLogging, "打开后会输出更多调试日志");

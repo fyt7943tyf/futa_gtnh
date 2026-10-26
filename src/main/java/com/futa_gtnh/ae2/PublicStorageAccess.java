@@ -1,0 +1,601 @@
+package com.futa_gtnh.ae2;
+
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
+
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.tileentity.TileEntity;
+
+import com.futa_gtnh.me.PublicMeNetwork;
+import com.futa_gtnh.shared.FluidKey;
+import com.futa_gtnh.shared.ItemKey;
+import com.futa_gtnh.shared.SharedStorage;
+import com.futa_gtnh.shared.SharedStorageListener;
+import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.shared.StorageNetworkAccess;
+
+import appeng.api.config.Actionable;
+import appeng.api.networking.IGrid;
+import appeng.api.networking.events.MENetworkCellArrayUpdate;
+import appeng.api.networking.security.BaseActionSource;
+import appeng.api.networking.security.PlayerSource;
+import appeng.api.networking.storage.IBaseMonitor;
+import appeng.api.networking.storage.IStorageGrid;
+import appeng.api.storage.ICellProvider;
+import appeng.api.storage.IMEInventory;
+import appeng.api.storage.IMEInventoryHandler;
+import appeng.api.storage.IMEMonitor;
+import appeng.api.storage.IMEMonitorHandlerReceiver;
+import appeng.api.storage.data.IAEFluidStack;
+import appeng.api.storage.data.IAEItemStack;
+import appeng.api.storage.data.IAEStack;
+import appeng.api.storage.data.IAEStackType;
+import appeng.api.storage.data.IItemList;
+import appeng.me.storage.MEInventoryHandler;
+import appeng.util.item.AEFluidStack;
+import appeng.util.item.AEFluidStackType;
+import appeng.util.item.AEItemStack;
+import appeng.util.item.AEItemStackType;
+
+/** One authoritative ME route. Only the cell provider and explicit recovery may touch durable pool data. */
+public final class PublicStorageAccess implements StorageNetworkAccess, ICellProvider {
+
+    private static final PublicStorageAccess INSTANCE = new PublicStorageAccess();
+    private static final ThreadLocal<Context> CONTEXT = ThreadLocal.withInitial(Context::new);
+    private static final long REPORT_CAP = (1L << 52) - 1;
+    private IGrid grid;
+    private SharedStorage pool;
+    private IMEMonitor<IAEItemStack> itemMonitor;
+    private IMEMonitor<IAEFluidStack> fluidMonitor;
+    private int itemRevision, fluidRevision;
+    private boolean refresh, sendSnapshot, wasOnline;
+    private int providerWrites;
+    private final java.util.Set<ItemKey> changedItems = new java.util.LinkedHashSet<>();
+    private final java.util.Set<FluidKey> changedFluids = new java.util.LinkedHashSet<>();
+    private final Listener<IAEItemStack> itemListener = new Listener<>(true);
+    private final Listener<IAEFluidStack> fluidListener = new Listener<>(false);
+    private final SharedStorageListener poolListener = new SharedStorageListener() {
+
+        @Override
+        public void onItemChanged(ItemKey key) {
+            if (providerWrites == 0) refresh = true;
+        }
+
+        @Override
+        public void onFluidChanged(FluidKey key) {
+            if (providerWrites == 0) refresh = true;
+        }
+
+        @Override
+        public void onStorageReplaced() {
+            refresh = true;
+        }
+    };
+    private IMEInventoryHandler<IAEItemStack> itemCell;
+    private IMEInventoryHandler<IAEFluidStack> fluidCell;
+
+    private PublicStorageAccess() {}
+
+    private static final class Context {
+
+        boolean manual, direct;
+        int routeDepth, queryDepth;
+        TileEntity excluded;
+        BaseActionSource source;
+    }
+
+    public static TileEntity excludedTile() {
+        return CONTEXT.get().excluded;
+    }
+
+    public static boolean poolOnly() {
+        return CONTEXT.get().direct;
+    }
+
+    public static <T> T withPlayer(EntityPlayer player, Supplier<T> operation) {
+        if (!PublicMeNetwork.isRunning()) return operation.get();
+        Context context = CONTEXT.get();
+        BaseActionSource previous = context.source;
+        context.source = new PlayerSource(player, PublicMeNetwork.core());
+        try {
+            return operation.get();
+        } finally {
+            context.source = previous;
+        }
+    }
+
+    public static <T> T withSource(BaseActionSource source, Supplier<T> operation) {
+        Context context = CONTEXT.get();
+        BaseActionSource previous = context.source;
+        context.source = source;
+        try {
+            return operation.get();
+        } finally {
+            context.source = previous;
+        }
+    }
+
+    public static void begin() {
+        INSTANCE.attachPool();
+        if (INSTANCE.grid != null) {
+            INSTANCE.refresh = false;
+            INSTANCE.grid.postEvent(new MENetworkCellArrayUpdate());
+        }
+        INSTANCE.changed();
+    }
+
+    private void attachPool() {
+        SharedStorage current = SharedStorageManager.getStorage();
+        if (pool == current) return;
+        if (pool != null) {
+            pool.setNetworkAccess(null);
+            pool.removeListener(poolListener);
+        }
+        pool = current;
+        pool.addListener(poolListener);
+        pool.setNetworkAccess(this);
+        refresh = true;
+    }
+
+    public static void install(IGrid newGrid) {
+        if (INSTANCE.grid == newGrid) return;
+        com.futa_gtnh.storagebus.LegacyMeBusProvider.clear();
+        INSTANCE.detachGrid();
+        INSTANCE.attachPool();
+        INSTANCE.changed();
+        if (newGrid == null) return;
+        INSTANCE.grid = newGrid;
+        if (INSTANCE.itemCell == null) {
+            INSTANCE.itemCell = new MEInventoryHandler<>(INSTANCE.new ItemPool(), AEItemStackType.ITEM_STACK_TYPE);
+            INSTANCE.fluidCell = new MEInventoryHandler<>(INSTANCE.new FluidPool(), AEFluidStackType.FLUID_STACK_TYPE);
+        }
+        IStorageGrid storage = newGrid.getCache(IStorageGrid.class);
+        storage.registerCellProvider(INSTANCE);
+        INSTANCE.itemMonitor = (IMEMonitor<IAEItemStack>) storage.getMEMonitor(AEItemStackType.ITEM_STACK_TYPE);
+        INSTANCE.fluidMonitor = (IMEMonitor<IAEFluidStack>) storage.getMEMonitor(AEFluidStackType.FLUID_STACK_TYPE);
+        INSTANCE.itemMonitor.addListener(INSTANCE.itemListener, newGrid);
+        INSTANCE.fluidMonitor.addListener(INSTANCE.fluidListener, newGrid);
+        com.futa_gtnh.storagebus.LegacyMeBusProvider.install(newGrid);
+        INSTANCE.changed();
+    }
+
+    private void detachGrid() {
+        if (itemMonitor != null) itemMonitor.removeListener(itemListener);
+        if (fluidMonitor != null) fluidMonitor.removeListener(fluidListener);
+        if (grid != null) {
+            IStorageGrid storage = grid.getCache(IStorageGrid.class);
+            storage.unregisterCellProvider(this);
+        }
+        itemMonitor = null;
+        fluidMonitor = null;
+        grid = null;
+    }
+
+    public static void clear() {
+        com.futa_gtnh.storagebus.LegacyMeBusProvider.clear();
+        INSTANCE.detachGrid();
+        if (INSTANCE.pool != null) {
+            INSTANCE.pool.setNetworkAccess(null);
+            INSTANCE.pool.removeListener(INSTANCE.poolListener);
+        }
+        INSTANCE.pool = null;
+        INSTANCE.refresh = false;
+        INSTANCE.wasOnline = false;
+        INSTANCE.sendSnapshot = false;
+        INSTANCE.changedItems.clear();
+        INSTANCE.changedFluids.clear();
+        CONTEXT.remove();
+    }
+
+    public static void tick() {
+        if (!PublicMeNetwork.isRunning()) return;
+        INSTANCE.attachPool();
+        com.futa_gtnh.storagebus.LegacyMeBusProvider.tick();
+        boolean online = INSTANCE.online();
+        if (online != INSTANCE.wasOnline) {
+            INSTANCE.wasOnline = online;
+            INSTANCE.changed();
+        }
+        if (INSTANCE.refresh && INSTANCE.grid != null) {
+            INSTANCE.refresh = false;
+            INSTANCE.grid.postEvent(new MENetworkCellArrayUpdate());
+            INSTANCE.changed();
+        }
+        if (INSTANCE.sendSnapshot) {
+            INSTANCE.sendSnapshot = false;
+            SharedStorageManager.invalidateSnapshot();
+            // Batched once per tick regardless of how many native AE operations occurred.
+            SharedStorageManager.resyncAll();
+            INSTANCE.changedItems.clear();
+            INSTANCE.changedFluids.clear();
+        } else if (!INSTANCE.changedItems.isEmpty() || !INSTANCE.changedFluids.isEmpty()) {
+            com.futa_gtnh.network.PacketStorageDelta delta = new com.futa_gtnh.network.PacketStorageDelta();
+            for (ItemKey key : INSTANCE.changedItems) delta.addItem(key, INSTANCE.itemAmount(key));
+            for (FluidKey key : INSTANCE.changedFluids) delta.addFluid(key, INSTANCE.fluidAmount(key));
+            INSTANCE.changedItems.clear();
+            INSTANCE.changedFluids.clear();
+            if (delta.hasOverflowed()) SharedStorageManager.resyncAll();
+            else SharedStorageManager.broadcastDelta(delta);
+        }
+    }
+
+    private void changed() {
+        itemRevision++;
+        fluidRevision++;
+        sendSnapshot = true;
+    }
+
+    private boolean online() {
+        return SharedStorageManager.isServerThread() && PublicMeNetwork.isOnline() && grid == PublicMeNetwork.grid();
+    }
+
+    private BaseActionSource source() {
+        return CONTEXT.get().source == null ? PublicMeNetwork.actionSource() : CONTEXT.get().source;
+    }
+
+    @Override
+    public long itemAmount(ItemKey key) {
+        if (key == null || !online() || itemMonitor == null) return 0;
+        return querying(0L, () -> {
+            IAEItemStack found = itemMonitor.getStorageList()
+                .findPrecise(AEItemStack.create(key.prototype()));
+            return found == null ? 0 : Math.max(0, found.getStackSize());
+        });
+    }
+
+    @Override
+    public long fluidAmount(FluidKey key) {
+        if (key == null || !online() || fluidMonitor == null) return 0;
+        return querying(0L, () -> {
+            IAEFluidStack found = fluidMonitor.getStorageList()
+                .findPrecise(AEFluidStack.create(key.prototype()));
+            return found == null ? 0 : Math.max(0, found.getStackSize());
+        });
+    }
+
+    private <T> T querying(T recursiveResult, Supplier<T> operation) {
+        Context context = CONTEXT.get();
+        if (context.queryDepth > 0) return recursiveResult;
+        context.queryDepth++;
+        try {
+            return operation.get();
+        } finally {
+            context.queryDepth--;
+        }
+    }
+
+    private <T> T inContext(boolean manual, boolean direct, TileEntity excluded, Supplier<T> operation) {
+        Context old = CONTEXT.get();
+        Context next = new Context();
+        next.manual = manual;
+        next.direct = direct;
+        next.excluded = excluded;
+        next.source = old.source;
+        next.routeDepth = old.routeDepth + 1;
+        next.queryDepth = old.queryDepth;
+        CONTEXT.set(next);
+        try {
+            return operation.get();
+        } finally {
+            CONTEXT.set(old);
+        }
+    }
+
+    @Override
+    public long insertItem(ItemKey key, long amount, boolean manual, boolean direct) {
+        if (key == null || amount <= 0 || !SharedStorageManager.isServerThread() || CONTEXT.get().routeDepth > 0)
+            return 0;
+        return inContext(manual, direct, null, () -> {
+            long accepted = 0;
+            if (online() && itemMonitor != null) {
+                IAEItemStack input = AEItemStack.create(key.prototype());
+                input.setStackSize(amount);
+                IAEItemStack rest = itemMonitor.injectItems(input, Actionable.MODULATE, source());
+                accepted = accepted(amount, rest);
+            }
+            // Manual callers already own these items (crafting returns, replacement tools, recovery).
+            // A network outage must not discard them; the durable pool remains the recovery destination.
+            if (manual && accepted < amount) accepted += pool.poolInsertItem(key, amount - accepted, true);
+            return accepted;
+        });
+    }
+
+    @Override
+    public long insertFluid(FluidKey key, long amount, boolean manual, boolean direct) {
+        if (key == null || amount <= 0 || !SharedStorageManager.isServerThread() || CONTEXT.get().routeDepth > 0)
+            return 0;
+        return inContext(manual, direct, null, () -> {
+            long accepted = 0;
+            if (online() && fluidMonitor != null) {
+                IAEFluidStack input = AEFluidStack.create(key.prototype());
+                input.setStackSize(amount);
+                IAEFluidStack rest = fluidMonitor.injectItems(input, Actionable.MODULATE, source());
+                accepted = accepted(amount, rest);
+            }
+            if (manual && accepted < amount) accepted += pool.poolInsertFluid(key, amount - accepted, true);
+            return accepted;
+        });
+    }
+
+    private static long accepted(long offered, IAEStack<?> rest) {
+        long remaining = rest == null ? 0 : rest.getStackSize();
+        if (remaining < 0 || remaining > offered) throw new IllegalStateException("Invalid AE insertion remainder");
+        return offered - remaining;
+    }
+
+    @Override
+    public long extractItem(ItemKey key, long amount, TileEntity excluded) {
+        if (key == null || amount <= 0 || !online() || itemMonitor == null || CONTEXT.get().routeDepth > 0) return 0;
+        return inContext(false, false, excluded, () -> {
+            IAEItemStack request = AEItemStack.create(key.prototype());
+            request.setStackSize(amount);
+            IAEItemStack result = itemMonitor.extractItems(request, Actionable.MODULATE, source());
+            return result == null ? 0 : result.getStackSize();
+        });
+    }
+
+    @Override
+    public long extractFluid(FluidKey key, long amount, TileEntity excluded) {
+        if (key == null || amount <= 0 || !online() || fluidMonitor == null || CONTEXT.get().routeDepth > 0) return 0;
+        return inContext(false, false, excluded, () -> {
+            IAEFluidStack request = AEFluidStack.create(key.prototype());
+            request.setStackSize(amount);
+            IAEFluidStack result = fluidMonitor.extractItems(request, Actionable.MODULATE, source());
+            return result == null ? 0 : result.getStackSize();
+        });
+    }
+
+    @Override
+    public long itemSpace(ItemKey key, boolean manual) {
+        if (key == null || !SharedStorageManager.isServerThread() || CONTEXT.get().routeDepth > 0) return 0;
+        if (!online()) return manual ? pool.poolItemSpace(key, true) : 0;
+        return inContext(manual, false, null, () -> {
+            IAEItemStack input = AEItemStack.create(key.prototype());
+            input.setStackSize(REPORT_CAP);
+            return accepted(REPORT_CAP, itemMonitor.injectItems(input, Actionable.SIMULATE, source()));
+        });
+    }
+
+    @Override
+    public long fluidSpace(FluidKey key, boolean manual) {
+        if (key == null || !SharedStorageManager.isServerThread() || CONTEXT.get().routeDepth > 0) return 0;
+        if (!online()) return manual ? pool.poolFluidSpace(key, true) : 0;
+        return inContext(manual, false, null, () -> {
+            IAEFluidStack input = AEFluidStack.create(key.prototype());
+            input.setStackSize(REPORT_CAP);
+            return accepted(REPORT_CAP, fluidMonitor.injectItems(input, Actionable.SIMULATE, source()));
+        });
+    }
+
+    @Override
+    public List<Map.Entry<ItemKey, Long>> items() {
+        if (!online() || itemMonitor == null) return Collections.emptyList();
+        return querying(Collections.emptyList(), () -> {
+            List<Map.Entry<ItemKey, Long>> result = new ArrayList<>();
+            for (IAEItemStack row : itemMonitor.getStorageList()) if (row.getStackSize() > 0) {
+                ItemKey key = ItemKey.of(row.getItemStack());
+                if (key != null) result.add(new AbstractMap.SimpleImmutableEntry<>(key, row.getStackSize()));
+            }
+            return Collections.unmodifiableList(result);
+        });
+    }
+
+    @Override
+    public List<Map.Entry<FluidKey, Long>> fluids() {
+        if (!online() || fluidMonitor == null) return Collections.emptyList();
+        return querying(Collections.emptyList(), () -> {
+            List<Map.Entry<FluidKey, Long>> result = new ArrayList<>();
+            for (IAEFluidStack row : fluidMonitor.getStorageList()) if (row.getStackSize() > 0) {
+                FluidKey key = FluidKey.of(row.getFluidStack());
+                if (key != null) result.add(new AbstractMap.SimpleImmutableEntry<>(key, row.getStackSize()));
+            }
+            return Collections.unmodifiableList(result);
+        });
+    }
+
+    @Override
+    public int itemRevision() {
+        return itemRevision;
+    }
+
+    @Override
+    public int fluidRevision() {
+        return fluidRevision;
+    }
+
+    @Override
+    public int getPriority() {
+        return 0;
+    }
+
+    @Override
+    @SuppressWarnings("rawtypes")
+    public List<IMEInventoryHandler> getCellArray(IAEStackType<?> type) {
+        if (!attached()) return Collections.emptyList();
+        if (type == AEItemStackType.ITEM_STACK_TYPE) return Collections.singletonList(itemCell);
+        if (type == AEFluidStackType.FLUID_STACK_TYPE) return Collections.singletonList(fluidCell);
+        return Collections.emptyList();
+    }
+
+    private final class Listener<T extends IAEStack<T>> implements IMEMonitorHandlerReceiver<T> {
+
+        final boolean item;
+
+        Listener(boolean item) {
+            this.item = item;
+        }
+
+        @Override
+        public boolean isValid(Object token) {
+            return grid != null && token == grid;
+        }
+
+        @Override
+        public void onListUpdate() {
+            changed();
+        }
+
+        @Override
+        public void postChange(IBaseMonitor<T> monitor, Iterable<T> changes, BaseActionSource action) {
+            if (item) itemRevision++;
+            else fluidRevision++;
+            // Tell compatibility gateways without reporting the same change back into this grid.
+            providerWrites++;
+            try {
+                for (T value : changes) {
+                    if (value instanceof IAEItemStack) {
+                        ItemKey key = ItemKey.of(((IAEItemStack) value).getItemStack());
+                        if (key != null) {
+                            changedItems.add(key);
+                            pool.notifyExternalItemChanged(key);
+                        }
+                    } else if (value instanceof IAEFluidStack) {
+                        FluidKey key = FluidKey.of(((IAEFluidStack) value).getFluidStack());
+                        if (key != null) {
+                            changedFluids.add(key);
+                            pool.notifyExternalFluidChanged(key);
+                        }
+                    }
+                }
+            } finally {
+                providerWrites--;
+            }
+        }
+    }
+
+    private boolean attached() {
+        return pool != null && grid != null && grid == PublicMeNetwork.grid();
+    }
+
+    private final class ItemPool implements IMEInventory<IAEItemStack> {
+
+        @Override
+        public IAEItemStack injectItems(IAEItemStack input, Actionable mode, BaseActionSource source) {
+            if (input == null || !attached() || input.getStackSize() <= 0) return input;
+            ItemKey key = ItemKey.of(input.getItemStack());
+            long amount = Math.min(input.getStackSize(), pool.poolItemSpace(key, CONTEXT.get().manual));
+            if (mode == Actionable.MODULATE) {
+                providerWrites++;
+                try {
+                    amount = pool.poolInsertItem(key, amount, CONTEXT.get().manual);
+                } finally {
+                    providerWrites--;
+                }
+            }
+            if (amount == input.getStackSize()) return null;
+            IAEItemStack rest = input.copy();
+            rest.setStackSize(input.getStackSize() - amount);
+            return rest;
+        }
+
+        @Override
+        public IAEItemStack extractItems(IAEItemStack input, Actionable mode, BaseActionSource source) {
+            if (input == null || !attached() || input.getStackSize() <= 0) return null;
+            ItemKey key = ItemKey.of(input.getItemStack());
+            long amount = Math.min(input.getStackSize(), pool.getItemAmountPool(key));
+            if (mode == Actionable.MODULATE) {
+                providerWrites++;
+                try {
+                    amount = pool.poolExtractItem(key, amount);
+                } finally {
+                    providerWrites--;
+                }
+            }
+            if (amount <= 0) return null;
+            IAEItemStack result = input.copy();
+            result.setStackSize(amount);
+            return result;
+        }
+
+        @Override
+        public IAEItemStack getAvailableItem(IAEItemStack request, int iteration) {
+            if (request == null || !attached()) return null;
+            ItemKey key = ItemKey.of(request.getItemStack());
+            long amount = Math.min(REPORT_CAP, pool.getItemAmountPool(key));
+            if (amount <= 0) return null;
+            IAEItemStack result = request.copy();
+            result.setStackSize(amount);
+            return result;
+        }
+
+        @Override
+        public IItemList<IAEItemStack> getAvailableItems(IItemList<IAEItemStack> out, int iteration) {
+            if (attached()) for (Map.Entry<ItemKey, Long> row : pool.snapshotPoolItems()) {
+                IAEItemStack value = AEItemStack.create(
+                    row.getKey()
+                        .prototype());
+                value.setStackSize(Math.min(REPORT_CAP, row.getValue()));
+                out.add(value);
+            }
+            return out;
+        }
+    }
+
+    private final class FluidPool implements IMEInventory<IAEFluidStack> {
+
+        @Override
+        public IAEFluidStack injectItems(IAEFluidStack input, Actionable mode, BaseActionSource source) {
+            if (input == null || !attached() || input.getStackSize() <= 0) return input;
+            FluidKey key = FluidKey.of(input.getFluidStack());
+            long amount = Math.min(input.getStackSize(), pool.poolFluidSpace(key, CONTEXT.get().manual));
+            if (mode == Actionable.MODULATE) {
+                providerWrites++;
+                try {
+                    amount = pool.poolInsertFluid(key, amount, CONTEXT.get().manual);
+                } finally {
+                    providerWrites--;
+                }
+            }
+            if (amount == input.getStackSize()) return null;
+            IAEFluidStack rest = input.copy();
+            rest.setStackSize(input.getStackSize() - amount);
+            return rest;
+        }
+
+        @Override
+        public IAEFluidStack extractItems(IAEFluidStack input, Actionable mode, BaseActionSource source) {
+            if (input == null || !attached() || input.getStackSize() <= 0) return null;
+            FluidKey key = FluidKey.of(input.getFluidStack());
+            long amount = Math.min(input.getStackSize(), pool.getFluidAmountPool(key));
+            if (mode == Actionable.MODULATE) {
+                providerWrites++;
+                try {
+                    amount = pool.poolExtractFluid(key, amount);
+                } finally {
+                    providerWrites--;
+                }
+            }
+            if (amount <= 0) return null;
+            IAEFluidStack result = input.copy();
+            result.setStackSize(amount);
+            return result;
+        }
+
+        @Override
+        public IAEFluidStack getAvailableItem(IAEFluidStack request, int iteration) {
+            if (request == null || !attached()) return null;
+            FluidKey key = FluidKey.of(request.getFluidStack());
+            long amount = Math.min(REPORT_CAP, pool.getFluidAmountPool(key));
+            if (amount <= 0) return null;
+            IAEFluidStack result = request.copy();
+            result.setStackSize(amount);
+            return result;
+        }
+
+        @Override
+        public IItemList<IAEFluidStack> getAvailableItems(IItemList<IAEFluidStack> out, int iteration) {
+            if (attached()) for (Map.Entry<FluidKey, Long> row : pool.snapshotPoolFluids()) {
+                IAEFluidStack value = AEFluidStack.create(
+                    row.getKey()
+                        .prototype());
+                value.setStackSize(Math.min(REPORT_CAP, row.getValue()));
+                out.add(value);
+            }
+            return out;
+        }
+    }
+}

@@ -71,7 +71,13 @@ final class SharedItemCellInventory extends AbstractSharedCellInventory<IAEItemS
 
     @Override
     public IItemList<IAEItemStack> getAvailableItems(IItemList<IAEItemStack> out, int iteration) {
-        if (AeCellBridge.serveContent(this)) AeCellBridge.addItemMirror(out);
+        if (!AeCellBridge.serveContent(this)) return out;
+        if (com.futa_gtnh.me.PublicMeNetwork.isRunning()) {
+            appeng.api.storage.IMEMonitor<IAEItemStack> monitor = com.futa_gtnh.me.PublicMeNetwork
+                .monitor(aeStackType());
+            return monitor == null ? out : monitor.getAvailableItems(out, iteration);
+        }
+        AeCellBridge.addItemMirror(out);
         return out;
     }
 }

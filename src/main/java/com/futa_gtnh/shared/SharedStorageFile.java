@@ -57,7 +57,41 @@ public final class SharedStorageFile {
      * 主文件损坏时尝试 {@code .bak}。已有文件都无法读取或格式过新时抛异常，
      * 避免把读取失败当成新仓库，并在后续保存中覆盖原文件和备份。
      */
-    public static SharedStorage load(File worldDirectory) {
+    public static synchronized SharedStorage load(File worldDirectory) {
+        SharedMigrationState.checkReady(worldDirectory, true);
+        return loadSource(worldDirectory).storage;
+    }
+
+    /**
+     * Claims the existing pool for the AE backend without moving any stock. Call before publishing
+     * the storage to players or machines. Migration failures leave the existing data untouched and
+     * must abort startup; they must never fall back to a new writable pool.
+     */
+    public static synchronized SharedStorage loadForAe(File worldDirectory) {
+        if (SharedMigrationState.isCommitted(worldDirectory)) {
+            SharedMigrationState.checkReady(worldDirectory, true);
+            return loadSource(worldDirectory).storage;
+        }
+        LoadedStorage loaded = loadSource(worldDirectory);
+        File source = loaded.source;
+        if (source == null) {
+            // Even an empty new world needs durable data before its migration marker is committed.
+            // This also refuses a stranded migration backup rather than resurrecting old stock.
+            if (!save(worldDirectory, loaded.storage)) {
+                throw new IllegalStateException("共享存储：无法为 AE 迁移建立初始数据文件");
+            }
+            source = fileFor(worldDirectory);
+        }
+        SharedMigrationState.commit(worldDirectory, source);
+        return loaded.storage;
+    }
+
+    /** Stable across restarts and reloads; available only after a successful AE migration. */
+    public static synchronized String getAeStorageId(File worldDirectory) {
+        return SharedMigrationState.storageId(worldDirectory);
+    }
+
+    private static LoadedStorage loadSource(File worldDirectory) {
         SharedStorage storage = new SharedStorage();
         File primary = fileFor(worldDirectory);
         File backup = new File(primary.getPath() + BAK_SUFFIX);
@@ -65,7 +99,7 @@ public final class SharedStorageFile {
         if (primary.isFile()) {
             if (tryLoadInto(storage, primary)) {
                 logLoaded(primary, storage);
-                return storage;
+                return new LoadedStorage(storage, primary);
             }
             LOG.error("共享存储：主文件 {} 读取失败，尝试备份 {}", primary.getName(), backup.getName());
         } else {
@@ -81,7 +115,7 @@ public final class SharedStorageFile {
                 backup.getName(),
                 storage.itemTypeCount(),
                 storage.fluidTypeCount());
-            return storage;
+            return new LoadedStorage(storage, backup);
         }
 
         if (primary.exists() || backup.exists()) {
@@ -91,7 +125,7 @@ public final class SharedStorageFile {
         // A failed primary parse may have partially populated the temporary instance.
         storage = new SharedStorage();
         storage.markClean();
-        return storage;
+        return new LoadedStorage(storage, null);
     }
 
     private static void logLoaded(File file, SharedStorage storage) {
@@ -136,7 +170,13 @@ public final class SharedStorageFile {
      *
      * @return 是否成功
      */
-    public static boolean save(File worldDirectory, SharedStorage storage) {
+    public static synchronized boolean save(File worldDirectory, SharedStorage storage) {
+        try {
+            SharedMigrationState.checkReady(worldDirectory, false);
+        } catch (IllegalStateException error) {
+            LOG.error("共享存储：迁移状态不完整，拒绝覆盖数据文件", error);
+            return false;
+        }
         File target = fileFor(worldDirectory);
         File dir = target.getParentFile();
         if (dir != null && !dir.isDirectory() && !dir.mkdirs()) {
@@ -192,6 +232,17 @@ public final class SharedStorageFile {
     private static void deleteQuietly(File file) {
         if (file.isFile() && !file.delete()) {
             LOG.warn("共享存储：无法删除临时文件 {}", file.getPath());
+        }
+    }
+
+    private static final class LoadedStorage {
+
+        private final SharedStorage storage;
+        private final File source;
+
+        private LoadedStorage(SharedStorage storage, File source) {
+            this.storage = storage;
+            this.source = source;
         }
     }
 

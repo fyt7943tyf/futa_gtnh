@@ -67,6 +67,14 @@ public final class StorageActionHandler {
 
     public static void handle(EntityPlayerMP player, PacketStorageAction packet) {
         if (player == null || packet == null) return;
+        com.futa_gtnh.ae2.PublicStorageAccess.withPlayer(player, () -> {
+            handleWithSource(player, packet);
+            return null;
+        });
+    }
+
+    private static void handleWithSource(EntityPlayerMP player, PacketStorageAction packet) {
+        if (player == null || packet == null) return;
         if (packet.getAction() == PacketStorageAction.SUPPLY_CLIENT_READY) {
             com.futa_gtnh.network.ServerActions.enqueue(() -> {
                 if (com.futa_gtnh.network.SupplyClients.supports(player.getUniqueID(), player.playerNetServerHandler))
@@ -74,6 +82,8 @@ public final class StorageActionHandler {
                 com.futa_gtnh.network.SupplyClients.register(player.getUniqueID(), player.playerNetServerHandler);
                 net.minecraft.nbt.NBTTagCompound ready = new net.minecraft.nbt.NBTTagCompound();
                 ready.setBoolean("ready", true);
+                ready.setBoolean("productionReady", true);
+                ready.setBoolean("publicMeReady", true);
                 com.futa_gtnh.network.NetworkHandler.INSTANCE
                     .sendTo(new com.futa_gtnh.network.PacketSupplySnapshot(-2, 0, ready), player);
             });

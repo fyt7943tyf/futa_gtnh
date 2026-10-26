@@ -311,6 +311,7 @@ if (providers.gradleProperty("uiSmoke").isPresent) {
         dependsOn(compileReadApiChecks)
         classpath += files(compileReadApiChecks.flatMap { it.destinationDirectory })
         systemProperty("futa.uiSmoke", "true")
+        if (providers.gradleProperty("gtswnCompatJar").isPresent) systemProperty("futa.gtswnSmoke", "true")
     }
 }
 
@@ -351,6 +352,7 @@ tasks.register<JavaExec>("verifyTerminalIo") {
 val compileStorageBusChecks = tasks.register<JavaCompile>("compileStorageBusChecks") {
     dependsOn(tasks.named("classes"))
     source(fileTree("tools/storage-bus-check") { include("**/*.java") })
+    source("tools/terminal-io-check/appeng/core/Api.java")
     classpath = sourceSets["main"].output +
         sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
     destinationDirectory.set(layout.buildDirectory.dir("storage-bus-check/classes"))

@@ -109,6 +109,10 @@ final class TerminalIoEngine {
      *         时逐步拉长下一轮的间隔，别让一堆空闲节点每个周期都全量扫仓库。
      */
     static boolean tick(World world, int x, int y, int z, TerminalIoConfig config) {
+        return com.futa_gtnh.me.PublicMeFlowTracking.suppress(() -> tickUntracked(world, x, y, z, config));
+    }
+
+    private static boolean tickUntracked(World world, int x, int y, int z, TerminalIoConfig config) {
         boolean moved = false;
         for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
             TerminalIoConfig.Mode itemMode = config.getMode(face, false);
@@ -140,6 +144,10 @@ final class TerminalIoEngine {
 
     /** 空闲退避期间只重试精确选择的物品，不扫描矿典或整个仓库。 */
     static boolean tickManualItems(World world, int x, int y, int z, TerminalIoConfig config) {
+        return com.futa_gtnh.me.PublicMeFlowTracking.suppress(() -> tickManualItemsUntracked(world, x, y, z, config));
+    }
+
+    private static boolean tickManualItemsUntracked(World world, int x, int y, int z, TerminalIoConfig config) {
         boolean moved = false;
         for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
             if (!config.getMode(face, false)
@@ -169,52 +177,52 @@ final class TerminalIoEngine {
         int budget = Math.max(1, config.getItemsPerOperation());
         SharedStorage storage = SharedStorageManager.getStorage();
         boolean moved = false;
-        TileEntity sourceTile = inventory instanceof TileEntity ? (TileEntity) inventory : null;
-        boolean busTarget = sourceTile != null && StorageBusRegistry.isTargetTile(sourceTile);
-
+        TileEntity source = inventory instanceof TileEntity ? (TileEntity) inventory : null;
+        boolean busTarget = source != null && StorageBusRegistry.isTargetTile(source);
         for (int slot = 0; slot < inventory.getSizeInventory() && budget > 0; slot++) {
             ItemStack stack = inventory.getStackInSlot(slot);
             if (stack == null || stack.getItem() == null || stack.stackSize <= 0) continue;
             if (!canExtract(inventory, slot, stack, side)) continue;
-
             ItemKey key = ItemKey.of(stack);
-            if (key == null) continue;
-
-            int want = Math.min(budget, stack.stackSize);
-            // 主动抽入直接进池子：源容器本身可能挂着存储总线，写回总线会把刚抽出来的东西
-            // 又塞回同一个格子（甚至先扣格再写回），既白费力气又可能让缓存短暂对不上。
-            // 源恰好是总线目标、而且这条库存已经被总线计入聚合表时，这一步是「总线 → 池子」
-            // 的内部搬家，不受存量上限约束（总量没变）；被筛选挡住的条目仍按普通上限走。
-            boolean counted = busTarget && StorageBusRegistry.targetCountsItem(sourceTile, key);
-            long stored = counted ? storage.insertItemManualDirect(key, want) : storage.insertItemDirect(stack, want);
-            if (stored <= 0L) continue;
-
-            int remaining = stack.stackSize - (int) stored;
-            // 扣源那一格：数量为 0 时放 null。用副本写回去，
-            // 免得把调用方还拿着的那个 ItemStack 对象改坏
-            inventory.setInventorySlotContents(slot, remaining <= 0 ? null : withSize(stack, remaining));
-            inventory.markDirty();
-
-            // 有些容器（别的模组写的）会「收下这个调用但什么都不改」。
-            // 那样我们就等于凭空多了一份东西，所以回头验一下：
-            // 源那一格如果还是原来的数量，就把刚存进去的吐回去。
-            if (!sourceShrank(inventory, slot, stack, (int) stored)) {
-                storage.extractItemDirect(key, stored);
+            if (key == null || storage.hasPendingItemTransfer(key)) continue;
+            boolean counted = busTarget && StorageBusRegistry.targetCountsItem(source, key);
+            long room = counted ? storage.itemManualSpaceLeft(key) : storage.itemSpaceLeft(key);
+            int take = (int) Math.min(Math.min(budget, stack.stackSize), room);
+            SharedStorage.OwnedTransfer transfer = storage.holdOwnedItemTransfer(key, take);
+            if (transfer == null) continue;
+            ItemStack before = stack.copy();
+            int remaining = before.stackSize - take;
+            try {
+                inventory.setInventorySlotContents(slot, remaining <= 0 ? null : withSize(before, remaining));
+                inventory.markDirty();
+            } catch (RuntimeException error) {
+                // A setter may have changed the source before throwing; observe actual ownership.
+                com.futa_gtnh.FutaGtnhMod.LOG.warn("IO 取源回调异常，核对源格后再决定是否入库", error);
+            }
+            ItemStack after;
+            try {
+                after = inventory.getStackInSlot(slot);
+                if (after != null && !sameItem(before, after))
+                    throw new IllegalStateException("Source identity changed");
+            } catch (RuntimeException error) {
+                unresolved("物品取源", error);
+                moved = true;
+                budget -= take;
                 continue;
             }
-
-            SharedStorageManager.broadcastItemChange(key);
-            budget -= (int) stored;
-            com.futa_gtnh.supply.SupplyTracker.recordIo(key, sourceTile, side, stored, true);
-            moved = true;
-        }
-        if (busTarget && moved) {
-            try {
-                StorageBusRegistry.refreshTargeting(sourceTile);
-            } catch (Throwable ignored) {
-                // 下一次周期刷新会收敛
+            int removed = after == null ? take : Math.max(0, Math.min(take, before.stackSize - after.stackSize));
+            transfer.setOwnedAmount(removed);
+            if (removed == 0) {
+                transfer.finish(0);
+                continue;
             }
+            long stored = deliverItem(storage, key, removed, counted, transfer);
+            budget -= removed;
+            moved = true;
+            if (stored > 0) com.futa_gtnh.supply.SupplyTracker.recordIo(key, source, side, stored, true);
+            SharedStorageManager.broadcastItemChange(key);
         }
+        if (busTarget && moved) refreshTarget(source);
         return moved;
     }
 
@@ -227,23 +235,60 @@ final class TerminalIoEngine {
         for (Map.Entry<ItemKey, Long> entry : DrawerStorageCompat.snapshot(inventory)
             .entrySet()) {
             ItemKey key = entry.getKey();
-            long want = Math.min(budget, entry.getValue());
-            synchronized (storage) {
-                boolean counted = busTarget && StorageBusRegistry.targetCountsItem(source, key);
-                long stored = counted ? storage.insertItemManualDirect(key, want) : storage.insertItemDirect(key, want);
-                if (stored <= 0L) continue;
-                long taken = DrawerStorageCompat.extractItems(inventory, side, key, stored);
-                if (taken < stored) storage.extractItemDirect(key, stored - taken);
-                if (taken <= 0L) continue;
-                budget -= (int) taken;
-                com.futa_gtnh.supply.SupplyTracker.recordIo(key, source, side, taken, true);
+            if (storage.hasPendingItemTransfer(key)) continue;
+            boolean counted = busTarget && StorageBusRegistry.targetCountsItem(source, key);
+            long room = counted ? storage.itemManualSpaceLeft(key) : storage.itemSpaceLeft(key);
+            long requested = Math.min(Math.min(budget, entry.getValue()), room);
+            SharedStorage.OwnedTransfer transfer = storage.holdOwnedItemTransfer(key, requested);
+            if (transfer == null) continue;
+            long taken;
+            try {
+                taken = DrawerStorageCompat.extractItems(inventory, side, key, requested);
+                transfer.setOwnedAmount(taken);
+            } catch (RuntimeException error) {
+                unresolved("抽屉取源", error);
                 moved = true;
-                if (busTarget) StorageBusRegistry.refreshTargeting(source);
+                budget -= (int) requested;
+                continue;
             }
+            if (taken == 0) {
+                transfer.finish(0);
+                continue;
+            }
+            long stored = deliverItem(storage, key, taken, counted, transfer);
+            budget -= (int) taken;
+            moved = true;
+            if (stored > 0) com.futa_gtnh.supply.SupplyTracker.recordIo(key, source, side, stored, true);
+            if (busTarget) refreshTarget(source);
             SharedStorageManager.broadcastItemChange(key);
             if (budget <= 0) break;
         }
         return moved;
+    }
+
+    private static long deliverItem(SharedStorage storage, ItemKey key, long amount, boolean manual,
+        SharedStorage.OwnedTransfer transfer) {
+        try {
+            long accepted = manual ? storage.insertItemManualDirect(key, amount)
+                : storage.insertItemDirect(key, amount);
+            return transfer.finish(accepted);
+        } catch (RuntimeException error) {
+            unresolved("物品入库", error);
+            return 0;
+        }
+    }
+
+    private static void unresolved(String operation, RuntimeException error) {
+        com.futa_gtnh.FutaGtnhMod.LOG
+            .error("IO {} 结果不确定；保留不可用托管并停止该原料自动搬运，请核对来源、目标和 ME CPU 后处理 escrow", operation, error);
+    }
+
+    private static void refreshTarget(TileEntity target) {
+        try {
+            StorageBusRegistry.refreshTargeting(target);
+        } catch (RuntimeException error) {
+            com.futa_gtnh.FutaGtnhMod.LOG.warn("IO 已结算，目标库存镜像刷新失败", error);
+        }
     }
 
     /** @return 源那一格是不是真的少了 {@code moved} 个 */
@@ -311,32 +356,37 @@ final class TerminalIoEngine {
     /** 搬运一个精确条目，返回实际消耗的额度；拒收时保留原有回滚路径。 */
     private static int pushItem(IInventory inventory, ForgeDirection side, SharedStorage storage, ItemKey key,
         long available, int budget) {
-        if (available <= 0L || budget <= 0) return 0;
+        if (available <= 0 || budget <= 0 || storage.hasPendingItemTransfer(key)) return 0;
         ItemStack prototype = key.prototype();
-        if (prototype == null || prototype.getItem() == null) return 0;
         int maxSize = Math.max(1, prototype.getMaxStackSize());
         int moved = 0;
         TileEntity destination = inventory instanceof TileEntity ? (TileEntity) inventory : null;
-        while (budget > 0 && available > 0L) {
-            int want = (int) Math.min(Math.min((long) budget, (long) maxSize), available);
-            // 目标装不下就别去扣仓库：先算清楚有多少空位（额度内够用就停）
+        while (budget > 0 && available > 0) {
+            int want = (int) Math.min(Math.min(budget, maxSize), available);
             want = Math.min(want, freeSpaceFor(inventory, side, prototype, budget));
-            if (want <= 0) break;
-
-            long taken = storage.extractItemExcluding(key, want, destination);
-            if (taken <= 0L) break;
-
-            int accepted = insertInto(inventory, side, key.prototype(taken));
-            if (accepted < taken) {
-                // 目标中途不收（比如别的机器同时塞满了）：剩下的原样放回仓库。
-                // 宁可退回去，也不能凭空多出来。
-                // 这是回滚不是存款 —— 用不受上限、且不经过存储总线的入口，
-                // 否则上限/总线一挡，东西就没了
-                storage.insertItemManualDirect(key, taken - accepted);
+            SharedStorage.OwnedTransfer transfer = storage.holdOwnedItemTransfer(key, want);
+            if (transfer == null) break;
+            long taken;
+            int accepted;
+            try {
+                taken = storage.extractItemExcluding(key, want, destination);
+                transfer.setOwnedAmount(taken);
+                if (taken == 0) {
+                    transfer.finish(0);
+                    break;
+                }
+                accepted = insertInto(inventory, side, key.prototype(taken));
+                transfer.finish(accepted);
+            } catch (RuntimeException error) {
+                unresolved("物品输出", error);
+                break;
             }
-            inventory.markDirty();
+            try {
+                inventory.markDirty();
+            } catch (RuntimeException error) {
+                com.futa_gtnh.FutaGtnhMod.LOG.warn("IO 物品输出已结算，但目标标脏失败", error);
+            }
             SharedStorageManager.broadcastItemChange(key);
-
             budget -= accepted;
             available -= taken;
             moved += accepted;
@@ -485,46 +535,51 @@ final class TerminalIoEngine {
      */
     private static boolean pullFluid(IFluidHandler handler, ForgeDirection side, TerminalIoConfig config) {
         int budget = Math.max(1, config.getFluidPerOperation());
-
         FluidStack preview = handler.drain(side, budget, false);
         if (preview == null || preview.getFluid() == null || preview.amount <= 0) return false;
         SharedStorage storage = SharedStorageManager.getStorage();
-        TileEntity sourceTile = handler instanceof TileEntity ? (TileEntity) handler : null;
-        boolean busTarget = sourceTile != null && StorageBusRegistry.isTargetTile(sourceTile);
+        TileEntity source = handler instanceof TileEntity ? (TileEntity) handler : null;
+        boolean busTarget = source != null && StorageBusRegistry.isTargetTile(source);
         FluidKey key = FluidKey.of(preview);
-        boolean counted = busTarget && key != null && StorageBusRegistry.targetCountsFluid(sourceTile, key);
+        if (key == null || storage.hasPendingFluidTransfer(key)) return false;
+        boolean counted = busTarget && StorageBusRegistry.targetCountsFluid(source, key);
         long stored;
-        // Keep the capacity check and actual pool insertion atomic against worker-thread deposits.
         synchronized (storage) {
             long room = counted ? storage.fluidManualSpaceLeft(key) : storage.fluidSpaceLeft(key);
-            int want = (int) Math.min(Math.min((long) budget, preview.amount), room);
+            int want = (int) Math.min(Math.min(budget, preview.amount), room);
             if (want <= 0) return false;
-            FluidStack drained = handler.drain(side, key.prototype(want), true);
-            if (drained == null || drained.getFluid() == null || drained.amount <= 0) return false;
-            FluidKey actualKey = FluidKey.of(drained);
-            if (!key.equals(actualKey)) {
-                handler.fill(side, drained, true);
+            FluidStack drained;
+            try {
+                drained = handler.drain(side, key.prototype(want), true);
+            } catch (RuntimeException error) {
+                storage.holdOwnedFluidTransfer(key, want);
+                unresolved("流体取源", error);
                 return false;
             }
-            stored = counted ? storage.insertFluidManualDirect(key, drained.amount)
-                : storage.insertFluidDirect(drained, drained.amount);
-            if (stored < drained.amount) {
-                FluidStack returned = drained.copy();
-                returned.amount -= (int) stored;
-                handler.fill(side, returned, true);
-                if (stored <= 0L) return false;
+            if (drained == null || drained.getFluid() == null || drained.amount <= 0) return false;
+            FluidKey actualKey = FluidKey.of(drained);
+            if (actualKey == null) throw new IllegalStateException("Unregistered fluid returned by source");
+            SharedStorage.OwnedTransfer transfer = storage.holdOwnedFluidTransfer(actualKey, drained.amount);
+            if (transfer == null) throw new IllegalStateException("Fluid transfer already requires reconciliation");
+            if (!key.equals(actualKey)) {
+                // A contract-violating source returned another fluid. Preserve exactly the returned
+                // identity in the durable pool, avoiding a second uncertain foreign callback.
+                transfer.finish(0);
+                return false;
             }
-        }
-
-        com.futa_gtnh.supply.SupplyTracker.recordIo(key, sourceTile, side, stored, true);
-        if (key != null) SharedStorageManager.broadcastFluidChange(key);
-        if (busTarget) {
             try {
-                StorageBusRegistry.refreshTargeting(sourceTile);
-            } catch (Throwable ignored) {
-                // 下一次周期刷新会收敛
+                long accepted = counted ? storage.insertFluidManualDirect(key, drained.amount)
+                    : storage.insertFluidDirect(key, drained.amount);
+                stored = transfer.finish(accepted);
+            } catch (RuntimeException error) {
+                unresolved("流体入库", error);
+                if (busTarget) refreshTarget(source);
+                return false;
             }
         }
+        if (stored > 0) com.futa_gtnh.supply.SupplyTracker.recordIo(key, source, side, stored, true);
+        SharedStorageManager.broadcastFluidChange(key);
+        if (busTarget) refreshTarget(source);
         return true;
     }
 
@@ -576,17 +631,30 @@ final class TerminalIoEngine {
 
     private static int pushFluid(IFluidHandler handler, ForgeDirection side, SharedStorage storage, FluidKey key,
         long available, int budget) {
+        if (storage.hasPendingFluidTransfer(key)) return 0;
         TileEntity destination = handler instanceof TileEntity ? (TileEntity) handler : null;
         int total = 0;
-        while (budget > 0 && available > 0L) {
-            int want = (int) Math.min((long) budget, available);
-            int accepted = handler.fill(side, key.prototype(want), false);
-            if (accepted <= 0) break;
-            long taken = storage.extractFluidExcluding(key, accepted, destination);
-            if (taken <= 0L) break;
-            int filled = handler.fill(side, key.prototype(taken), true);
-            if (filled < taken) storage.insertFluidManualDirect(key, taken - filled);
-            if (filled > 0) SharedStorageManager.broadcastFluidChange(key);
+        while (budget > 0 && available > 0) {
+            int want = (int) Math.min(budget, available);
+            int preview = Math.max(0, Math.min(want, handler.fill(side, key.prototype(want), false)));
+            SharedStorage.OwnedTransfer transfer = storage.holdOwnedFluidTransfer(key, preview);
+            if (transfer == null) break;
+            long taken;
+            int filled;
+            try {
+                taken = storage.extractFluidExcluding(key, preview, destination);
+                transfer.setOwnedAmount(taken);
+                if (taken == 0) {
+                    transfer.finish(0);
+                    break;
+                }
+                filled = handler.fill(side, key.prototype(taken), true);
+                transfer.finish(filled);
+            } catch (RuntimeException error) {
+                unresolved("流体输出", error);
+                break;
+            }
+            SharedStorageManager.broadcastFluidChange(key);
             total += filled;
             com.futa_gtnh.supply.SupplyTracker.recordIo(key, destination, side, filled, false);
             budget -= filled;
@@ -595,4 +663,5 @@ final class TerminalIoEngine {
         }
         return total;
     }
+
 }

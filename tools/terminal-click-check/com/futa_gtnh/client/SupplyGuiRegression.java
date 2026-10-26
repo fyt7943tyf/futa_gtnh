@@ -42,6 +42,8 @@ public final class SupplyGuiRegression {
         mc.thePlayer.worldObj=(net.minecraft.world.World)unsafe.allocateInstance(net.minecraft.client.multiplayer.WorldClient.class);
         field(net.minecraft.world.World.class,"isRemote").setBoolean(mc.thePlayer.worldObj,true);
         connectionIsolation();
+        ProductionGuiRegression.run(mc);
+        PublicMeGuiRegression.run(mc);
         // No open window means request dispatch is intentionally disabled; all actual widget methods still run.
         for(int[] size:new int[][]{{320,240},{854,480}}) runSize(mc,size[0],size[1]);
         System.out.println("Supply GUI: "+checks+" checks passed (layout, selection, paged zero-stock history and modal editors)");

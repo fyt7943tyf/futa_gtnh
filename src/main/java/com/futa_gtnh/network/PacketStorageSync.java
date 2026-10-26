@@ -52,6 +52,8 @@ public class PacketStorageSync implements IMessage {
      */
     public static byte[] createPayload(SharedStorage storage) {
         NBTTagCompound root = new NBTTagCompound();
+        root.setBoolean("publicMe", storage.usesNetwork());
+        root.setBoolean("meOnline", !storage.usesNetwork() || com.futa_gtnh.me.PublicMeNetwork.isOnline());
 
         NBTTagList itemList = new NBTTagList();
         for (Map.Entry<ItemKey, Long> entry : storage.snapshotItems()) {

@@ -51,6 +51,7 @@ public final class DrawerStorageRegression {
         checkActiveIo();
         checkRepeatedTransfers();
         checkLargeDrawerBatch();
+        checkNativeSimulation();
         System.out.println("Storage Drawers regression passed: " + checks + " checks");
     }
 
@@ -80,6 +81,29 @@ public final class DrawerStorageRegression {
         alias.invalidate();
         check(f.storage.getItemAmount(iron) == 0 && f.drawer.getDrawer(0).getStoredItemCount() == 208,
             "drawer adapter still obeys filters without changing physical stock");
+    }
+
+    private static void checkNativeSimulation() {
+        Fixture f = new Fixture(1);
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        f.drawer.getDrawer(0).setStoredItem(iron.prototype(), 208);
+        check(ExternalInventoryOps.simulateExtractItems(f.drawer, WEST, iron, 200) == 200,
+            "ME simulation reads drawer physical quantity beyond its output window");
+        check(ExternalInventoryOps.simulateInsertItems(f.drawer, WEST, iron, 200) == 48,
+            "ME simulation reads remaining physical capacity rather than virtual input slots");
+        check(f.drawer.getDrawer(0).getStoredItemCount() == 208,
+            "drawer insertion and extraction simulations never change physical stock");
+        try {
+            StorageDrawers.config.cache.enableSidedOutput = false;
+            check(ExternalInventoryOps.simulateExtractItems(f.drawer, WEST, iron, 10) == 0,
+                "ME extraction simulation respects disabled sided drawer output");
+            StorageDrawers.config.cache.enableSidedInput = false;
+            check(ExternalInventoryOps.simulateInsertItems(f.drawer, WEST, iron, 10) == 0,
+                "ME insertion simulation respects disabled sided drawer input");
+        } finally {
+            StorageDrawers.config.cache.enableSidedInput = true;
+            StorageDrawers.config.cache.enableSidedOutput = true;
+        }
     }
 
     private static void checkTransfers() {

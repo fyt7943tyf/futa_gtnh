@@ -89,6 +89,8 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
         button(11, panelWidth - 48, panelHeight - 26, 38, tr("done"));
         button(13, listWidth + 8, panelHeight - 70, 64, tr("highlight"));
         button(14, listWidth + 74, panelHeight - 70, 64, tr("teleport"));
+        button(16, panelWidth - 100, 5, 90, StatCollector.translateToLocal("futa_gtnh.me.crafting.button"));
+        button(15, panelWidth - 168, 5, 64, StatCollector.translateToLocal("futa_gtnh.production.button"));
         Keyboard.enableRepeatEvents(true);
         listDirty = true;
         request(PacketSupplyRequest.QUERY, "", "", -1);
@@ -212,6 +214,12 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
             return;
         }
         switch (button.id) {
+            case 16:
+                GuiPublicMeCrafting.open(container);
+                return;
+            case 15:
+                GuiProductionLines.open(container);
+                return;
             case 3:
             case 4:
                 int direction = button.id == 3 ? -1 : 1;
@@ -230,7 +238,7 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
                 }
                 break;
             case 5:
-                minutes = minutes == 10 ? 60 : 10;
+                minutes = minutes == 1 ? 10 : minutes == 10 ? 60 : 1;
                 sourcePage = 0;
                 sourceScroll = 0;
                 request(PacketSupplyRequest.QUERY, "", "", -1);
@@ -308,7 +316,7 @@ public final class GuiSupplyMonitor extends FutaGuiScreen {
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         drawDefaultBackground();
         com.futa_gtnh.client.ui.FutaUiTheme.panel(left, top, panelWidth, panelHeight);
-        text(tr("title"), 8, 7, panelWidth - 16, 0xFFFFFF);
+        text(tr("title"), 8, 7, panelWidth - 184, 0xFFFFFF);
         super.drawScreen(mouseX, mouseY, partialTicks);
         search.drawTextBox();
         RenderHelper.enableGUIStandardItemLighting();

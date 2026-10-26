@@ -29,6 +29,7 @@ import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
 import com.futa_gtnh.shared.SharedStorageManager;
+import com.futa_gtnh.shared.StorageNetworkAccess;
 import com.futa_gtnh.storagebus.StorageBusRegistry;
 import com.futa_gtnh.storagebus.TileEntityStorageBus;
 
@@ -82,6 +83,7 @@ public final class TerminalIoRegression {
         checkBusAttachedFluidOutput();
         checkFluidPullCapacity();
         checkDirectFluidSelection();
+        checkUncertainTransfers();
         System.out.println("Terminal IO regression passed: " + checks + " checks");
     }
 
@@ -703,11 +705,16 @@ public final class TerminalIoRegression {
 
     private static final class TestInventory extends TileEntity implements IInventory {
         final InventoryBasic inventory = new InventoryBasic("target", true, 1);
+        boolean throwAfterWrite;
+        boolean rejectWrites;
         public int getSizeInventory() { return inventory.getSizeInventory(); }
         public ItemStack getStackInSlot(int slot) { return inventory.getStackInSlot(slot); }
         public ItemStack decrStackSize(int slot, int amount) { return inventory.decrStackSize(slot, amount); }
         public ItemStack getStackInSlotOnClosing(int slot) { return inventory.getStackInSlotOnClosing(slot); }
-        public void setInventorySlotContents(int slot, ItemStack stack) { inventory.setInventorySlotContents(slot, stack); }
+        public void setInventorySlotContents(int slot, ItemStack stack) {
+            if (!rejectWrites) inventory.setInventorySlotContents(slot, stack);
+            if (throwAfterWrite) throw new IllegalStateException("fixture setter applied then failed");
+        }
         public String getInventoryName() { return "target"; }
         public boolean hasCustomInventoryName() { return true; }
         public int getInventoryStackLimit() { return 64; }
@@ -837,10 +844,154 @@ public final class TerminalIoRegression {
         }
     }
 
+    private static void checkUncertainTransfers() throws Exception {
+        StorageBusRegistry.clear();
+        SharedStorage storage = SharedStorageManager.getStorage();
+        storage.setNetworkAccess(null);
+        storage.clear();
+        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+        FluidKey water = FluidKey.of(FluidRegistry.WATER, null);
+        TerminalIoConfig config = new TerminalIoConfig();
+        Class<?>[] itemPull = { IInventory.class, ForgeDirection.class, TerminalIoConfig.class };
+        Class<?>[] fluidPull = { IFluidHandler.class, ForgeDirection.class, TerminalIoConfig.class };
+        try {
+            TestInventory source = new TestInventory();
+            source.inventory.setInventorySlotContents(0, iron.prototype(10));
+            source.throwAfterWrite = true;
+            invoke("pullItems", itemPull, source, WEST, config);
+            check(source.getStackInSlot(0) == null && storage.getItemAmountPool(iron) == 10
+                && !storage.hasPendingItemTransfer(iron), "setter throwing after removal is reconciled before one-time delivery");
+            storage.clear();
+            source.throwAfterWrite = false;
+            source.rejectWrites = true;
+            source.inventory.setInventorySlotContents(0, iron.prototype(10));
+            invoke("pullItems", itemPull, source, WEST, config);
+            check(source.getStackInSlot(0).stackSize == 10 && storage.getItemAmountPool(iron) == 0
+                && !storage.hasPendingItemTransfer(iron), "source refusing removal clears provisional escrow without creating stock");
+
+            FaultNetwork network = new FaultNetwork();
+            network.throwOnInsert = true;
+            source.rejectWrites = false;
+            storage.setNetworkAccess(network);
+            invoke("pullItems", itemPull, source, WEST, config);
+            check(source.getStackInSlot(0) == null && network.itemAccepted == 4 && network.itemCalls == 1
+                && storage.getItemAmountPool(iron) == 0 && storage.snapshotCraftingItems().get(0).getValue() == 10,
+                "uncertain AE acceptance stays quarantined without automatic source or pool refund");
+            SharedStorage restored = new SharedStorage();
+            restored.readFromNbt(storage.writeToNbt());
+            check(restored.hasPendingItemTransfer(iron) && restored.getItemAmountPool(iron) == 0,
+                "uncertain IO acceptance persists as unavailable escrow across reload");
+            source.inventory.setInventorySlotContents(0, iron.prototype(5));
+            invoke("pullItems", itemPull, source, WEST, config);
+            check(source.getStackInSlot(0).stackSize == 5 && network.itemCalls == 1,
+                "an unresolved item key is not retried by later IO rounds");
+
+            storage.clear();
+            network = new FaultNetwork();
+            storage.setNetworkAccess(network);
+            source.inventory.setInventorySlotContents(0, iron.prototype(10));
+            invoke("pullItems", itemPull, source, WEST, config);
+            check(network.itemCalls == 1 && network.itemAccepted == 4 && storage.getItemAmountPool(iron) == 6
+                && !storage.hasPendingItemTransfer(iron), "known partial AE acceptance refunds only rejected items directly to raw pool");
+            storage.clear();
+            storage.poolInsertItem(iron, Long.MAX_VALUE, true);
+            network = new FaultNetwork();
+            network.rejectAll = true;
+            storage.setNetworkAccess(network);
+            source.inventory.setInventorySlotContents(0, iron.prototype(10));
+            invoke("pullItems", itemPull, source, WEST, config);
+            check(storage.getItemAmountPool(iron) == Long.MAX_VALUE
+                && storage.snapshotCraftingItems().get(0).getValue() == 10 && source.getStackInSlot(0) == null,
+                "known rejected items remain in escrow if durable raw recovery capacity is full");
+
+            storage.clear();
+            network = new FaultNetwork();
+            network.throwOnInsert = true;
+            storage.setNetworkAccess(network);
+            TestTank fluidSource = new TestTank();
+            fluidSource.tank.fill(water.prototype(10), true);
+            invoke("pullFluid", fluidPull, fluidSource, WEST, config);
+            check(fluidSource.tank.getFluidAmount() == 0 && network.fluidAccepted == 4 && network.fluidCalls == 1
+                && storage.getFluidAmountPool(water) == 0 && storage.snapshotCraftingFluids().get(0).getValue() == 10,
+                "uncertain AE fluid acceptance is not reinjected or returned to source");
+            fluidSource.tank.fill(water.prototype(5), true);
+            invoke("pullFluid", fluidPull, fluidSource, WEST, config);
+            check(fluidSource.tank.getFluidAmount() == 5 && network.fluidCalls == 1,
+                "unresolved fluid keys stop automatic retries");
+            storage.clear();
+            network = new FaultNetwork();
+            storage.setNetworkAccess(network);
+            fluidSource.tank.drain(4000, true);
+            fluidSource.tank.fill(water.prototype(10), true);
+            invoke("pullFluid", fluidPull, fluidSource, WEST, config);
+            check(network.fluidAccepted == 4 && network.fluidCalls == 1 && storage.getFluidAmountPool(water) == 6
+                && !storage.hasPendingFluidTransfer(water), "known fluid remainder is recovered raw without a second network callback");
+
+            storage.setNetworkAccess(null);
+            storage.clear();
+            storage.poolInsertItem(iron, 10, true);
+            TestInventory destination = new TestInventory();
+            destination.throwAfterWrite = true;
+            invoke("pushItem", new Class<?>[] { IInventory.class, ForgeDirection.class, SharedStorage.class, ItemKey.class, long.class, int.class },
+                destination, WEST, storage, iron, 10L, 10);
+            check(destination.getStackInSlot(0).stackSize == 10 && storage.getItemAmountPool(iron) == 0
+                && storage.snapshotCraftingItems().get(0).getValue() == 10,
+                "target throwing after accepting items does not cause an automatic duplicate refund");
+            storage.clear();
+            storage.poolInsertFluid(water, 10, true);
+            TestTank fluidDestination = new TestTank();
+            fluidDestination.throwAfterFill = true;
+            invoke("pushFluid", new Class<?>[] { IFluidHandler.class, ForgeDirection.class, SharedStorage.class, FluidKey.class, long.class, int.class },
+                fluidDestination, WEST, storage, water, 10L, 10);
+            check(fluidDestination.tank.getFluidAmount() == 10 && storage.getFluidAmountPool(water) == 0
+                && storage.snapshotCraftingFluids().get(0).getValue() == 10,
+                "target throwing after accepting fluid preserves uncertainty rather than duplicating fluid");
+        } finally {
+            storage.setNetworkAccess(null);
+            storage.clear();
+        }
+    }
+
+    private static final class FaultNetwork implements StorageNetworkAccess {
+        boolean throwOnInsert;
+        boolean rejectAll;
+        int itemCalls, fluidCalls;
+        long itemAccepted, fluidAccepted;
+        @Override public long itemAmount(ItemKey key) { return 0; }
+        @Override public long fluidAmount(FluidKey key) { return 0; }
+        @Override public long insertItem(ItemKey key, long amount, boolean manual, boolean direct) {
+            itemCalls++;
+            long accepted = rejectAll ? 0 : Math.min(4, amount);
+            itemAccepted += accepted;
+            if (throwOnInsert) throw new IllegalStateException("fixture AE item acceptance unknown");
+            return accepted;
+        }
+        @Override public long insertFluid(FluidKey key, long amount, boolean manual, boolean direct) {
+            fluidCalls++;
+            long accepted = rejectAll ? 0 : Math.min(4, amount);
+            fluidAccepted += accepted;
+            if (throwOnInsert) throw new IllegalStateException("fixture AE fluid acceptance unknown");
+            return accepted;
+        }
+        @Override public long extractItem(ItemKey key, long amount, TileEntity excluded) { return 0; }
+        @Override public long extractFluid(FluidKey key, long amount, TileEntity excluded) { return 0; }
+        @Override public long itemSpace(ItemKey key, boolean manual) { return 1000; }
+        @Override public long fluidSpace(FluidKey key, boolean manual) { return 1000; }
+        @Override public java.util.List<java.util.Map.Entry<ItemKey, Long>> items() { return Collections.emptyList(); }
+        @Override public java.util.List<java.util.Map.Entry<FluidKey, Long>> fluids() { return Collections.emptyList(); }
+        @Override public int itemRevision() { return 0; }
+        @Override public int fluidRevision() { return 0; }
+    }
+
     private static final class TestTank extends TileEntity implements IFluidHandler {
         private final FluidTank tank = new FluidTank(4000);
         private boolean allowFill = true;
-        public int fill(ForgeDirection from, FluidStack resource, boolean doFill) { return allowFill ? tank.fill(resource, doFill) : 0; }
+        private boolean throwAfterFill;
+        public int fill(ForgeDirection from, FluidStack resource, boolean doFill) {
+            int result = allowFill ? tank.fill(resource, doFill) : 0;
+            if (doFill && throwAfterFill) throw new IllegalStateException("fixture fill accepted then failed");
+            return result;
+        }
         public FluidStack drain(ForgeDirection from, FluidStack resource, boolean doDrain) {
             return tank.getFluid() != null && tank.getFluid().isFluidEqual(resource) ? tank.drain(resource.amount, doDrain) : null;
         }

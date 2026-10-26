@@ -137,15 +137,15 @@ public final class TerminalSearchRegression {
         field.setFocused(true);
         field.setText("ingotIron");
         org.lwjgl.input.Keyboard.control = true;
-        check(field.textboxKeyTyped('\0', 30) && field.getSelectedText().equals("ingotIron"), "physical Ctrl+A selects expression without control character");
-        check((Character) normalize.invoke(null, '\0', 47) == '\u0016', "physical Ctrl+V enters vanilla paste branch with a zero character");
-        check((Character) normalize.invoke(null, 'v', 47) == '\u0016', "physical Ctrl+V enters vanilla paste branch with a printable character");
+        check(field.textboxKeyTyped('\0', 30) && field.getSelectedText().equals("ingotIron"), "physical Ctrl/Cmd+A selects expression without control character");
+        check((Character) normalize.invoke(null, '\0', 47) == '\u0016', "physical Ctrl/Cmd+V enters vanilla paste branch with a zero character");
+        check((Character) normalize.invoke(null, 'v', 47) == '\u0016', "physical Ctrl/Cmd+V enters vanilla paste branch with a printable character");
         check((Character) normalize.invoke(null, '\u0016', 47) == '\u0016', "legacy paste control character is preserved");
         check((Character) normalize.invoke(null, '\0', 46) == '\u0003' && (Character) normalize.invoke(null, '\0', 45) == '\u0018', "copy and cut map to vanilla editing branches");
         check((Character) normalize.invoke(null, '\0', 203) == '\0', "Ctrl navigation remains unchanged");
         org.lwjgl.input.Keyboard.control = false;
         org.lwjgl.input.Keyboard.rightControl = true;
-        check((Character) normalize.invoke(null, '\0', 47) == '\u0016', "right Ctrl supports paste");
+        check((Character) normalize.invoke(null, '\0', 47) == '\u0016', "right Ctrl/Cmd supports paste");
         org.lwjgl.input.Keyboard.rightControl = false;
         field.setSelectionPos(field.getCursorPosition());
         check(field.textboxKeyTyped('v', 47) && field.getText().equals("ingotIronv"), "plain V still types normally");
@@ -167,7 +167,7 @@ public final class TerminalSearchRegression {
             field.setFocused(true);
             field.setText("crushed*&!crushedPurified*");
             keyTyped.invoke(gui, '\0', 30);
-            check(field.getSelectedText().equals(field.getText()), type.getSimpleName() + " routes physical Ctrl shortcuts to focused ore field");
+            check(field.getSelectedText().equals(field.getText()), type.getSimpleName() + " routes physical Ctrl/Cmd shortcuts to focused ore field");
             field.setEnabled(false);
             field.textboxKeyTyped('z', 44);
             check(field.getText().equals("crushed*&!crushedPurified*"), "disabled ore field remains read-only");

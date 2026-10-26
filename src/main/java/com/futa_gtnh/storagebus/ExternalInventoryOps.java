@@ -82,6 +82,48 @@ final class ExternalInventoryOps {
     // 物品
     // ==================================================================
 
+    /** Pure preflight: never writes a slot, decrements a stack or calls markDirty. */
+    static long simulateInsertItems(IInventory inventory, ForgeDirection side, ItemKey key, long amount) {
+        if (inventory == null || key == null || amount <= 0L) return 0L;
+        long drawerAmount = DrawerStorageCompat.simulateItems(inventory, side, key, amount, true);
+        if (drawerAmount >= 0L) return drawerAmount;
+        long remaining = amount;
+        try {
+            ItemStack prototype = key.prototype();
+            int inventoryLimit = inventory.getInventoryStackLimit();
+            int limit = Math
+                .max(1, Math.min(Math.max(1, prototype.getMaxStackSize()), inventoryLimit > 0 ? inventoryLimit : 64));
+            for (int slot = 0; slot < inventory.getSizeInventory() && remaining > 0; slot++) {
+                ItemStack existing = inventory.getStackInSlot(slot);
+                if (existing != null && existing.stackSize > 0 && !key.equals(ItemKey.of(existing))) continue;
+                if (!canInsert(inventory, slot, prototype, side)) continue;
+                long room = Math.max(0L, limit - (existing == null ? 0L : Math.max(0, existing.stackSize)));
+                remaining -= Math.min(remaining, room);
+            }
+        } catch (RuntimeException error) {
+            return 0L;
+        }
+        return amount - remaining;
+    }
+
+    /** Pure preflight; all permissions and item identities are checked against the live target. */
+    static long simulateExtractItems(IInventory inventory, ForgeDirection side, ItemKey key, long amount) {
+        if (inventory == null || key == null || amount <= 0L) return 0L;
+        long drawerAmount = DrawerStorageCompat.simulateItems(inventory, side, key, amount, false);
+        if (drawerAmount >= 0L) return drawerAmount;
+        long remaining = amount;
+        try {
+            for (int slot = 0; slot < inventory.getSizeInventory() && remaining > 0; slot++) {
+                ItemStack existing = inventory.getStackInSlot(slot);
+                if (existing == null || existing.stackSize <= 0 || !key.equals(ItemKey.of(existing))) continue;
+                if (canExtract(inventory, slot, existing, side)) remaining -= Math.min(remaining, existing.stackSize);
+            }
+        } catch (RuntimeException error) {
+            return 0L;
+        }
+        return amount - remaining;
+    }
+
     /**
      * 把 {@code amount} 个 {@code key} 塞进容器。
      *
@@ -354,6 +396,27 @@ final class ExternalInventoryOps {
     // 流体
     // ==================================================================
 
+    static long simulateInsertFluid(IFluidHandler handler, ForgeDirection side, FluidKey key, long amount) {
+        if (handler == null || key == null || amount <= 0L) return 0L;
+        int want = (int) Math.min(amount, Integer.MAX_VALUE);
+        try {
+            return Math.max(0, Math.min(want, handler.fill(side, key.prototype(want), false)));
+        } catch (RuntimeException error) {
+            return 0L;
+        }
+    }
+
+    static long simulateExtractFluid(IFluidHandler handler, ForgeDirection side, FluidKey key, long amount) {
+        if (handler == null || key == null || amount <= 0L) return 0L;
+        int want = (int) Math.min(amount, Integer.MAX_VALUE);
+        try {
+            FluidStack result = handler.drain(side, key.prototype(want), false);
+            return result == null || !key.equals(FluidKey.of(result)) ? 0L : Math.max(0, Math.min(want, result.amount));
+        } catch (RuntimeException error) {
+            return 0L;
+        }
+    }
+
     static long insertFluid(IFluidHandler handler, ForgeDirection side, FluidKey key, long amount) {
         if (handler == null || key == null || amount <= 0L) return 0L;
         int want = (int) Math.min(amount, Integer.MAX_VALUE);
@@ -392,7 +455,7 @@ final class ExternalInventoryOps {
     // 面访问
     // ==================================================================
 
-    private static boolean canInsert(IInventory inventory, int slot, ItemStack stack, ForgeDirection side) {
+    static boolean canInsert(IInventory inventory, int slot, ItemStack stack, ForgeDirection side) {
         try {
             if (inventory instanceof ISidedInventory) {
                 return isAccessible((ISidedInventory) inventory, slot, side)
@@ -404,7 +467,7 @@ final class ExternalInventoryOps {
         }
     }
 
-    private static boolean canExtract(IInventory inventory, int slot, ItemStack stack, ForgeDirection side) {
+    static boolean canExtract(IInventory inventory, int slot, ItemStack stack, ForgeDirection side) {
         try {
             if (inventory instanceof ISidedInventory) {
                 return isAccessible((ISidedInventory) inventory, slot, side)

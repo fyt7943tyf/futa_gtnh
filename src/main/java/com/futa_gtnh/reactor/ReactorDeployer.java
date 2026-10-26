@@ -169,10 +169,19 @@ public final class ReactorDeployer {
             for (int column = 0; column < targetColumns; column++) {
                 ItemStack existing = Ic2ReactorCompat.getItemAt(ref, column, row);
                 if (existing == null || existing.getItem() == null) continue;
-                Ic2ReactorCompat.setItemAt(ref, column, row, null);
                 ItemKey key = ItemKey.of(existing);
                 if (key == null) continue;
+                if (storage.itemManualSpaceLeft(key) < existing.stackSize) {
+                    return "futa_gtnh.reactor.msg.storage_unavailable";
+                }
+                Ic2ReactorCompat.setItemAt(ref, column, row, null);
                 long accepted = storage.insertItemManual(key, existing.stackSize);
+                if (accepted < existing.stackSize) {
+                    ItemStack remainder = existing.copy();
+                    remainder.stackSize -= (int) accepted;
+                    Ic2ReactorCompat.setItemAt(ref, column, row, remainder);
+                    return "futa_gtnh.reactor.msg.storage_unavailable";
+                }
                 recycled += accepted;
                 SharedStorageManager.broadcastItemChange(key);
             }

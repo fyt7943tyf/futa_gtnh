@@ -32,6 +32,7 @@ public final class StorageBusLink {
 
     private LinkedHashMap<ItemKey, Long> itemCache = new LinkedHashMap<>();
     private LinkedHashMap<FluidKey, Long> fluidCache = new LinkedHashMap<>();
+    private int mirrorRevision;
 
     StorageBusLink(TileEntityStorageBus bus, ForgeDirection side) {
         this.bus = bus;
@@ -124,6 +125,7 @@ public final class StorageBusLink {
         LinkedHashMap<ItemKey, Long> items = scanItems();
         LinkedHashMap<FluidKey, Long> fluids = scanFluids();
         synchronized (this) {
+            if (!itemCache.equals(items) || !fluidCache.equals(fluids)) mirrorRevision++;
             itemCache = items;
             fluidCache = fluids;
         }
@@ -213,13 +215,50 @@ public final class StorageBusLink {
     }
 
     public synchronized void clearCache() {
+        if (!itemCache.isEmpty() || !fluidCache.isEmpty()) mirrorRevision++;
         itemCache = new LinkedHashMap<>();
         fluidCache = new LinkedHashMap<>();
+    }
+
+    public synchronized int getMirrorRevision() {
+        return mirrorRevision;
     }
 
     // ==================================================================
     // 按需读写
     // ==================================================================
+
+    public long simulateInsertItem(ItemKey key, long amount) {
+        if (key == null || amount <= 0L || !isWritable() || !getConfig().allowsItem(key)) return 0L;
+        TileEntity tile = targetTile();
+        return tile instanceof IInventory && ExternalInventoryOps.isItemTarget(tile, targetFace())
+            ? ExternalInventoryOps.simulateInsertItems((IInventory) tile, targetFace(), key, amount)
+            : 0L;
+    }
+
+    public long simulateExtractItem(ItemKey key, long amount) {
+        if (key == null || amount <= 0L || !isReadable() || !getConfig().allowsItem(key)) return 0L;
+        TileEntity tile = targetTile();
+        return tile instanceof IInventory && ExternalInventoryOps.isItemTarget(tile, targetFace())
+            ? ExternalInventoryOps.simulateExtractItems((IInventory) tile, targetFace(), key, amount)
+            : 0L;
+    }
+
+    public long simulateInsertFluid(FluidKey key, long amount) {
+        if (key == null || amount <= 0L || !isWritable() || !getConfig().allowsFluid(key)) return 0L;
+        TileEntity tile = targetTile();
+        return tile instanceof IFluidHandler && ExternalInventoryOps.isFluidTarget(tile, targetFace())
+            ? ExternalInventoryOps.simulateInsertFluid((IFluidHandler) tile, targetFace(), key, amount)
+            : 0L;
+    }
+
+    public long simulateExtractFluid(FluidKey key, long amount) {
+        if (key == null || amount <= 0L || !isReadable() || !getConfig().allowsFluid(key)) return 0L;
+        TileEntity tile = targetTile();
+        return tile instanceof IFluidHandler && ExternalInventoryOps.isFluidTarget(tile, targetFace())
+            ? ExternalInventoryOps.simulateExtractFluid((IFluidHandler) tile, targetFace(), key, amount)
+            : 0L;
+    }
 
     /** @return 容器实际接受的物品数量 */
     public long insertItem(ItemKey key, long amount) {
@@ -281,6 +320,7 @@ public final class StorageBusLink {
 
     private synchronized void adjustItemCache(ItemKey key, long delta) {
         if (delta == 0L) return;
+        mirrorRevision++;
         long current = cachedItemAmount(key);
         long next = delta > 0L ? saturatingAdd(current, delta) : Math.max(0L, current + delta);
         if (next <= 0L) {
@@ -292,6 +332,7 @@ public final class StorageBusLink {
 
     private synchronized void adjustFluidCache(FluidKey key, long delta) {
         if (delta == 0L) return;
+        mirrorRevision++;
         long current = cachedFluidAmount(key);
         long next = delta > 0L ? saturatingAdd(current, delta) : Math.max(0L, current + delta);
         if (next <= 0L) {

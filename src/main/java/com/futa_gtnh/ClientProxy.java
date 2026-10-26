@@ -33,6 +33,18 @@ public class ClientProxy extends CommonProxy {
     }
 
     @Override
+    public void onPublicMeSnapshot(net.minecraft.network.INetHandler source,
+        com.futa_gtnh.network.PacketPublicMeSnapshot packet) {
+        com.futa_gtnh.client.ClientPublicMeState.receive(source, packet);
+    }
+
+    @Override
+    public void onProductionSnapshot(net.minecraft.network.INetHandler source,
+        com.futa_gtnh.network.PacketProductionSnapshot packet) {
+        com.futa_gtnh.client.ClientProductionState.receive(source, packet);
+    }
+
+    @Override
     public void preInit(FMLPreInitializationEvent event) {
         super.preInit(event);
         com.futa_gtnh.client.ClientSupplyState.register();

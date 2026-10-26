@@ -33,6 +33,8 @@ public final class ClientSupplyState {
         if (source == null || source != connection) return;
         if (packet.data.getBoolean("ready")) {
             supported = true;
+            ClientProductionState.ready(source, packet.data.getBoolean("productionReady"));
+            ClientPublicMeState.ready(source, packet.data.getBoolean("publicMeReady"));
             return;
         }
         if (packet.data.hasKey("navigate", 10)) navigation = packet;
@@ -70,6 +72,8 @@ public final class ClientSupplyState {
         if (mc.getNetHandler() != null && mc.getNetHandler() != connection) {
             connection = mc.getNetHandler();
             supported = false;
+            ClientProductionState.ready(null, false);
+            ClientPublicMeState.ready(null, false);
             response = null;
             navigation = null;
             handledNavigation = null;
@@ -109,6 +113,8 @@ public final class ClientSupplyState {
 
     @SubscribeEvent
     public void disconnected(FMLNetworkEvent.ClientDisconnectionFromServerEvent event) {
+        ClientProductionState.ready(null, false);
+        ClientPublicMeState.ready(null, false);
         ALERTS.clear();
         response = null;
         navigation = null;

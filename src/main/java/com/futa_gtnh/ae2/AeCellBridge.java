@@ -261,6 +261,8 @@ final class AeCellBridge {
      * 自己网络里的 primary。
      */
     static synchronized boolean serveContent(AbstractSharedCellInventory<?, ?> handler) {
+        if (com.futa_gtnh.me.PublicMeNetwork.isRunning() && handler.currentGrid() != null
+            && handler.currentGrid() == com.futa_gtnh.me.PublicMeNetwork.grid()) return false;
         if (!installed) return true;
         int identity = System.identityHashCode(handler.cellItem);
         CellEntry entry = cells.get(identity);
@@ -491,6 +493,7 @@ final class AeCellBridge {
 
         // ★ 顺序有意义：先向等待的 CPU 投递实物，再广播结算后的共享库存。
         // 中间产物进入 CPU；最终产物被确认后退回共享库。
+        liveGrids.removeIf(grid -> grid == com.futa_gtnh.me.PublicMeNetwork.grid());
         feedWaitingCraftingCpus(liveGrids, items, fluids);
 
         // 差量只算一次：基准（lastPosted）在计算时就会前移，
@@ -502,6 +505,7 @@ final class AeCellBridge {
         if (itemDeltaList.isEmpty() && fluidDeltaList.isEmpty()) return;
 
         for (IGrid grid : liveGrids) {
+            if (grid == com.futa_gtnh.me.PublicMeNetwork.grid()) continue;
             try {
                 IStorageGrid storageGrid = grid.getCache(IStorageGrid.class);
                 MachineSource source = machineSourceOf(grid);

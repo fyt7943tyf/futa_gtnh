@@ -74,6 +74,8 @@ public class ModEventHandler {
     @SubscribeEvent
     public void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        com.futa_gtnh.me.PublicMeNetwork.tick();
+        com.futa_gtnh.me.PublicMeCrafting.tick();
         com.futa_gtnh.network.ServerActions.tick();
         SharedStorageManager.onServerTick();
         com.futa_gtnh.supply.SupplyTracker.onServerTick();
@@ -95,6 +97,7 @@ public class ModEventHandler {
         // 反应堆布局档案的定期落盘（同上，空载一次布尔判断的开销）
         com.futa_gtnh.reactor.ReactorLayoutManager.onServerTick();
         // AE2 共享背包元件的增量推送（没装 AE2 时钩子为 null，一次判空的开销）
+        com.futa_gtnh.ae2.PublicStorageAccess.tick();
         com.futa_gtnh.ae2.Ae2Compat.onServerTickEnd();
     }
 
@@ -106,6 +109,8 @@ public class ModEventHandler {
             SwiftStepGrowthAura.forget(player);
             StorageActionHandler.forget(player);
             com.futa_gtnh.network.PacketSupplyRequest.forget(player.getUniqueID());
+            com.futa_gtnh.network.PacketProductionRequest.forget(player.getUniqueID());
+            com.futa_gtnh.network.PacketPublicMeRequest.forget(player.getUniqueID());
             com.futa_gtnh.network.SupplyClients.forget(player.getUniqueID(), player.playerNetServerHandler);
             // 寻物任务和结果也一起清掉：任务里存着 World 引用，
             // 玩家走了还留着的话，那个 World 就没法被回收了

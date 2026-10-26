@@ -64,20 +64,22 @@ public class CommandSharedStorage extends CommandBase {
                         reply(
                             sender,
                             EnumChatFormatting.RED
-                                + "请先关闭 ae2CellFeedCraftingCpu 并确认 CPU 没有收下这些货；盲目退回可能复制物品。确认：/futashared escrow refund confirm");
+                                + "请先暂停相关 IO、关闭 ae2CellFeedCraftingCpu，并核对来源容器、目标和 ME CPU，确认这些货没有留在其中；盲目退回可能复制物品。确认：/futashared escrow refund confirm");
                         return;
                     }
                     if (Config.ae2CellFeedCraftingCpu) {
-                        reply(sender, EnumChatFormatting.RED + "请先关闭 ae2CellFeedCraftingCpu，再核对并退回托管库存。");
+                        reply(
+                            sender,
+                            EnumChatFormatting.RED + "请先关闭 ae2CellFeedCraftingCpu，并暂停相关 IO；核对来源、目标和 CPU 后再退回托管库存。");
                         return;
                     }
                     escrow.refundCraftingEscrow();
                     SharedStorageManager.saveNow();
-                    reply(sender, EnumChatFormatting.GREEN + "可识别的合成托管库存已退回共享库；缺失模组的条目仍保留在存档。");
+                    reply(sender, EnumChatFormatting.GREEN + "可识别的传输托管库存已退回共享库；缺失模组的条目仍保留在存档。");
                 } else {
                     reply(
                         sender,
-                        "合成托管：" + escrow.snapshotCraftingItems()
+                        "传输托管（合成 / IO）：" + escrow.snapshotCraftingItems()
                             .size()
                             + " 种物品 / "
                             + escrow.snapshotCraftingFluids()

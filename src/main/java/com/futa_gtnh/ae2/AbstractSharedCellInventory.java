@@ -127,9 +127,10 @@ abstract class AbstractSharedCellInventory<StackType extends IAEStack<StackType>
         if (!AeCellBridge.serveContent(this)) return input;
 
         if (mode == Actionable.MODULATE) {
-            long accepted = AeCellBridge.suppressed(() -> insertStorage(key, input.getStackSize()));
+            long accepted = PublicStorageAccess
+                .withSource(src, () -> AeCellBridge.suppressed(() -> insertStorage(key, input.getStackSize())));
             if (accepted <= 0) return input;
-            if (com.futa_gtnh.supply.SupplyTracker.enabled())
+            if (!com.futa_gtnh.me.PublicMeNetwork.isRunning() && com.futa_gtnh.supply.SupplyTracker.enabled())
                 AeSupplyTracking.record(key, accepted, true, src, currentGrid());
             broadcastChange(key);
             noteOwnWrite(key);
@@ -150,9 +151,10 @@ abstract class AbstractSharedCellInventory<StackType extends IAEStack<StackType>
         if (!AeCellBridge.serveContent(this)) return null;
 
         if (mode == Actionable.MODULATE) {
-            long taken = AeCellBridge.suppressed(() -> extractStorage(key, request.getStackSize()));
+            long taken = PublicStorageAccess
+                .withSource(src, () -> AeCellBridge.suppressed(() -> extractStorage(key, request.getStackSize())));
             if (taken <= 0) return null;
-            if (com.futa_gtnh.supply.SupplyTracker.enabled())
+            if (!com.futa_gtnh.me.PublicMeNetwork.isRunning() && com.futa_gtnh.supply.SupplyTracker.enabled())
                 AeSupplyTracking.record(key, taken, false, src, currentGrid());
             broadcastChange(key);
             noteOwnWrite(key);
@@ -174,6 +176,10 @@ abstract class AbstractSharedCellInventory<StackType extends IAEStack<StackType>
         Key key = keyOf(request);
         if (key == null) return null;
         if (!AeCellBridge.serveContent(this)) return null;
+        if (com.futa_gtnh.me.PublicMeNetwork.isRunning()) {
+            appeng.api.storage.IMEMonitor<StackType> monitor = com.futa_gtnh.me.PublicMeNetwork.monitor(aeStackType());
+            return monitor == null ? null : monitor.getAvailableItem(request, iteration);
+        }
         long amount = Math.min(storedAmount(key), AeCellBridge.REPORT_CAP);
         if (amount <= 0) return null;
         return copyWithSize(request, amount);

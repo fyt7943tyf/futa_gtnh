@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 
+import net.minecraft.command.ICommandSender;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.nbt.CompressedStreamTools;
 import net.minecraft.nbt.NBTTagCompound;
@@ -38,6 +39,7 @@ public final class SupplyTracker {
     public static final int MAX_WATCHES = 128;
     public static final int PAGE_SIZE = 8;
     public static final SupplyLedger LEDGER = new SupplyLedger();
+    private static final ProductionLines PRODUCTION = new ProductionLines();
     private static final Map<String, String> NAMES = new LinkedHashMap<>();
     private static final Map<Object, Watch> WATCHES = new LinkedHashMap<>();
     private static final Map<Object, StockTrend> TRENDS = new LinkedHashMap<>();
@@ -65,6 +67,34 @@ public final class SupplyTracker {
 
     public static void record(Object key, SupplySource source, long amount, boolean incoming) {
         if (enabled()) LEDGER.record(key, source, amount, incoming, minute());
+    }
+
+    /** Device flows describe warehouse issuance/returns, never inferred machine consumption. */
+    public static NBTTagCompound productionSnapshot(String lineId, String sourceId, int minutes, int linePage,
+        int sourcePage, int resourcePage) {
+        if (!SharedStorageManager.isServerThread()) throw new IllegalStateException("Server thread required");
+        NBTTagCompound tag = PRODUCTION
+            .snapshot(LEDGER, lineId, sourceId, minutes, linePage, sourcePage, resourcePage, clock);
+        tag.setBoolean("enabled", enabled());
+        tag.setBoolean("writable", loaded && writable);
+        return tag;
+    }
+
+    /** Shared command/GUI entry point. Permission is checked here even if a caller already checked it. */
+    public static NBTTagCompound productionMutation(ICommandSender sender, NBTTagCompound request) {
+        if (sender == null || !sender.canCommandSenderUseCommand(4, "futalines"))
+            return ProductionLines.result(false, "修改产线需要管理员权限", "");
+        if (!SharedStorageManager.isServerThread() || !loaded || !writable)
+            return ProductionLines.result(false, "产线配置未就绪或读取失败，暂时不能修改", "");
+        if (request == null) return ProductionLines.result(false, "缺少产线操作", "");
+        NBTTagCompound result = PRODUCTION.mutate(request, LEDGER);
+        if (result.getBoolean("ok")) {
+            changed();
+            save();
+            result.setBoolean("saved", file == null || !dirty);
+            if (dirty) result.setString("message", result.getString("message") + "；写盘失败，将重试，请查看日志");
+        }
+        return result;
     }
 
     /** Called after actual insertion into the neighboring inventory/tank, never for the provisional extraction. */
@@ -149,7 +179,7 @@ public final class SupplyTracker {
         changedAt = clock;
     }
 
-    private static boolean boundedKey(Object key) {
+    static boolean boundedKey(Object key) {
         try {
             NBTTagCompound tag = writeKey(key);
             return tag.toString()
@@ -180,6 +210,11 @@ public final class SupplyTracker {
         tag.setBoolean("writable", writable);
         tag.setBoolean("teleportEnabled", enabled() && Config.enableSupplyTeleport);
         tag.setLong("age", clock);
+        long observed = SupplyLedger.observedMillis(minutes, clock);
+        tag.setInteger("minutes", SupplyLedger.window(minutes));
+        tag.setLong("observedMillis", observed);
+        tag.setBoolean("hasRate", observed > 0);
+        tag.setBoolean("bucketed", true);
         Watch watch = WATCHES.get(key);
         tag.setLong("threshold", watch == null ? -1 : watch.threshold);
         if (key != null) {
@@ -198,6 +233,8 @@ public final class SupplyTracker {
             SupplyLedger.Snapshot snapshot = LEDGER.snapshot(key, minutes, minute());
             tag.setLong("incoming", snapshot.incoming);
             tag.setLong("outgoing", snapshot.outgoing);
+            tag.setDouble("incomingPerMinute", observed <= 0 ? 0 : snapshot.incoming * 60_000d / observed);
+            tag.setDouble("outgoingPerMinute", observed <= 0 ? 0 : snapshot.outgoing * 60_000d / observed);
             tag.setLong("dropped", snapshot.dropped);
             int page = clampPage(sourcePage, snapshot.rows.size());
             tag.setInteger("sourcePage", page);
@@ -210,6 +247,8 @@ public final class SupplyTracker {
                 entry.setString("name", name(row.source));
                 entry.setLong("out", row.outgoing);
                 entry.setLong("in", row.incoming);
+                entry.setDouble("outPerMinute", observed <= 0 ? 0 : row.outgoing * 60_000d / observed);
+                entry.setDouble("inPerMinute", observed <= 0 ? 0 : row.incoming * 60_000d / observed);
                 rows.appendTag(entry);
             }
             tag.setTag("sources", rows);
@@ -248,6 +287,7 @@ public final class SupplyTracker {
     public static void onServerTick() {
         if (!loaded || ++tick % 20 != 0) return;
         clock = Math.max(0, (System.nanoTime() - started) / 1_000_000L);
+        if (dirty && clock - changedAt >= 5000) save();
         if (!Config.enableSupplyTracking) return;
         long minute = minute();
         if (minute != lastMinute) {
@@ -276,7 +316,6 @@ public final class SupplyTracker {
                 alerts++;
             }
         }
-        if (dirty && clock - changedAt >= 5000) save();
     }
 
     private static void alert(Object key, long stock, long threshold) {
@@ -320,7 +359,8 @@ public final class SupplyTracker {
 
     public static NBTTagCompound settings() {
         NBTTagCompound root = new NBTTagCompound();
-        root.setInteger("version", 1);
+        root.setInteger("version", 2);
+        root.setTag("production", PRODUCTION.write());
         NBTTagList names = new NBTTagList();
         for (Map.Entry<String, String> entry : NAMES.entrySet()) {
             NBTTagCompound tag = new NBTTagCompound();
@@ -340,7 +380,15 @@ public final class SupplyTracker {
     }
 
     public static void readSettings(NBTTagCompound root) {
-        if (root.getInteger("version") != 1) throw new IllegalArgumentException("Unsupported supply settings version");
+        int version = root.getInteger("version");
+        if (version != 1 && version != 2) throw new IllegalArgumentException("Unsupported supply settings version");
+        if (version == 2 && !root.hasKey("production", 10))
+            throw new IllegalArgumentException("Missing production line metadata");
+        if (version == 2 && (!root.getCompoundTag("production")
+            .hasKey("lines", 9)
+            || !root.getCompoundTag("production")
+                .hasKey("bindings", 9)))
+            throw new IllegalArgumentException("Incomplete production line metadata");
         Map<String, String> names = new LinkedHashMap<>();
         Map<Object, Watch> watches = new LinkedHashMap<>();
         NBTTagList list = root.getTagList("names", 10);
@@ -356,6 +404,7 @@ public final class SupplyTracker {
             if (key != null && tag.getLong("threshold") >= 0 && boundedKey(key))
                 watches.put(key, new Watch(tag.getLong("threshold")));
         }
+        PRODUCTION.read(version == 2 ? root.getCompoundTag("production") : new NBTTagCompound());
         NAMES.clear();
         NAMES.putAll(names);
         WATCHES.clear();
@@ -406,6 +455,7 @@ public final class SupplyTracker {
         watchCursor = 0;
         lastMinute = -1;
         LEDGER.clear();
+        PRODUCTION.clear();
         NAMES.clear();
         WATCHES.clear();
         TRENDS.clear();

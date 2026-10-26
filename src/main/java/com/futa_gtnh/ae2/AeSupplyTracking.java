@@ -186,8 +186,21 @@ public final class AeSupplyTracking {
             }
         }
 
+        private boolean excluded() {
+            TileEntity excluded = PublicStorageAccess.excludedTile();
+            if (excluded == null || part.getHost() == null) return false;
+            TileEntity tile = part.getHost()
+                .getTile();
+            ForgeDirection side = part.getSide();
+            return tile != null && tile.getWorldObj() == excluded.getWorldObj()
+                && tile.xCoord + side.offsetX == excluded.xCoord
+                && tile.yCoord + side.offsetY == excluded.yCoord
+                && tile.zCoord + side.offsetZ == excluded.zCoord;
+        }
+
         @Override
         public T extractItems(T request, Actionable mode, BaseActionSource action) {
+            if (excluded()) return null;
             if (mode != Actionable.MODULATE || !SupplyTracker.enabled())
                 return super.extractItems(request, mode, action);
             SupplySource previous = INLET.get();
@@ -201,6 +214,7 @@ public final class AeSupplyTracking {
 
         @Override
         public T injectItems(T input, Actionable mode, BaseActionSource action) {
+            if (PublicStorageAccess.poolOnly() || excluded()) return input;
             if (mode != Actionable.MODULATE || !SupplyTracker.enabled()) return super.injectItems(input, mode, action);
             SupplySource previous = INLET.get();
             INLET.set(inlet());
