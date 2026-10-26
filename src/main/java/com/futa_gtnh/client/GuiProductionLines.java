@@ -181,7 +181,7 @@ public final class GuiProductionLines extends FutaGuiScreen {
                     button.enabled &= data.getBoolean("canEdit") && !lineId.isEmpty() && !sourceId.isEmpty();
                     break;
                 case 11:
-                    button.enabled &= data.getBoolean("canEdit") && !sourceId.isEmpty();
+                    button.enabled &= data.getBoolean("canEdit") && !sourceId.isEmpty() && !automaticSource();
                     break;
                 case 13:
                     button.enabled &= (resources ? resourcePage : sourcePage) > 0;
@@ -194,6 +194,15 @@ public final class GuiProductionLines extends FutaGuiScreen {
                     break;
             }
         }
+    }
+
+    private boolean automaticSource() {
+        NBTTagList sources = data.getTagList("sources", 10);
+        for (int i = 0; i < sources.tagCount(); i++) {
+            NBTTagCompound entry = sources.getCompoundTagAt(i);
+            if (sourceId.equals(entry.getString("id"))) return entry.getBoolean("autoBound");
+        }
+        return false;
     }
 
     @Override
@@ -482,6 +491,11 @@ public final class GuiProductionLines extends FutaGuiScreen {
             } else {
                 lines.add(sourceName(entry));
                 lines.add(entry.getString("id"));
+                if (entry.getBoolean("autoBound")) {
+                    NBTTagCompound parent = entry.getCompoundTag("bindingParent");
+                    lines
+                        .add(tr("autoBinding", parent.getInteger("x"), parent.getInteger("y"), parent.getInteger("z")));
+                }
                 lines.add(
                     tr(
                         "member",

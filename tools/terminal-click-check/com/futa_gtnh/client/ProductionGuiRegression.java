@@ -72,6 +72,9 @@ public final class ProductionGuiRegression {
         check(get(gui,"lineId").equals("line-a") && !(Boolean)get(gui,"allSources"),"line click selects UUID and filters device list");
         int listWidth=(Integer)get(gui,"listWidth");gui.mouseClicked(left+listWidth+8,top+103,0);
         check(get(gui,"sourceId").equals(source.id()),"device selection uses stable source identity");
+        data.setBoolean("canEdit",true);row.setBoolean("autoBound",true);call(gui,"updateButtons");
+        check(!button(buttons,11).enabled && button(buttons,10).enabled,"automatic bus directs unbinding to interface while allowing manual override");
+        row.setBoolean("autoBound",false);data.setBoolean("canEdit",false);call(gui,"updateButtons");
         gui.mouseClicked(left+listWidth+8,top+103,0);
         check(get(gui,"sourceId").equals(""),"clicking selected device restores group totals");
         data.setBoolean("canEdit",true);call(gui,"updateButtons");gui.actionPerformed(button(buttons,1));

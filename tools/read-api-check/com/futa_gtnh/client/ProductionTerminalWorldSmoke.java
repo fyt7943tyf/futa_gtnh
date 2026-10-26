@@ -16,6 +16,11 @@ import com.futa_gtnh.CommonProxy;
 import com.futa_gtnh.inventory.ContainerProductionTerminal;
 import com.futa_gtnh.me.PublicMeWorldSmoke;
 import com.futa_gtnh.supply.SupplyTracker;
+import com.futa_gtnh.supply.SupplySource;
+import appeng.api.AEApi;
+import appeng.api.parts.IPartHost;
+import appeng.parts.misc.PartStorageBus;
+import net.minecraftforge.common.util.ForgeDirection;
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
@@ -28,6 +33,7 @@ public final class ProductionTerminalWorldSmoke {
     private volatile int x,y,z;
     private volatile String lineId;
     private int ticks,clientSent=-1;
+    private long lastCloseAt;
     private ItemStack previous;
     private EntityPlayerMP player;
     private WorldServer world;
@@ -67,11 +73,32 @@ public final class ProductionTerminalWorldSmoke {
             }else if(stage==4 && player.openContainer instanceof ContainerProductionTerminal){
                 require(!((ContainerProductionTerminal)player.openContainer).bindingMode,"air use opens full manager");stage=5;
             }else if(stage==5 && player.openContainer==player.inventoryContainer){
+                NBTTagCompound clearIo=new NBTTagCompound();clearIo.setString("action","unbind");
+                clearIo.setTag("source",new SupplySource(SupplySource.IO,0,x,y,z,2,"").write());
+                require(SupplyTracker.productionMutation(player,clearIo).getBoolean("ok"),"remove first shared-IO smoke binding before replacing fixture");
+                world.setBlockToAir(x,y,z);
+                require(world.setBlock(x,y,z,com.glodblock.github.loader.ItemAndBlockHolder.INTERFACE,0,3),"place actual two-in-one ME interface");
+                addStorageBus(x+1,y,z,ForgeDirection.WEST,false);
+                NBTTagCompound bind=new NBTTagCompound();bind.setString("action","bind");bind.setString("lineId",lineId);
+                bind.setTag("source",new SupplySource(SupplySource.AE_MACHINE,0,x,y,z,-1,"").write());
+                require(SupplyTracker.productionMutation(player,bind).getBoolean("ok"),"bind real interface through production API");
+                require(SupplyTracker.productionSnapshot(lineId,"",10,0,0,0).getInteger("sourceCount")==2,"existing item bus inherits immediately");
+                addStorageBus(x,y,z-1,ForgeDirection.SOUTH,true);stage=6;
+            }else if(stage==6 && player.openContainer instanceof ContainerProductionTerminal){
+                ContainerProductionTerminal c=(ContainerProductionTerminal)player.openContainer;
+                require(c.target!=null && c.target.source.kind==SupplySource.AE_BUS && c.target.source.x==x+1 && c.target.source.side==4,"real bus click selects local native multipart geometry");
+                if(SupplyTracker.productionSnapshot(lineId,"",10,0,0,0).getInteger("sourceCount")!=3)return;
+                stage=7;
+            }else if(stage==7 && player.openContainer==player.inventoryContainer){
+                NBTTagCompound unbind=new NBTTagCompound();unbind.setString("action","unbind");
+                unbind.setTag("source",new SupplySource(SupplySource.AE_MACHINE,0,x,y,z,-1,"").write());
+                require(SupplyTracker.productionMutation(player,unbind).getBoolean("ok"),"unbind real interface");
+                require(SupplyTracker.productionSnapshot(lineId,"",10,0,0,0).getInteger("sourceCount")==0,"interface unbind removes both inherited buses");
                 NBTTagCompound delete=new NBTTagCompound();delete.setString("action","delete");delete.setString("lineId",lineId);
                 require(SupplyTracker.productionMutation(player,delete).getBoolean("ok"),"clean smoke metadata");
                 player.inventory.setInventorySlotContents(player.inventory.currentItem,previous);player.inventoryContainer.detectAndSendChanges();
-                world.setBlockToAir(x,y,z);complete=true;
-                System.out.println("PRODUCTION_TERMINAL_SMOKE_SUCCESS real item click, physical face, GUI query, row binding, close and air manager");
+                world.setBlockToAir(x+1,y,z);world.setBlockToAir(x,y,z-1);world.setBlockToAir(x,y,z);complete=true;
+                System.out.println("PRODUCTION_TERMINAL_SMOKE_SUCCESS real item click, physical face, GUI query, row binding, close and air manager; native two-in-one interface + item/fluid bus inheritance + direct bus click + parent unbind");
             }
         }catch(Throwable error){failure="PRODUCTION_TERMINAL_SMOKE_FAILED "+error;error.printStackTrace();}
     }
@@ -106,9 +133,35 @@ public final class ProductionTerminalWorldSmoke {
                 CommonProxy.productionTerminal.onItemRightClick(held,mc.theWorld,mc.thePlayer);clientSent=4;
             }else if(stage==5 && mc.currentScreen instanceof GuiProductionLines){
                 NBTTagCompound data=(NBTTagCompound)get(mc.currentScreen,"data");if(!data.getBoolean("canEdit"))return;
-                ((GuiProductionLines)mc.currentScreen).keyTyped('\0',1);clientSent=5;
+                ((GuiProductionLines)mc.currentScreen).keyTyped('\0',1);clientSent=5;lastCloseAt=System.nanoTime();
+            }else if(stage==6){
+                // Automated consecutive window opens must respect the real server's 250 ms item-use limit.
+                if(System.nanoTime()-lastCloseAt<600_000_000L)return;
+                if(!(mc.theWorld.getTileEntity(x+1,y,z) instanceof IPartHost)
+                    || !(((IPartHost)mc.theWorld.getTileEntity(x+1,y,z)).getPart(ForgeDirection.WEST) instanceof PartStorageBus))return;
+                net.minecraft.client.settings.KeyBinding.setKeyBindState(mc.gameSettings.keyBindSneak.getKeyCode(),true);
+                mc.thePlayer.movementInput.sneak=true;mc.thePlayer.setSneaking(true);
+                mc.getNetHandler().addToSendQueue(new C0BPacketEntityAction(mc.thePlayer,1));
+                require(mc.playerController.onPlayerRightClick(mc.thePlayer,mc.theWorld,held,x+1,y,z,4,Vec3.createVectorHelper(x+1,y+.5,z+.5)),"actual item right-click on native storage bus");clientSent=6;
+            }else if(stage==7 && mc.currentScreen instanceof GuiProductionBinding){
+                NBTTagCompound data=(NBTTagCompound)get(mc.currentScreen,"data");
+                if(!data.getCompoundTag("currentBinding").getBoolean("autoBound"))return;
+                require(lineId.equals(data.getCompoundTag("currentBinding").getString("lineId")),"client receives inherited line from server");
+                ((GuiProductionBinding)mc.currentScreen).keyTyped('\0',1);
+                net.minecraft.client.settings.KeyBinding.setKeyBindState(mc.gameSettings.keyBindSneak.getKeyCode(),false);
+                mc.thePlayer.movementInput.sneak=false;mc.thePlayer.setSneaking(false);
+                mc.getNetHandler().addToSendQueue(new C0BPacketEntityAction(mc.thePlayer,2));clientSent=7;
             }
         }catch(Throwable error){failure="PRODUCTION_TERMINAL_SMOKE_FAILED client "+error;error.printStackTrace();}
+    }
+    private void addStorageBus(int bx,int by,int bz,ForgeDirection face,boolean fluid){
+        require(world.isAirBlock(bx,by,bz),"native storage-bus fixture site empty");
+        net.minecraft.block.Block block=AEApi.instance().definitions().blocks().multiPart().maybeBlock().orNull();
+        require(block!=null && world.setBlock(bx,by,bz,block,0,3),"place real cable bus host");
+        IPartHost host=(IPartHost)world.getTileEntity(bx,by,bz);
+        require(host.addPart(AEApi.instance().definitions().parts().cableGlass().stack(appeng.api.util.AEColor.Transparent,1),ForgeDirection.UNKNOWN,player)!=null,"install native glass cable");
+        ItemStack bus=fluid?new ItemStack(com.glodblock.github.loader.ItemAndBlockHolder.FLUID_STORAGE_BUS):AEApi.instance().definitions().parts().storageBus().maybeStack(1).orNull();
+        require(bus!=null && host.addPart(bus,face,player)==face,"install native item/fluid storage bus facing interface");
     }
     private static Object get(Object object,String name)throws Exception{Field f=object.getClass().getDeclaredField(name);f.setAccessible(true);return f.get(object);}
     private static void require(boolean value,String reason){if(!value)throw new AssertionError(reason);}

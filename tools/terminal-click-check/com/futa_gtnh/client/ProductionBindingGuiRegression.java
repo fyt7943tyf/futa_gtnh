@@ -44,6 +44,10 @@ public final class ProductionBindingGuiRegression {
         check(get(gui,"pendingAction").equals(""),"read-only row clicks cannot issue mutations");
         check(rows<8 && (Integer)call(gui,"maxScroll")==8-rows,"minimum view can reach every server-page row by local scrolling");
         data.setBoolean("canEdit",true);call(gui,"updateButtons");
+        NBTTagCompound inherited=new NBTTagCompound();inherited.setString("lineId","line-0");inherited.setBoolean("autoBound",true);
+        data.setTag("currentBinding",inherited);call(gui,"updateButtons");
+        check(!button(buttons,2).enabled,"inherited bus unbinding is directed to its parent interface");
+        check(button(buttons,1).enabled,"inherited bus still permits creating a line for a manual override");
         gui.mouseClicked(left+15,top+90,0);check(get(gui,"pendingAction").equals("bind"),"admin row click enters binding request path");
         gui.actionPerformed(button(buttons,1));check((Boolean)get(gui,"editing"),"create opens name editor");bounds(gui,buttons);
         ((FutaSearchField)get(gui,"editor")).setText("",false);gui.keyTyped('\n',28);

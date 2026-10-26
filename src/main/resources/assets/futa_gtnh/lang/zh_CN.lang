@@ -760,3 +760,6 @@ futa_gtnh.productionTerminal.tip.bind=潜行右键 IO：选择产线并绑定，
 futa_gtnh.productionTerminal.tip.open=对空气右键：打开产线与 IO 流速管理
 futa_gtnh.productionTerminal.tip.permission=修改产线与绑定需要管理员权限（OP 4）
 futa_gtnh.productionTerminal.invalid=请潜行右键共享 IO、ME 接口或输入/输出总线的工作面
+
+futa_gtnh.productionTerminal.hintAuto=自动跟随接口；选择其他产线可手动覆盖
+futa_gtnh.production.autoBinding=自动跟随接口 (%s, %s, %s)；解绑请操作接口

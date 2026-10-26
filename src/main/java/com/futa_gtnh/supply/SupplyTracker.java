@@ -87,8 +87,14 @@ public final class SupplyTracker {
         if (!SharedStorageManager.isServerThread() || !loaded || !writable)
             return ProductionLines.result(false, "产线配置未就绪或读取失败，暂时不能修改", "");
         if (request == null) return ProductionLines.result(false, "缺少产线操作", "");
+        SupplySource selected = PRODUCTION.source(request, LEDGER);
         NBTTagCompound result = PRODUCTION.mutate(request, LEDGER);
         if (result.getBoolean("ok")) {
+            PRODUCTION.refreshRelated(selected, ProductionAttachments::scan);
+            if ("unbind".equals(request.getString("action")) && selected != null
+                && PRODUCTION.binding(selected)
+                    .getBoolean("autoBound"))
+                result.setString("message", "已取消手动绑定；总线恢复跟随相邻接口的产线");
             changed();
             save();
             result.setBoolean("saved", file == null || !dirty);
@@ -98,6 +104,7 @@ public final class SupplyTracker {
     }
 
     public static NBTTagCompound productionBindingSnapshot(ProductionTarget target, int minutes, int linePage) {
+        if (loaded && writable) PRODUCTION.refreshRelated(target.source, ProductionAttachments::scan);
         NBTTagCompound tag = productionSnapshot("", target.source.id(), minutes, linePage, 0, 0);
         tag.setTag("bindingTarget", target.source.write());
         tag.setString("targetName", target.name);
@@ -295,6 +302,7 @@ public final class SupplyTracker {
     public static void onServerTick() {
         if (!loaded || ++tick % 20 != 0) return;
         clock = Math.max(0, (System.nanoTime() - started) / 1_000_000L);
+        if (writable) PRODUCTION.refreshAttachments(ProductionAttachments::scan, 32);
         if (dirty && clock - changedAt >= 5000) save();
         if (!Config.enableSupplyTracking) return;
         long minute = minute();

@@ -48,7 +48,7 @@ public final class ProductionTarget {
         if (tile instanceof TileEntityIoNode && world.getBlock(x, y, z) instanceof BlockIoNode node)
             side = node.interactionFace(world, x, y, z, player, side);
         else if (tile instanceof IPartHost host) {
-            SelectedPart selected = host.selectPart(Vec3.createVectorHelper(x + hitX, y + hitY, z + hitZ));
+            SelectedPart selected = host.selectPart(Vec3.createVectorHelper(hitX, hitY, hitZ));
             if (selected == null || selected.facade != null
                 || selected.part == null
                 || selected.side == null

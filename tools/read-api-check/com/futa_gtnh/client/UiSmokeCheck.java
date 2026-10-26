@@ -122,7 +122,7 @@ public final class UiSmokeCheck {
             add("production_lines", () -> new GuiProductionLines(null, storage));
             add("public_me_crafting", () -> new GuiPublicMeCrafting(storage));
             add("production_lines_small", () -> new GuiProductionLines(null, storage));
-            for (String state : new String[] { "normal", "empty", "editor", "readonly", "small" }) {
+            for (String state : new String[] { "normal", "empty", "editor", "readonly", "small", "automatic_small" }) {
                 add("production_binding_" + state, () -> new GuiProductionBinding(
                     new com.futa_gtnh.inventory.ContainerProductionTerminal(mc.thePlayer, mc.theWorld, 0, 0, 0, 5, false)));
             }
@@ -207,10 +207,11 @@ public final class UiSmokeCheck {
     private static void bindingFixture(GuiScreen screen, Minecraft mc, String name) {
         NBTTagCompound data = new NBTTagCompound();
         data.setBoolean("canEdit", !name.endsWith("readonly"));data.setInteger("linePages", 2);
-        data.setString("targetName", "ME 流体输出总线");
+        data.setString("targetName", name.contains("automatic") ? "ME 流体存储总线" : "ME 流体输出总线");
         data.setTag("bindingTarget", new com.futa_gtnh.supply.SupplySource(
             com.futa_gtnh.supply.SupplySource.AE_MACHINE, 0, 120, 64, 220, 5, "").write());
         NBTTagCompound binding = new NBTTagCompound();binding.setString("lineId", "line-1");binding.setString("lineName", "聚乙烯产线");
+        binding.setBoolean("autoBound",name.contains("automatic"));
         data.setTag("currentBinding", binding);
         NBTTagList lines = new NBTTagList();
         String[] labels = { "电路装配线", "聚乙烯产线", "基础金属处理", "氯碱化工", "矿石处理", "电解水", "燃料供应", "备用产线" };

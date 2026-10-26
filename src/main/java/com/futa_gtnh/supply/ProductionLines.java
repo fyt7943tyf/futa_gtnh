@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
@@ -19,6 +20,9 @@ final class ProductionLines {
     static final int MAX_LINES = 256;
     private final Map<String, String> lines = new LinkedHashMap<>();
     private final Map<String, Binding> bindings = new LinkedHashMap<>();
+    // Derived membership is rebuilt from saved interface bindings, so the existing disk format stays intact.
+    private final Map<String, Binding> attached = new LinkedHashMap<>();
+    private int attachmentCursor;
 
     NBTTagCompound mutate(NBTTagCompound request, SupplyLedger ledger) {
         String action = request.getString("action");
@@ -48,21 +52,24 @@ final class ProductionLines {
             final String removed = lineId;
             bindings.values()
                 .removeIf(binding -> binding.lineId.equals(removed));
+            attached.values()
+                .removeIf(binding -> !bindings.containsKey(binding.parentId));
             return result(true, "已删除产线分组；设备及库存未改变", "");
         }
         if ("bind".equals(action) || "unbind".equals(action)) {
             String sourceId = request.getString("sourceId");
-            SupplySource source = ledger.source(sourceId);
-            Binding previous = bindings.get(sourceId);
-            if (source == null && previous != null) source = previous.source;
-            if (request.hasKey("source", 10)) {
-                source = SupplySource.read(request.getCompoundTag("source"));
-                sourceId = source.id();
-            }
+            SupplySource source = source(request, ledger);
+            if (source != null) sourceId = source.id();
             if (source == null || !source.hasPosition() || !source.player.isEmpty())
                 return result(false, "请选择已记录的设备或填写有效的维度、坐标、类型和工作面", lineId);
             if ("unbind".equals(action)) {
-                if (bindings.remove(sourceId) == null) return result(false, "该设备尚未绑定产线", lineId);
+                if (bindings.remove(sourceId) == null) return result(
+                    false,
+                    attached.containsKey(sourceId) ? "此总线自动跟随接口；请解绑接口，或为总线手动指定其他产线" : "该设备尚未绑定产线",
+                    lineId);
+                final String removed = sourceId;
+                attached.values()
+                    .removeIf(binding -> binding.parentId.equals(removed));
                 return result(true, "已解除设备绑定", lineId);
             }
             if (!bindings.containsKey(sourceId) && bindings.size() >= SupplyLedger.MAX_SOURCES)
@@ -71,6 +78,82 @@ final class ProductionLines {
             return result(true, "已绑定设备；同一设备只归属一条产线", lineId);
         }
         return result(false, "未知产线操作", lineId);
+    }
+
+    SupplySource source(NBTTagCompound request, SupplyLedger ledger) {
+        if (request.hasKey("source", 10)) return SupplySource.read(request.getCompoundTag("source"));
+        String id = request.getString("sourceId");
+        SupplySource source = ledger.source(id);
+        Binding member = bindings.get(id);
+        if (member == null) member = attached.get(id);
+        return source != null ? source : member == null ? null : member.source;
+    }
+
+    /** Bounded periodic repair also covers interfaces bound before this feature was installed. */
+    void refreshAttachments(Function<SupplySource, ProductionAttachments.Scan> scan, int budget) {
+        List<Binding> parents = new ArrayList<>();
+        for (Binding binding : bindings.values())
+            if (binding.source.kind == SupplySource.AE_MACHINE) parents.add(binding);
+        int count = Math.min(Math.max(0, budget), parents.size());
+        for (int i = 0; i < count; i++) {
+            if (attachmentCursor >= parents.size()) attachmentCursor = 0;
+            refreshAttachment(parents.get(attachmentCursor++), scan);
+        }
+    }
+
+    void refreshRelated(SupplySource source, Function<SupplySource, ProductionAttachments.Scan> scan) {
+        if (source == null || !source.hasPosition()) return;
+        if (source.kind == SupplySource.AE_MACHINE) {
+            Binding parent = bindings.get(source.id());
+            if (parent != null) refreshAttachment(parent, scan);
+        } else if (source.kind == SupplySource.AE_BUS && source.side >= 0) {
+            net.minecraftforge.common.util.ForgeDirection face = net.minecraftforge.common.util.ForgeDirection
+                .getOrientation(source.side);
+            for (int side : new int[] { -1, face.getOpposite()
+                .ordinal() }) {
+                SupplySource candidate = new SupplySource(
+                    SupplySource.AE_MACHINE,
+                    source.dim,
+                    source.x + face.offsetX,
+                    source.y + face.offsetY,
+                    source.z + face.offsetZ,
+                    side,
+                    "");
+                Binding parent = bindings.get(candidate.id());
+                if (parent != null) refreshAttachment(parent, scan);
+            }
+        }
+    }
+
+    private void refreshAttachment(Binding parent, Function<SupplySource, ProductionAttachments.Scan> scan) {
+        ProductionAttachments.Scan result;
+        try {
+            result = scan.apply(parent.source);
+        } catch (RuntimeException unavailable) {
+            return;
+        }
+        if (result == null) return; // An unloaded parent or neighbor must not erase known membership.
+        Map<String, SupplySource> present = new LinkedHashMap<>();
+        for (SupplySource source : result.buses) present.put(source.id(), source);
+        attached.values()
+            .removeIf(
+                binding -> binding.parentId.equals(parent.source.id()) && (!result.interfacePresent
+                    || result.checked.contains(binding.source.id()) && !present.containsKey(binding.source.id())));
+        for (SupplySource source : present.values()) {
+            if (!attached.containsKey(source.id()) && attached.size() >= SupplyLedger.MAX_SOURCES) continue;
+            attached.put(source.id(), new Binding(parent.lineId, source, parent.source.id()));
+        }
+    }
+
+    private Map<String, Binding> effectiveBindings() {
+        Map<String, Binding> effective = new LinkedHashMap<>(bindings);
+        for (Binding child : attached.values()) {
+            Binding parent = bindings.get(child.parentId);
+            if (parent != null && !effective.containsKey(child.source.id())
+                && effective.size() < SupplyLedger.MAX_SOURCES)
+                effective.put(child.source.id(), new Binding(parent.lineId, child.source, child.parentId));
+        }
+        return effective;
     }
 
     private String resolve(String id) {
@@ -98,6 +181,7 @@ final class ProductionLines {
         String lineId = resolve(requestedLine);
         boolean all = requestedLine == null || requestedLine.isEmpty();
         String selectedSource = sourceId == null ? "" : sourceId;
+        Map<String, Binding> effective = effectiveBindings();
         long observed = SupplyLedger.observedMillis(minutes, now);
         NBTTagCompound root = new NBTTagCompound();
         root.setInteger("minutes", SupplyLedger.window(minutes));
@@ -120,20 +204,20 @@ final class ProductionLines {
             tag.setString("id", line.getKey());
             tag.setString("name", line.getValue());
             int count = 0;
-            for (Binding binding : bindings.values()) if (binding.lineId.equals(line.getKey())) count++;
+            for (Binding binding : effective.values()) if (binding.lineId.equals(line.getKey())) count++;
             tag.setInteger("sourceCount", count);
             lineTags.appendTag(tag);
         }
         root.setTag("lines", lineTags);
 
         Map<String, Device> devices = new LinkedHashMap<>();
-        for (Binding binding : bindings.values()) {
+        for (Binding binding : effective.values()) {
             if (all || binding.lineId.equals(lineId))
                 devices.put(binding.source.id(), new Device(binding.source, binding.lineId));
         }
         for (SupplySource source : ledger.sources()) {
             if (!source.hasPosition()) continue;
-            Binding binding = bindings.get(source.id());
+            Binding binding = effective.get(source.id());
             String member = binding == null ? "" : binding.lineId;
             if (all || member.equals(lineId)) devices.putIfAbsent(source.id(), new Device(source, member));
         }
@@ -167,6 +251,8 @@ final class ProductionLines {
             tag.setString("name", SupplyTracker.name(device.source));
             tag.setString("lineId", device.lineId);
             tag.setString("lineName", lines.getOrDefault(device.lineId, ""));
+            Binding member = effective.get(device.source.id());
+            writeParent(tag, member);
             tag.setBoolean("active", device.active);
             sourceTags.appendTag(tag);
         }
@@ -198,10 +284,17 @@ final class ProductionLines {
 
     NBTTagCompound binding(SupplySource source) {
         NBTTagCompound tag = new NBTTagCompound();
-        Binding binding = bindings.get(source.id());
+        Binding binding = effectiveBindings().get(source.id());
         tag.setString("lineId", binding == null ? "" : binding.lineId);
         tag.setString("lineName", binding == null ? "" : lines.getOrDefault(binding.lineId, ""));
+        writeParent(tag, binding);
         return tag;
+    }
+
+    private void writeParent(NBTTagCompound tag, Binding binding) {
+        Binding parent = binding == null ? null : bindings.get(binding.parentId);
+        tag.setBoolean("autoBound", parent != null);
+        if (parent != null) tag.setTag("bindingParent", parent.source.write());
     }
 
     private static int end(int page, int size) {
@@ -260,21 +353,31 @@ final class ProductionLines {
         lines.putAll(nextLines);
         bindings.clear();
         bindings.putAll(nextBindings);
+        attached.clear();
+        attachmentCursor = 0;
     }
 
     void clear() {
         lines.clear();
         bindings.clear();
+        attached.clear();
+        attachmentCursor = 0;
     }
 
     private static final class Binding {
 
         final String lineId;
         final SupplySource source;
+        final String parentId;
 
         Binding(String lineId, SupplySource source) {
+            this(lineId, source, "");
+        }
+
+        Binding(String lineId, SupplySource source, String parentId) {
             this.lineId = lineId;
             this.source = source;
+            this.parentId = parentId;
         }
     }
 

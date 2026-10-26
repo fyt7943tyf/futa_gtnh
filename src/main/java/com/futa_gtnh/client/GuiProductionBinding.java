@@ -173,7 +173,9 @@ public final class GuiProductionBinding extends FutaGuiScreen {
             if (button.id == 1 || button.id == 2 || button.id == 5) button.enabled &= data.getBoolean("canEdit");
             if (button.id == 2) button.enabled &= !data.getCompoundTag("currentBinding")
                 .getString("lineId")
-                .isEmpty();
+                .isEmpty()
+                && !data.getCompoundTag("currentBinding")
+                    .getBoolean("autoBound");
             if (button.id == 3) button.enabled &= page > 0;
             if (button.id == 4) button.enabled &= page + 1 < data.getInteger("linePages");
         }
@@ -249,7 +251,14 @@ public final class GuiProductionBinding extends FutaGuiScreen {
         String currentName = data.getCompoundTag("currentBinding")
             .getString("lineName");
         text(tr("current", currentName.isEmpty() ? tr("unbound") : currentName), 8, 54, panelWidth - 16, 0xAADD99);
-        text(tr(data.getBoolean("canEdit") ? "hint" : "readOnly"), 8, 68, panelWidth - 16, 0xAAAAAA);
+        text(
+            tr(
+                data.getBoolean("canEdit") ? data.getCompoundTag("currentBinding")
+                    .getBoolean("autoBound") ? "hintAuto" : "hint" : "readOnly"),
+            8,
+            68,
+            panelWidth - 16,
+            0xAAAAAA);
         NBTTagList lines = data.getTagList("lines", 10);
         scroll = Math.min(scroll, maxScroll());
         if (lines.tagCount() == 0) text(tr("noLines"), 10, 92, panelWidth - 20, 0xCCCCCC);

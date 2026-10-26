@@ -763,3 +763,6 @@ futa_gtnh.productionTerminal.tip.bind=Sneak-right-click IO to bind, even before 
 futa_gtnh.productionTerminal.tip.open=Right-click air to view production lines and IO rates
 futa_gtnh.productionTerminal.tip.permission=Editing lines and bindings requires admin permission (OP 4)
 futa_gtnh.productionTerminal.invalid=Sneak-right-click shared IO, an ME interface or an import/export bus
+
+futa_gtnh.productionTerminal.hintAuto=Follows interface; select a line for a manual override
+futa_gtnh.production.autoBinding=Follows interface (%s, %s, %s); unbind at the interface
