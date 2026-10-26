@@ -25,6 +25,8 @@ import appeng.api.networking.security.ReshuffleActionSource;
 import appeng.api.storage.IMEInventory;
 import appeng.api.storage.data.IAEStack;
 import appeng.api.storage.data.IAEStackType;
+import appeng.api.util.DimensionalCoord;
+import appeng.me.helpers.IGridProxyable;
 import appeng.me.storage.StorageBusInventoryHandler;
 import appeng.parts.AEBasePart;
 import appeng.parts.misc.PartStorageBus;
@@ -72,7 +74,7 @@ public final class AeSupplyTracking {
                     source = new SupplySource(SupplySource.PLAYER, 0, 0, 0, 0, -1, player.getCommandSenderName());
             } else if (action instanceof MachineSource) {
                 IActionHost host = ((MachineSource) action).via;
-                source = hostSource(host);
+                source = sourceFor(host);
                 IGridNode node = host == null ? null : host.getActionableNode();
                 IGrid grid = node == null ? null : node.getGrid();
                 if (grid != null && mainGrid != null && grid != mainGrid) {
@@ -122,17 +124,29 @@ public final class AeSupplyTracking {
         return source;
     }
 
-    private static SupplySource hostSource(IActionHost host) {
+    public static SupplySource sourceFor(IActionHost host) {
         if (host instanceof AEBasePart) {
             AEBasePart part = (AEBasePart) host;
+            if (part.getHost() == null) return SupplySource.UNIDENTIFIED;
             return SupplySource.at(
                 host instanceof PartStorageBus ? SupplySource.AE_BUS : SupplySource.AE_MACHINE,
                 part.getHost()
                     .getTile(),
                 part.getSide());
         }
-        return host instanceof TileEntity ? SupplySource.at(SupplySource.AE_MACHINE, (TileEntity) host, null)
-            : SupplySource.UNIDENTIFIED;
+        if (host instanceof TileEntity tile) return SupplySource.at(SupplySource.AE_MACHINE, tile, null);
+        if (host instanceof IGridProxyable proxyable) {
+            DimensionalCoord location = proxyable.getLocation();
+            if (location != null) return new SupplySource(
+                SupplySource.AE_MACHINE,
+                location.getDimension(),
+                location.x,
+                location.y,
+                location.z,
+                -1,
+                "");
+        }
+        return SupplySource.UNIDENTIFIED;
     }
 
     public static void clear() {

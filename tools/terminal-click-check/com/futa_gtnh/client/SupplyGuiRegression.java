@@ -43,6 +43,7 @@ public final class SupplyGuiRegression {
         field(net.minecraft.world.World.class,"isRemote").setBoolean(mc.thePlayer.worldObj,true);
         connectionIsolation();
         ProductionGuiRegression.run(mc);
+        ProductionBindingGuiRegression.run(mc);
         PublicMeGuiRegression.run(mc);
         // No open window means request dispatch is intentionally disabled; all actual widget methods still run.
         for(int[] size:new int[][]{{320,240},{854,480}}) runSize(mc,size[0],size[1]);

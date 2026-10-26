@@ -83,6 +83,7 @@ public final class StorageActionHandler {
                 net.minecraft.nbt.NBTTagCompound ready = new net.minecraft.nbt.NBTTagCompound();
                 ready.setBoolean("ready", true);
                 ready.setBoolean("productionReady", true);
+                ready.setBoolean("productionTerminalReady", true);
                 ready.setBoolean("publicMeReady", true);
                 com.futa_gtnh.network.NetworkHandler.INSTANCE
                     .sendTo(new com.futa_gtnh.network.PacketSupplySnapshot(-2, 0, ready), player);

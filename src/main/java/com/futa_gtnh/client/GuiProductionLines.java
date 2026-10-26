@@ -6,6 +6,7 @@ import java.util.Locale;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
+import net.minecraft.inventory.Container;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraft.util.StatCollector;
@@ -26,7 +27,7 @@ import com.futa_gtnh.supply.SupplyTracker;
 public final class GuiProductionLines extends FutaGuiScreen {
 
     private final GuiSharedTerminal parent;
-    private final ContainerSharedTerminal container;
+    private final Container container;
     private NBTTagCompound data = new NBTTagCompound();
     private String lineId = "", lineName = "", sourceId = "", status = "";
     private String pendingAction = "", pendingName = "";
@@ -37,7 +38,7 @@ public final class GuiProductionLines extends FutaGuiScreen {
     private boolean allSources = true, resources, queryPending, mutationPending;
     private FutaSearchField editor;
 
-    public GuiProductionLines(GuiSharedTerminal parent, ContainerSharedTerminal container) {
+    public GuiProductionLines(GuiSharedTerminal parent, Container container) {
         this.parent = parent;
         this.container = container;
     }
@@ -255,6 +256,10 @@ public final class GuiProductionLines extends FutaGuiScreen {
     }
 
     private void query() {
+        if (container instanceof com.futa_gtnh.inventory.ContainerProductionTerminal && container.windowId == 0) {
+            queryPending = true;
+            return;
+        }
         if (mutationPending) {
             queryPending = true;
             return;
@@ -609,9 +614,14 @@ public final class GuiProductionLines extends FutaGuiScreen {
     }
 
     private void close() {
+        if (!(container instanceof ContainerSharedTerminal shared)) {
+            if (mc.thePlayer != null) mc.thePlayer.closeScreen();
+            else mc.displayGuiScreen(null);
+            return;
+        }
         mc.displayGuiScreen(
             mc.thePlayer != null && mc.thePlayer.openContainer == container
-                ? parent == null ? GuiSharedTerminal.create(container) : parent
+                ? parent == null ? GuiSharedTerminal.create(shared) : parent
                 : null);
     }
 

@@ -8,6 +8,7 @@ import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.network.INetHandler;
 
+import com.futa_gtnh.inventory.ContainerProductionTerminal;
 import com.futa_gtnh.supply.SupplyTracker;
 
 import cpw.mods.fml.common.network.ByteBufUtils;
@@ -123,24 +124,35 @@ public final class PacketProductionRequest implements IMessage {
             }
             Rate state = rate;
             ServerActions.enqueue(() -> {
-                if (!PacketSupplyRequest.authorized(player, message.window)
+                ContainerProductionTerminal terminal = player.openContainer instanceof ContainerProductionTerminal target
+                    && target.windowId == message.window ? target : null;
+                if (!(PacketSupplyRequest.authorized(player, message.window) || terminal != null)
                     || !player.openContainer.canInteractWith(player)
                     || state.connection != player.playerNetServerHandler
                     || !SupplyClients.supports(player.getUniqueID(), player.playerNetServerHandler)) return;
+                if (terminal != null && !terminal.accepts(message.session, message.mutation == null)) return;
                 synchronized (LAST) {
                     if (state.session == message.session && message.sequence <= state.sequence) return;
                     state.session = message.session;
                     state.sequence = message.sequence;
                 }
-                NBTTagCompound result = message.mutation == null ? null
-                    : SupplyTracker.productionMutation(player, message.mutation);
-                NBTTagCompound data = SupplyTracker.productionSnapshot(
-                    message.lineId,
-                    message.sourceId,
-                    message.minutes,
-                    message.linePage,
-                    message.sourcePage,
-                    message.resourcePage);
+                NBTTagCompound mutation = terminal == null ? message.mutation : terminal.constrain(message.mutation);
+                NBTTagCompound result = null;
+                if (message.mutation != null) {
+                    if (mutation == null) {
+                        result = new NBTTagCompound();
+                        result.setString("message", "此窗口仅支持绑定、解绑和新建产线");
+                    } else result = SupplyTracker.productionMutation(player, mutation);
+                }
+                NBTTagCompound data = terminal != null && terminal.bindingMode
+                    ? SupplyTracker.productionBindingSnapshot(terminal.target, message.minutes, message.linePage)
+                    : SupplyTracker.productionSnapshot(
+                        message.lineId,
+                        message.sourceId,
+                        message.minutes,
+                        message.linePage,
+                        message.sourcePage,
+                        message.resourcePage);
                 data.setBoolean(
                     "canEdit",
                     data.getBoolean("writable") && player.canCommandSenderUseCommand(4, "futalines"));

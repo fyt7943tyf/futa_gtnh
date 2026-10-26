@@ -50,10 +50,23 @@ public class GuiHandler implements IGuiHandler {
     /** 存储总线的配置界面：每个面一个 GUI id，id - base 就是板的面 ordinal。 */
     public static final int GUI_STORAGE_BUS_BASE = 9;
     public static final int GUI_STORAGE_BUS_COUNT = 6;
+    public static final int GUI_PRODUCTION_TERMINAL = 15;
+    public static final int GUI_PRODUCTION_BIND_BASE = 16;
 
     @Override
     public Object getServerGuiElement(int id, net.minecraft.entity.player.EntityPlayer player, World world, int x,
         int y, int z) {
+        if (id == GUI_PRODUCTION_TERMINAL || id >= GUI_PRODUCTION_BIND_BASE && id < GUI_PRODUCTION_BIND_BASE + 6) {
+            com.futa_gtnh.inventory.ContainerProductionTerminal container = new com.futa_gtnh.inventory.ContainerProductionTerminal(
+                player,
+                world,
+                x,
+                y,
+                z,
+                id - GUI_PRODUCTION_BIND_BASE,
+                id != GUI_PRODUCTION_TERMINAL);
+            return container.canInteractWith(player) ? container : null;
+        }
         if (id >= GUI_IO_NODE_BASE && id < GUI_IO_NODE_BASE + GUI_IO_NODE_COUNT) {
             TileEntityIoNode node = resolveIoNode(world, x, y, z);
             if (node == null) return null;
@@ -124,6 +137,21 @@ public class GuiHandler implements IGuiHandler {
     @Override
     public Object getClientGuiElement(int id, net.minecraft.entity.player.EntityPlayer player, World world, int x,
         int y, int z) {
+        if (id == GUI_PRODUCTION_TERMINAL || id >= GUI_PRODUCTION_BIND_BASE && id < GUI_PRODUCTION_BIND_BASE + 6) {
+            com.futa_gtnh.inventory.ContainerProductionTerminal container = new com.futa_gtnh.inventory.ContainerProductionTerminal(
+                player,
+                world,
+                x,
+                y,
+                z,
+                id - GUI_PRODUCTION_BIND_BASE,
+                id != GUI_PRODUCTION_TERMINAL);
+            // These metadata pages extend GuiScreen, so vanilla GuiContainer.initGui does not attach them.
+            // FML's OpenGuiHandler assigns the authoritative windowId to this container after opening the page.
+            player.openContainer = container;
+            return id == GUI_PRODUCTION_TERMINAL ? new com.futa_gtnh.client.GuiProductionLines(null, container)
+                : new com.futa_gtnh.client.GuiProductionBinding(container);
+        }
         if (id >= GUI_IO_NODE_BASE && id < GUI_IO_NODE_BASE + GUI_IO_NODE_COUNT) {
             TileEntityIoNode node = resolveIoNode(world, x, y, z);
             if (node == null) return null;

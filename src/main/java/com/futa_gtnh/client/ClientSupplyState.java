@@ -34,6 +34,7 @@ public final class ClientSupplyState {
         if (packet.data.getBoolean("ready")) {
             supported = true;
             ClientProductionState.ready(source, packet.data.getBoolean("productionReady"));
+            ClientProductionState.terminalReady(source, packet.data.getBoolean("productionTerminalReady"));
             ClientPublicMeState.ready(source, packet.data.getBoolean("publicMeReady"));
             return;
         }

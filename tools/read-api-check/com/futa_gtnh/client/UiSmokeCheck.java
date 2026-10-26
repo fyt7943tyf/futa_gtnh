@@ -52,6 +52,7 @@ public final class UiSmokeCheck {
         FMLCommonHandler.instance().bus().register(new UiSmokeCheck());
         com.futa_gtnh.me.PublicMeWorldSmoke.register();
         com.futa_gtnh.me.GtswnQuantumWorldSmoke.register();
+        ProductionTerminalWorldSmoke.register();
     }
 
     private void add(String name, Supplier<GuiScreen> factory) {
@@ -84,6 +85,8 @@ public final class UiSmokeCheck {
         if (!com.futa_gtnh.me.GtswnQuantumWorldSmoke.isComplete() && System.currentTimeMillis()-smokeWaitSince>240000L) {
             throw new AssertionError("GTSWN_QUANTUM_SMOKE_FAILED wall-clock timeout");
         }
+        if (ProductionTerminalWorldSmoke.failure()!=null) throw new AssertionError(ProductionTerminalWorldSmoke.failure());
+        if (!ProductionTerminalWorldSmoke.isComplete()) return;
         if (capturedAll) {
             if(com.futa_gtnh.me.PublicMeWorldSmoke.isComplete() && com.futa_gtnh.me.GtswnQuantumWorldSmoke.isComplete()) {
                 System.out.println("UI_SMOKE_SUCCESS " + screens.size() + " screens");mc.shutdown();
@@ -119,6 +122,10 @@ public final class UiSmokeCheck {
             add("production_lines", () -> new GuiProductionLines(null, storage));
             add("public_me_crafting", () -> new GuiPublicMeCrafting(storage));
             add("production_lines_small", () -> new GuiProductionLines(null, storage));
+            for (String state : new String[] { "normal", "empty", "editor", "readonly", "small" }) {
+                add("production_binding_" + state, () -> new GuiProductionBinding(
+                    new com.futa_gtnh.inventory.ContainerProductionTerminal(mc.thePlayer, mc.theWorld, 0, 0, 0, 5, false)));
+            }
             add("public_me_crafting_small", () -> new GuiPublicMeCrafting(storage));
             add("limits", () -> new GuiStorageLimits(storage));
             add("terminal_io", () -> new GuiTerminalIo(storage));
@@ -166,7 +173,7 @@ public final class UiSmokeCheck {
         }
         current = screens.get(index).get();
         mc.gameSettings.guiScale = names.get(index).endsWith("_small") ? 2 : 1;
-        if (current instanceof GuiProductionLines || current instanceof GuiPublicMeCrafting || current instanceof GuiSupplyMonitor) {
+        if (current instanceof GuiProductionLines || current instanceof GuiPublicMeCrafting || current instanceof GuiSupplyMonitor || current instanceof GuiProductionBinding) {
             // These are explicit client-only display fixtures. No plan, metadata edit or gameplay packet is sent.
             // Preserve the real local container lifecycle so updateScreen cannot immediately close the preview.
             ClientProductionState.ready(null, false);
@@ -183,7 +190,8 @@ public final class UiSmokeCheck {
                 mc.displayGuiScreen(current);
                 mc.thePlayer.openContainer = sharedContainer;
             });
-            if (current instanceof GuiProductionLines) productionFixture(current);
+            if (current instanceof GuiProductionBinding) bindingFixture(current, mc, names.get(index));
+            else if (current instanceof GuiProductionLines) productionFixture(current);
             else if(current instanceof GuiSupplyMonitor) supplyFixture(current,names.get(index).startsWith("supply_threshold"));
             else craftingFixture(current);
         } else mc.displayGuiScreen(current);
@@ -194,6 +202,33 @@ public final class UiSmokeCheck {
             java.lang.reflect.Field member=target.getClass().getDeclaredField(field);
             member.setAccessible(true);member.set(target,value);
         } catch(ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+
+    private static void bindingFixture(GuiScreen screen, Minecraft mc, String name) {
+        NBTTagCompound data = new NBTTagCompound();
+        data.setBoolean("canEdit", !name.endsWith("readonly"));data.setInteger("linePages", 2);
+        data.setString("targetName", "ME 流体输出总线");
+        data.setTag("bindingTarget", new com.futa_gtnh.supply.SupplySource(
+            com.futa_gtnh.supply.SupplySource.AE_MACHINE, 0, 120, 64, 220, 5, "").write());
+        NBTTagCompound binding = new NBTTagCompound();binding.setString("lineId", "line-1");binding.setString("lineName", "聚乙烯产线");
+        data.setTag("currentBinding", binding);
+        NBTTagList lines = new NBTTagList();
+        String[] labels = { "电路装配线", "聚乙烯产线", "基础金属处理", "氯碱化工", "矿石处理", "电解水", "燃料供应", "备用产线" };
+        if (!name.endsWith("empty")) for (int i = 0; i < labels.length; i++) {
+            NBTTagCompound row = new NBTTagCompound();row.setString("id", "line-" + i);row.setString("name", labels[i]);lines.appendTag(row);
+        }
+        data.setTag("lines", lines);
+        try {
+            java.lang.reflect.Field field=GuiProductionBinding.class.getDeclaredField("container");field.setAccessible(true);
+            mc.thePlayer.openContainer=(net.minecraft.inventory.Container)field.get(screen);
+            java.lang.reflect.Method apply=GuiProductionBinding.class.getDeclaredMethod("apply",NBTTagCompound.class);apply.setAccessible(true);apply.invoke(screen,data);
+            java.lang.reflect.Method buttons=GuiProductionBinding.class.getDeclaredMethod("updateButtons");buttons.setAccessible(true);buttons.invoke(screen);
+            if (name.endsWith("editor")) {
+                set(screen,"editing",true);
+                java.lang.reflect.Method editor=GuiProductionBinding.class.getDeclaredMethod("openEditor");editor.setAccessible(true);editor.invoke(screen);buttons.invoke(screen);
+            }
+        }catch(ReflectiveOperationException failure){throw new AssertionError(failure);}
+        set(screen,"lastQuery",System.currentTimeMillis()+60000L);set(screen,"status","");
     }
 
     private static NBTTagCompound resource(ItemStack stack,long stored,long craft,long missing) {

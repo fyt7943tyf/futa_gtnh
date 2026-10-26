@@ -94,6 +94,11 @@ public class CommonProxy {
     /** IC2 反应堆布局工具。没装 IC2 或配置关闭时为 null。 */
     public static com.futa_gtnh.item.ItemReactorLayoutTool reactorLayoutTool;
 
+    public static com.futa_gtnh.item.ItemProductionTerminal productionTerminal;
+
+    public void useProductionTerminal(com.futa_gtnh.network.PacketProductionTerminalUse packet,
+        net.minecraft.entity.player.EntityPlayer player) {}
+
     /**
      * AE2 共享背包存储元件（物品通道）。没装 AE2 或配置关闭时为 null。
      * 元件物品类不引用任何 AE 类型（实现隔离在 com.futa_gtnh.ae2 包的 handler 侧），
@@ -131,6 +136,8 @@ public class CommonProxy {
         registerLootMachine();
         registerSolarDescaler();
         registerReactorTool();
+        productionTerminal = new com.futa_gtnh.item.ItemProductionTerminal();
+        GameRegistry.registerItem(productionTerminal, com.futa_gtnh.item.ItemProductionTerminal.NAME);
         registerAe2Cells();
         registerRecipes();
 
@@ -461,6 +468,7 @@ public class CommonProxy {
      */
     private void registerRecipes() {
         if (!Config.enableRecipe) return;
+        GameRegistry.addShapelessRecipe(new ItemStack(productionTerminal), Items.book, Items.compass, Items.redstone);
         GameRegistry.addRecipe(
             new ShapedOreRecipe(
                 new ItemStack(blockPublicMeAccess),

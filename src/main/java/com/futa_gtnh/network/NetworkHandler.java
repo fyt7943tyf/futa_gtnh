@@ -117,5 +117,10 @@ public final class NetworkHandler {
             .registerMessage(PacketProductionSnapshot.Handler.class, PacketProductionSnapshot.class, 46, Side.CLIENT);
         INSTANCE.registerMessage(PacketPublicMeRequest.Handler.class, PacketPublicMeRequest.class, 47, Side.SERVER);
         INSTANCE.registerMessage(PacketPublicMeSnapshot.Handler.class, PacketPublicMeSnapshot.class, 48, Side.CLIENT);
+        INSTANCE.registerMessage(
+            PacketProductionTerminalUse.Handler.class,
+            PacketProductionTerminalUse.class,
+            49,
+            Side.SERVER);
     }
 }

@@ -196,6 +196,14 @@ final class ProductionLines {
         return page;
     }
 
+    NBTTagCompound binding(SupplySource source) {
+        NBTTagCompound tag = new NBTTagCompound();
+        Binding binding = bindings.get(source.id());
+        tag.setString("lineId", binding == null ? "" : binding.lineId);
+        tag.setString("lineName", binding == null ? "" : lines.getOrDefault(binding.lineId, ""));
+        return tag;
+    }
+
     private static int end(int page, int size) {
         return Math.min(size, (page + 1) * SupplyTracker.PAGE_SIZE);
     }

@@ -97,6 +97,14 @@ public final class SupplyTracker {
         return result;
     }
 
+    public static NBTTagCompound productionBindingSnapshot(ProductionTarget target, int minutes, int linePage) {
+        NBTTagCompound tag = productionSnapshot("", target.source.id(), minutes, linePage, 0, 0);
+        tag.setTag("bindingTarget", target.source.write());
+        tag.setString("targetName", target.name);
+        tag.setTag("currentBinding", PRODUCTION.binding(target.source));
+        return tag;
+    }
+
     /** Called after actual insertion into the neighboring inventory/tank, never for the provisional extraction. */
     public static void recordIo(Object key, TileEntity destination, ForgeDirection targetFace, long amount,
         boolean incoming) {

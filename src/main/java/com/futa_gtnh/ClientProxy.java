@@ -27,6 +27,17 @@ import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 public class ClientProxy extends CommonProxy {
 
     @Override
+    public void useProductionTerminal(com.futa_gtnh.network.PacketProductionTerminalUse packet,
+        net.minecraft.entity.player.EntityPlayer player) {
+        if (com.futa_gtnh.client.ClientProductionState.terminalSupported(
+            Minecraft.getMinecraft()
+                .getNetHandler()))
+            NetworkHandler.INSTANCE.sendToServer(packet);
+        else player.addChatMessage(
+            new net.minecraft.util.ChatComponentTranslation("futa_gtnh.productionTerminal.unsupported"));
+    }
+
+    @Override
     public void onSupplySnapshot(net.minecraft.network.INetHandler source,
         com.futa_gtnh.network.PacketSupplySnapshot packet) {
         com.futa_gtnh.client.ClientSupplyState.receive(source, packet);

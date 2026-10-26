@@ -273,16 +273,21 @@ public class BlockIoNode extends BlockContainer {
 
         TileEntity tile = world.getTileEntity(x, y, z);
         if (!(tile instanceof TileEntityIoNode)) return false;
-        TileEntityIoNode node = (TileEntityIoNode) tile;
 
+        int face = interactionFace(world, x, y, z, player, side);
+        player.openGui(FutaGtnhMod.instance, GuiHandler.GUI_IO_NODE_BASE + face, world, x, y, z);
+        return true;
+    }
+
+    public int interactionFace(World world, int x, int y, int z, EntityPlayer player, int side) {
+        TileEntityIoNode node = (TileEntityIoNode) world.getTileEntity(x, y, z);
         int face = traceComponent(world, x, y, z, player);
         if (face == MISS || face == -1) {
             // 没点到臂（点到核 / 视线已经移开了）：开第一个有连接的面；一面都没连就开右键点的那个面
             int connected = firstConnectedFace(node);
             face = connected >= 0 ? connected : (side >= 0 && side < 6 ? side : ForgeDirection.SOUTH.ordinal());
         }
-        player.openGui(FutaGtnhMod.instance, GuiHandler.GUI_IO_NODE_BASE + face, world, x, y, z);
-        return true;
+        return face;
     }
 
     private static int firstConnectedFace(TileEntityIoNode node) {

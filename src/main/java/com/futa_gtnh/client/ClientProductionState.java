@@ -11,6 +11,7 @@ public final class ClientProductionState {
 
     private static final AtomicLong GENERATIONS = new AtomicLong(System.nanoTime());
     private static volatile INetHandler supportedConnection, connection;
+    private static volatile INetHandler terminalConnection;
     private static volatile long session;
     private static volatile PacketProductionSnapshot response;
 
@@ -18,6 +19,15 @@ public final class ClientProductionState {
 
     public static void ready(INetHandler source, boolean supported) {
         supportedConnection = supported ? source : null;
+        terminalConnection = null;
+    }
+
+    public static void terminalReady(INetHandler source, boolean supported) {
+        terminalConnection = supported ? source : null;
+    }
+
+    public static boolean terminalSupported(INetHandler source) {
+        return source != null && source == terminalConnection;
     }
 
     public static boolean supported(INetHandler source) {
