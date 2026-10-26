@@ -1,6 +1,6 @@
 # GitHub 自动升版与正式发布
 
-正式发布统一使用 [Actions → 发版](https://github.com/fyt7943tyf/futa_gtnh/actions/workflows/release.yml)。
+正式发布统一使用 [Actions → 发版](https://github.com/fyt7943tyf/futa_gtnh/actions/workflows/release.yml)，支持网页手动触发和专用 Git/SSH 推送请求。
 普通代码推送只运行 CI，不修改版本号。迭代构建保持版本不变，确认本轮代码可以正式交付后再触发发版。
 
 ## 操作
@@ -16,11 +16,31 @@
 
 保持“仅验证”关闭即可正式发布。打开它时仍会计算新版本、构建、运行检查并保存验证产物，但不会提交版本、创建 tag 或发布 Release。
 
+### 使用 SSH 自动触发
+
+本机只需具备仓库的 Git 推送权限，远程 `origin` 可以使用 SSH 地址，无需 GitHub CLI 或 API 令牌。在仓库根目录执行：
+
+```sh
+python3 tools/release/release.py request --bump patch
+```
+
+命令检查当前分支是 `main`、工作区干净，拉取远端引用后确认本地与 `origin/main` 完全一致。随后生成含唯一请求 UUID、版本操作和布尔 `dry_run` 的 `.github/release-request.json`，仅提交该文件并普通推送到 `main`。该文件变更触发发版工作流；推送业务代码、文档或工作流本身不会触发发版。
+
+```sh
+python3 tools/release/release.py request --bump minor
+python3 tools/release/release.py request --bump retry
+python3 tools/release/release.py request --bump patch --dry-run
+```
+
+每次请求使用新 UUID，避免连续两次相同操作没有文件差异。推送失败时保留本地请求提交，修复 Git 连接后执行 `git push origin main` 即可，不必重复生成请求。工作流只接受完整字段、合法 UUID、明确版本操作和 JSON 布尔值；不会执行请求文件中的任意命令。
+
+两种触发入口共用相同的 `contents: write` 权限、发布并发锁、当前 main 校验、构建和原子写回，以及上传后的附件检查。`dry_run` 在入口解析后统一为明确的 `true` / `false` 输出，再决定是否记录版本和发布；请求文件本身不修改版本，也不创建 tag。
+
 不需要手动改 `version.txt` 或打 tag。计算新版本时取 `version.txt`、已有正式格式 tags 和 Release 所占版本的最大值，再按选择升版，避免草稿、失败遗留 tag 或已有版本造成冲突。
 
 ## 自动流程
 
-1. 确认从当前 main 启动，运行发版规则测试。
+1. 确认从当前 main 启动，运行发版规则测试并解析手动或 SSH 请求。
 2. 自动计算下一个版本，仅修改 Actions 临时工作区中的 `version.txt`。
 3. 执行 `gradlew build spotlessCheck`，包含项目现有检查。
 4. 校验主 JAR 中 `mcmod.info` 的 mod ID、版本号和入口类，确保 `version.txt`、文件名、tag 与 JAR 一致。

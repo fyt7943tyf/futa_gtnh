@@ -60,7 +60,7 @@ gradlew.bat build  rem 构建，产物在 build\libs\futa_gtnh-<版本>.jar
 | Workflow | 触发条件 | 作用 |
 |---|---|---|
 | [CI 构建](.github/workflows/ci.yml) | push / PR 到 `main` | 编译并执行 Spotless、Checkstyle 检查，构建产物保留 7 天 |
-| [发版](.github/workflows/release.yml) | Actions 页面手动触发，分支选择 `main` | 自动升版，构建检查通过后提交版本、创建 tag，附件核对完成后发布 Release |
+| [发版](.github/workflows/release.yml) | Actions 页面手动触发，或向 `main` 推送专用发版请求 | 自动升版，构建检查通过后提交版本、创建 tag，附件核对完成后发布 Release |
 
 ### 发一个新版本
 
@@ -68,6 +68,14 @@ gradlew.bat build  rem 构建，产物在 build\libs\futa_gtnh-<版本>.jar
 
 1. 提交代码并推送到 `main`，等待 CI 通过；不手动修改版本。
 2. 打开 [Actions → 发版](https://github.com/fyt7943tyf/futa_gtnh/actions/workflows/release.yml)，点击 **Run workflow**，选择 `main` 和默认的 `patch`，保持“仅验证”关闭。
+
+已配置 SSH 推送的开发环境也可以在仓库根目录直接执行：
+
+```sh
+python3 tools/release/release.py request --bump patch
+```
+
+命令要求 `main` 工作区干净且已与远端同步，只生成、提交并推送 `.github/release-request.json`，由其变更触发同一个发版工作流。无需本机 GitHub API 令牌，不手动修改版本或打 tag；普通代码推送不会触发发版。可使用 `--bump retry` 重试未发布版本，或添加 `--dry-run` 只验证。
 
 例如当前版本 `1.28.2`，工作流会自动准备 `1.28.3`，完成构建和检查后写回 `version.txt`、创建 `v1.28.3` 并发布带 JAR 的 Release。`minor` 和 `major` 分别增加次版本和主版本。
 

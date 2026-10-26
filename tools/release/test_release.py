@@ -8,11 +8,33 @@ import subprocess
 import unittest
 from unittest.mock import patch
 import zipfile
+import uuid
 
 import release as r
 
 
 class PureRules(unittest.TestCase):
+    def test_manual_request_preserves_inputs(self):
+        for operation in ('patch', 'minor', 'major', 'retry'):
+            for dry_run in ('true', 'false'):
+                self.assertEqual(r.resolve_request('workflow_dispatch', operation, dry_run),
+                                 {'bump': operation, 'dry_run': dry_run == 'true'})
+
+    def test_ssh_request_requires_explicit_valid_fields(self):
+        good = {'request_id': str(uuid.uuid4()), 'bump': 'patch', 'dry_run': False}
+        self.assertEqual(r.resolve_request('push', '', '', good), {'bump': 'patch', 'dry_run': False})
+        for document in [None, {}, dict(good, request_id='invalid'), dict(good, dry_run='false'),
+                         dict(good, bump='invalid'), dict(good, extra='unexpected')]:
+            with self.subTest(document=document), self.assertRaises(ValueError):
+                r.resolve_request('push', '', '', document)
+
+    def test_unsupported_events_cannot_release(self):
+        for event in ('pull_request', 'repository_dispatch', ''):
+            with self.subTest(event=event), self.assertRaises(ValueError):
+                r.resolve_request(event, 'patch', 'false')
+        with self.assertRaises(ValueError):
+            r.resolve_request('workflow_dispatch', 'patch', '')
+
     def test_default_patch(self):
         self.assertEqual(r.bump_version('1.28.2', ['1.28.2'], 'patch'), '1.28.3')
 
@@ -69,6 +91,7 @@ class ReleaseTransactions(unittest.TestCase):
         r.git('config', 'user.name', 'Release fixture')
         r.git('config', 'user.email', 'fixture@example.invalid')
         Path('version.txt').write_text('1.28.2\n', encoding='utf-8')
+        Path('.github').mkdir()
         r.git('add', 'version.txt')
         r.git('commit', '-m', 'fixture')
         r.git('tag', 'v1.28.2')
@@ -149,8 +172,9 @@ class ReleaseTransactions(unittest.TestCase):
     def test_failed_atomic_push_does_not_write_version_or_tag(self):
         plan = self.prepare_verified()
         hook = self.root / 'remote.git/hooks/pre-receive'
-        hook.write_text('#!/bin/sh\nwhile read old new ref; do\n'
-                        'case "$ref" in refs/tags/v1.28.3) exit 1;; esac\ndone\n', encoding='utf-8', newline='\n')
+        with hook.open('w', encoding='utf-8', newline='\n') as stream:
+            stream.write('#!/bin/sh\nwhile read old new ref; do\n'
+                         'case "$ref" in refs/tags/v1.28.3) exit 1;; esac\ndone\n')
         hook.chmod(0o755)
         with self.assertRaises(subprocess.CalledProcessError):
             r.record(self.state, plan)
@@ -191,6 +215,48 @@ class ReleaseTransactions(unittest.TestCase):
         r.prepare(self.state, 'patch')
         with self.assertRaises(ValueError):
             r.record(self.state, self.plan())
+
+    def test_ssh_request_pushes_only_request_without_bumping_version(self):
+        r.request_release('patch', False)
+        document = json.loads(r.git('--git-dir=../remote.git', 'show', 'main:.github/release-request.json'))
+        self.assertEqual(r.resolve_request('push', '', '', document), {'bump': 'patch', 'dry_run': False})
+        self.assertEqual(r.git('--git-dir=../remote.git', 'show', 'main:version.txt').strip(), '1.28.2')
+        self.assertIsNone(r.remote_tag('v1.28.3'))
+        self.assertEqual(r.git('diff', '--name-only', 'HEAD^', 'HEAD'), '.github/release-request.json')
+        previous = document['request_id']
+        r.request_release('retry', True)
+        document = json.loads(r.git('--git-dir=../remote.git', 'show', 'main:.github/release-request.json'))
+        self.assertNotEqual(document['request_id'], previous)
+        self.assertEqual(r.resolve_request('push', '', '', document), {'bump': 'retry', 'dry_run': True})
+
+    def test_ssh_request_rejects_wrong_branch_or_uncommitted_work(self):
+        Path('pending.txt').write_text('unfinished work', encoding='utf-8')
+        with self.assertRaises(ValueError):
+            r.request_release('patch', False)
+        Path('pending.txt').unlink()
+        r.git('checkout', '-b', 'feature')
+        with self.assertRaises(ValueError):
+            r.request_release('patch', False)
+        self.assertEqual(r.git('--git-dir=../remote.git', 'rev-parse', 'main'), self.sha)
+
+    def test_ssh_request_rejects_unpushed_code(self):
+        Path('code.txt').write_text('new code', encoding='utf-8')
+        r.git('add', 'code.txt')
+        r.git('commit', '-m', 'unpublished code')
+        with self.assertRaises(ValueError):
+            r.request_release('patch', False)
+        self.assertFalse(r.REQUEST_PATH.exists())
+
+    def test_ssh_push_failure_preserves_remote_and_local_request_commit(self):
+        hook = self.root / 'remote.git/hooks/pre-receive'
+        with hook.open('w', encoding='utf-8', newline='\n') as stream:
+            stream.write('#!/bin/sh\nexit 1\n')
+        hook.chmod(0o755)
+        with self.assertRaises(subprocess.CalledProcessError):
+            r.request_release('patch', False)
+        self.assertEqual(r.git('--git-dir=../remote.git', 'rev-parse', 'main'), self.sha)
+        self.assertEqual(r.git('log', '-1', '--format=%s'), '发版请求：patch')
+        self.assertEqual(Path('version.txt').read_text().strip(), '1.28.2')
 
     def test_publish_waits_for_complete_assets(self):
         plan = self.prepare_verified()

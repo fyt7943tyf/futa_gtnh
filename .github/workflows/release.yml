@@ -1,9 +1,12 @@
-# 正式发版统一从 Actions 手动触发；普通 push 仅运行 ci.yml。
+# 正式发版通过 Actions 手动触发或专用 SSH 推送请求；普通 push 仅运行 ci.yml。
 # 默认自动升补丁号。构建通过后才写回 version.txt，并原子推送 main + tag。
 name: 发版
-run-name: 发版 ${{ inputs.bump }}${{ inputs.dry_run && '（仅验证）' || '' }} · @${{ github.actor }}
+run-name: 发版 ${{ github.event_name == 'push' && 'SSH 请求' || inputs.bump }}${{ inputs.dry_run && '（仅验证）' || '' }} · @${{ github.actor }}
 
 on:
+  push:
+    branches: [main]
+    paths: ['.github/release-request.json']
   workflow_dispatch:
     inputs:
       bump:
@@ -44,10 +47,18 @@ jobs:
       - name: 运行发版规则测试
         run: python3 -m unittest discover -s tools/release -p 'test_*.py' -v
 
+      - name: 解析发版入口
+        id: request
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUEST_BUMP: ${{ inputs.bump }}
+          REQUEST_DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: python3 tools/release/release.py resolve
+
       - name: 计算并准备新版本
         id: plan
         env:
-          BUMP: ${{ inputs.bump }}
+          BUMP: ${{ steps.request.outputs.bump }}
         run: |
           git fetch origin main --tags
           python3 tools/release/release.py prepare --state "$RELEASE_STATE" --bump "$BUMP"
@@ -70,15 +81,15 @@ jobs:
         run: python3 tools/release/release.py verify --state "$RELEASE_STATE"
 
       - name: 提交新版本并原子推送 main 和 tag
-        if: inputs.dry_run == false
+        if: steps.request.outputs.dry_run == 'false'
         run: python3 tools/release/release.py record --state "$RELEASE_STATE"
 
       - name: 创建或恢复未发布草稿
-        if: inputs.dry_run == false
+        if: steps.request.outputs.dry_run == 'false'
         run: python3 tools/release/release.py draft --state "$RELEASE_STATE"
 
       - name: 上传附件到草稿
-        if: inputs.dry_run == false
+        if: steps.request.outputs.dry_run == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.plan.outputs.tag }}
@@ -87,11 +98,11 @@ jobs:
           fail_on_unmatched_files: true
 
       - name: 核对附件并正式发布
-        if: inputs.dry_run == false
+        if: steps.request.outputs.dry_run == 'false'
         run: python3 tools/release/release.py publish --state "$RELEASE_STATE"
 
       - name: 保存仅验证的构建产物
-        if: inputs.dry_run == true
+        if: steps.request.outputs.dry_run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: release-dry-run-${{ steps.plan.outputs.version }}-${{ github.run_number }}

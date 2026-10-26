@@ -11,6 +11,54 @@ import sys
 import urllib.error
 import urllib.request
 import zipfile
+import uuid
+
+
+REQUEST_PATH = Path('.github/release-request.json')
+OPERATIONS = ('patch', 'minor', 'major', 'retry')
+
+
+def resolve_request(event, manual_bump, manual_dry_run, document=None):
+    if event == 'workflow_dispatch':
+        if manual_dry_run not in ('true', 'false'):
+            raise ValueError('Manual dry_run must be true or false')
+        operation, dry_run = manual_bump, manual_dry_run == 'true'
+    elif event == 'push':
+        if not isinstance(document, dict) or set(document) != {'request_id', 'bump', 'dry_run'}:
+            raise ValueError('Invalid SSH release request fields')
+        request_id = document['request_id']
+        if not isinstance(request_id, str) or str(uuid.UUID(request_id)) != request_id:
+            raise ValueError('SSH request_id must be a canonical UUID')
+        operation, dry_run = document['bump'], document['dry_run']
+        if type(dry_run) is not bool:
+            raise ValueError('SSH dry_run must be a JSON boolean')
+    else:
+        raise ValueError('Only manual dispatch and explicit main push requests can release')
+    if operation not in OPERATIONS:
+        raise ValueError('Release operation must be patch, minor, major or retry')
+    return {'bump': operation, 'dry_run': dry_run}
+
+
+def request_release(operation, dry_run):
+    if operation not in OPERATIONS or type(dry_run) is not bool:
+        raise ValueError('Invalid release request')
+    if Path(git('rev-parse', '--show-toplevel')).resolve() != Path.cwd().resolve():
+        raise ValueError('Run the request command from the repository root')
+    if git('branch', '--show-current') != 'main':
+        raise ValueError('SSH release requests must be made on main')
+    if git('status', '--porcelain'):
+        raise ValueError('Commit or preserve pending changes before requesting a release')
+    git('fetch', 'origin', 'main')
+    if git('rev-parse', 'HEAD') != git('rev-parse', 'origin/main'):
+        raise ValueError('Push/pull main first; a release request must start from current origin/main')
+    document = {'request_id': str(uuid.uuid4()), 'bump': operation, 'dry_run': dry_run}
+    resolve_request('push', '', '', document)
+    with REQUEST_PATH.open('w', encoding='utf-8', newline='\n') as stream:
+        stream.write(json.dumps(document, indent=2) + '\n')
+    git('add', '--', str(REQUEST_PATH))
+    git('commit', '-m', f'发版请求：{operation}' + ('（仅验证）' if dry_run else ''))
+    git('push', 'origin', 'HEAD:refs/heads/main')
+    print('SSH release request pushed:', git('rev-parse', 'HEAD'), document['request_id'])
 
 
 def version(value):
@@ -246,10 +294,24 @@ def publish(state, plan):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['prepare', 'verify', 'record', 'draft', 'publish'])
-    parser.add_argument('--state', required=True, type=Path)
-    parser.add_argument('--bump', choices=['patch', 'minor', 'major', 'retry'], default='patch')
+    parser.add_argument('command', choices=['request', 'resolve', 'prepare', 'verify', 'record', 'draft', 'publish'])
+    parser.add_argument('--state', type=Path)
+    parser.add_argument('--bump', choices=OPERATIONS, default='patch')
+    parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
+    if args.command == 'request':
+        request_release(args.bump, args.dry_run)
+        return
+    if args.command == 'resolve':
+        event = os.environ.get('EVENT_NAME')
+        document = json.loads(REQUEST_PATH.read_text(encoding='utf-8')) if event == 'push' else None
+        request = resolve_request(event, os.environ.get('REQUEST_BUMP', ''),
+                                  os.environ.get('REQUEST_DRY_RUN', 'false'), document)
+        output(bump=request['bump'], dry_run=str(request['dry_run']).lower())
+        print('Release request:', request['bump'], 'dry_run=' + str(request['dry_run']).lower())
+        return
+    if args.state is None:
+        parser.error('--state is required for the release build/publish commands')
     if args.command == 'prepare':
         prepare(args.state, args.bump)
     else:
