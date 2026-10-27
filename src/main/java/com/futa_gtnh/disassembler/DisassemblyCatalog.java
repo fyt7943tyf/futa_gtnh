@@ -85,7 +85,7 @@ public final class DisassemblyCatalog {
                 }, 3, 3);
                 int slot = 0;
                 for (Object ingredient : inputs) {
-                    ItemStack stack = uniqueIngredient(ingredient);
+                    ItemStack stack = DisassemblyIngredients.resolve(ingredient);
                     if (stack != null) {
                         stack.stackSize = 1;
                         items.add(stack);
@@ -131,7 +131,7 @@ public final class DisassemblyCatalog {
                 builder.add(
                     new DisassemblyRecipe(
                         output,
-                        Arrays.asList(recipe.mInputs),
+                        normalized(recipe.mInputs),
                         Arrays.asList(recipe.mFluidInputs),
                         "assembler"));
             } catch (IllegalArgumentException | ArithmeticException exception) {
@@ -147,9 +147,9 @@ public final class DisassemblyCatalog {
                     if (recipe.mOreDictAlt != null && i < recipe.mOreDictAlt.length
                         && recipe.mOreDictAlt[i] != null
                         && recipe.mOreDictAlt[i].length > 0) {
-                        input = uniqueIngredient(Arrays.asList(recipe.mOreDictAlt[i]));
+                        input = DisassemblyIngredients.resolve(Arrays.asList(recipe.mOreDictAlt[i]));
                     }
-                    items.add(input);
+                    items.add(DisassemblyIngredients.normalize(input));
                 }
                 builder.add(
                     new DisassemblyRecipe(recipe.mOutput, items, Arrays.asList(recipe.mFluidInputs), "assembly line"));
@@ -186,8 +186,17 @@ public final class DisassemblyCatalog {
         builder.report.add(1, "Parsed candidates by source: " + builder.candidateSources);
         builder.report.add(2, "Accepted representative routes by source: " + acceptedSources);
         builder.report.add(3, "Skipped routes by source: " + builder.skippedSources);
-        for (DisassemblyRecipe recipe : recipes.values())
-            builder.report.add("ACCEPT " + recipe.input + " x" + recipe.inputCount + " <- " + recipe.source);
+        for (DisassemblyRecipe recipe : recipes.values()) builder.report.add(
+            "ACCEPT " + recipe.input
+                + " x"
+                + recipe.inputCount
+                + " <- "
+                + recipe.source
+                + "; items="
+                + recipe.itemOutputs()
+                    .stream()
+                    .map(stack -> ItemKey.of(stack) + " x" + stack.stackSize)
+                    .collect(java.util.stream.Collectors.joining(", ")));
         try {
             Files.write(reportFile.toPath(), builder.report, StandardCharsets.UTF_8);
         } catch (Exception exception) {
@@ -195,22 +204,10 @@ public final class DisassemblyCatalog {
         }
     }
 
-    /** Distinct ore alternatives have no production history. Do not invent a refund for them. */
-    public static ItemStack uniqueIngredient(Object ingredient) {
-        if (ingredient == null) return null;
-        if (ingredient instanceof ItemStack) return ((ItemStack) ingredient).copy();
-        if (!(ingredient instanceof List<?>)) throw new IllegalArgumentException("Unknown ingredient");
-        ItemStack result = null;
-        for (Object option : (List<?>) ingredient) {
-            if (!(option instanceof ItemStack)) throw new IllegalArgumentException("Unknown alternative");
-            ItemStack stack = (ItemStack) option;
-            if (result == null) result = stack;
-            else if (!ItemKey.of(result)
-                .equals(ItemKey.of(stack)) || result.stackSize != stack.stackSize)
-                throw new IllegalArgumentException("Conflicting ore alternatives");
-        }
-        if (result == null) throw new IllegalArgumentException("Empty ore alternatives");
-        return result.copy();
+    private static List<ItemStack> normalized(ItemStack[] inputs) {
+        List<ItemStack> result = new ArrayList<>();
+        for (ItemStack input : inputs) result.add(DisassemblyIngredients.normalize(input));
+        return result;
     }
 
     public static final class Builder {

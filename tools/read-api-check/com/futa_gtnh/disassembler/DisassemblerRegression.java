@@ -30,6 +30,7 @@ import net.minecraft.util.IChatComponent;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.common.util.ForgeDirection;
+import net.minecraftforge.oredict.OreDictionary;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.exchange.DeltaRecorder;
@@ -42,15 +43,24 @@ import cpw.mods.fml.common.Loader;
 import gregtech.api.interfaces.ITexture;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.enums.MetaTileEntityIDs;
+import gregtech.api.enums.ItemList;
+import gregtech.api.enums.Materials;
+import gregtech.api.enums.OrePrefixes;
+import gregtech.api.util.GTOreDictUnificator;
 
 public final class DisassemblerRegression {
     private static int assertions;
     public static void main(String[] args) throws Exception {
         Loader.injectData(new Object[] { "7", "99", "40", "1614", "1.7.10", "9.05", new File("."), Collections.emptyList() });
         Bootstrap.func_151354_b();
+        net.minecraft.launchwrapper.Launch.blackboard.put("fml.deobfuscatedEnvironment", true);
+        java.lang.reflect.Field logSide = cpw.mods.fml.relauncher.FMLRelaunchLog.class.getDeclaredField("side");
+        logSide.setAccessible(true);
+        logSide.set(null, cpw.mods.fml.relauncher.Side.SERVER);
         batchesAndIdentity();
         capacityAndAtomicProcessing();
         conflicts();
+        oreRefunds();
         machineInterfaces();
         mainInventoryTransfer();
         System.out.println("Disassembler/terminal regression: " + assertions + " assertions passed");
@@ -135,7 +145,63 @@ public final class DisassemblerRegression {
         builder.add(b); check(builder.finish().isEmpty(), "conflicting routes skipped");
         builder = new DisassemblyCatalog.Builder(); builder.add(a); builder.block(new ItemStack(Items.diamond), "custom", "unknown route");
         check(builder.finish().isEmpty(), "unsupported known output blocks unsafe refund");
-        expectRejected(() -> DisassemblyCatalog.uniqueIngredient(Arrays.asList(new ItemStack(Items.iron_ingot), new ItemStack(Items.gold_ingot))), "distinct ore alternatives skipped");
+        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(new ItemStack(Items.iron_ingot), new ItemStack(Items.gold_ingot))), "unrelated alternatives skipped");
+    }
+
+    private static void oreRefunds() {
+        Item standard = new Item();
+        Item alternate = new Item();
+        Item outside = new Item();
+        Item.itemRegistry.addObject(31000, "futa_test:plate_standard", standard);
+        Item.itemRegistry.addObject(31001, "futa_test:plate_alternate", alternate);
+        Item.itemRegistry.addObject(31002, "futa_test:outside", outside);
+        ItemStack preferred = new ItemStack(standard, 3);
+        ItemStack other = new ItemStack(alternate, 3);
+        GTOreDictUnificator.set(OrePrefixes.plate, Materials.Iron, preferred, true, false);
+        GTOreDictUnificator.registerOre(OrePrefixes.plate, Materials.Iron, other);
+        GTOreDictUnificator.addAssociation(OrePrefixes.plate, Materials.Iron, other);
+        ItemStack resolved = DisassemblyIngredients.resolve(Arrays.asList(other, preferred));
+        check(resolved.getItem() == standard && resolved.stackSize == 3, "GT material representative and count");
+        check(ItemKey.of(resolved).equals(ItemKey.of(DisassemblyIngredients.resolve(Arrays.asList(preferred, other)))), "ore refund independent of alternative order");
+        check(preferred.stackSize == 3 && other.stackSize == 3 && resolved != preferred, "recipe alternatives never mutated");
+        check(DisassemblyIngredients.resolve(other).getItem() == standard, "fixed material matches ore route");
+        check(DisassemblyIngredients.resolve(new ItemStack(alternate, 0)).stackSize == 0, "nonconsumable quantity preserved");
+        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, new ItemStack(alternate, 2))), "alternative quantities cannot be rounded");
+        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, new ItemStack(outside, 3))), "no arbitrary ore fallback");
+        NBTTagCompound nbt = new NBTTagCompound(); nbt.setString("contents", "valuable");
+        ItemStack stateful = other.copy(); stateful.setTagCompound(nbt);
+        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, stateful)), "stateful alternatives not erased");
+        check(ItemKey.of(DisassemblyIngredients.resolve(stateful)).equals(ItemKey.of(stateful)), "fixed NBT untouched");
+        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, new ItemStack(alternate, 3, OreDictionary.WILDCARD_VALUE))), "wildcard alternatives not guessed");
+        GTOreDictUnificator.getName2StackMap().put("plateIron", new ItemStack(outside));
+        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, other)), "standard outside allowed alternatives rejected");
+        GTOreDictUnificator.getName2StackMap().put("plateIron", preferred.copy());
+        ItemStack basic = new ItemStack(Items.comparator);
+        ItemStack advanced = new ItemStack(Items.repeater);
+        String circuitOre = OrePrefixes.circuit.get(Materials.LV).toString();
+        OreDictionary.registerOre(circuitOre, basic);
+        OreDictionary.registerOre(circuitOre, advanced);
+        ItemList.Circuit_Basic.set(basic);
+        // Even a different GT unification preference must not turn a basic circuit refund into a costly alternative.
+        GTOreDictUnificator.getName2StackMap().put(circuitOre, advanced);
+        check(DisassemblyIngredients.resolve(Arrays.asList(advanced, basic)).getItem() == Items.comparator, "LV circuits refund the declared basic circuit");
+        check(DisassemblyIngredients.resolve(Arrays.asList(basic, advanced)).getItem() == Items.comparator, "circuit refund order independent");
+        DisassemblyRecipe a = recipe(new ItemStack(Items.diamond), Arrays.asList(DisassemblyIngredients.resolve(other)), Collections.<FluidStack>emptyList());
+        DisassemblyRecipe b = recipe(new ItemStack(Items.diamond), Arrays.asList(DisassemblyIngredients.resolve(Arrays.asList(other, preferred))), Collections.<FluidStack>emptyList());
+        DisassemblyCatalog.Builder builder = new DisassemblyCatalog.Builder(); builder.add(a); builder.add(b);
+        check(builder.finish().size() == 1, "normalized crafting and assembler routes agree");
+        builder.add(recipe(new ItemStack(Items.diamond), Arrays.asList(new ItemStack(outside, 3)), Collections.<FluidStack>emptyList()));
+        check(builder.finish().isEmpty(), "real material conflicts still rejected");
+        DisassemblyBuffer buffer = new DisassemblyBuffer(36, 8, 64000);
+        buffer.inventory[0] = new ItemStack(Items.diamond);
+        check(buffer.start(a), "normalized recipe starts");
+        for (int i = 0; i < 40; i++) buffer.advance(true);
+        check(buffer.inventory[2].getItem() == standard && buffer.inventory[2].stackSize == 3 && !buffer.hasTask(), "normalized refund settles once after two seconds");
+        OreDictionary.registerOre("plateGold", preferred);
+        OreDictionary.registerOre("plateGold", other);
+        GTOreDictUnificator.getName2StackMap().put("plateGold", other.copy());
+        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(preferred, other)), "conflicting shared ore standards rejected");
+        expectRejected(() -> DisassemblyIngredients.resolve(Arrays.asList(other, preferred)), "ambiguous standards rejected in either order");
     }
 
     private static void machineInterfaces() throws Exception {

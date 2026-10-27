@@ -22,6 +22,9 @@ public final class ReadApiCheckLauncher {
             Launch.classLoader = loader;
             Launch.blackboard = new HashMap<>();
             Thread.currentThread().setContextClassLoader(loader);
+            if (args.length > 0 && args[0].equals("com.futa_gtnh.client.BookmarkWithdrawalRegression")) {
+                loader.registerTransformer("com.futa_gtnh.shared.BookmarkCheckAccessTransformer");
+            }
             try {
                 Class.forName(args.length == 0 ? "com.futa_gtnh.shared.SharedStorageReadApiRegression" : args[0], true, loader)
                     .getMethod("main", String[].class)

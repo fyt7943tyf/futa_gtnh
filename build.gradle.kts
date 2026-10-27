@@ -45,10 +45,33 @@ tasks.register<JavaExec>("verifySharedStorageReadApi") {
 }
 
 tasks.named("check") {
+    dependsOn(tasks.named("verifyTerminalIo"))
     dependsOn(tasks.named("verifySharedStorageReadApi"))
     dependsOn(tasks.named("verifyDisassembler"))
     dependsOn(tasks.named("verifyTerminalClicks"))
+    dependsOn(tasks.named("verifyBookmarkWithdrawal"))
     dependsOn(tasks.named("verifyDisassemblerUi"))
+}
+
+val compileTerminalIoChecks = tasks.register<JavaCompile>("compileTerminalIoChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/terminal-io-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output +
+        sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("terminal-io-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifyTerminalIo") {
+    group = "verification"
+    description = "Checks terminal IO, AE2 ore card parity, legacy filter migration and quantity conservation"
+    dependsOn(compileTerminalIoChecks)
+    mainClass.set("com.futa_gtnh.block.TerminalIoCheckLauncher")
+    classpath = files(compileTerminalIoChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 
 // Test-only input/GL fixtures exercise real GUI events and NEI foregrounds without a display or native input.
@@ -79,6 +102,18 @@ tasks.register<JavaExec>("verifyTerminalClicks") {
     dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
     mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
     args("com.futa_gtnh.client.TerminalClickRegression")
+    classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
+        files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+        files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
+tasks.register<JavaExec>("verifyBookmarkWithdrawal") {
+    group = "verification"
+    description = "Checks real NEI bookmark quantities, full warehouse access, batching and inventory conservation"
+    dependsOn(compileTerminalClickChecks, extractTerminalClickLwjgl, compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.client.BookmarkWithdrawalRegression")
     classpath = files(compileTerminalClickChecks.flatMap { it.destinationDirectory }) +
         files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
         files(compileReadApiChecks.flatMap { it.destinationDirectory }) +

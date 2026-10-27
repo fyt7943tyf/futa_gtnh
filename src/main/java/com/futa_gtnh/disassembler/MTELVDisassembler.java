@@ -55,6 +55,7 @@ public final class MTELVDisassembler extends MTETieredMachineBlock {
             1,
             0,
             new String[] { "One production step per batch; 32 EU/t, 1 A, 2 seconds",
+                "Ore ingredients refund standard GT materials and tier circuits",
                 "Crafting, assembler and assembly line; conflicting routes are skipped",
                 "Paged item outputs and independent output tanks; rear extraction" });
         rebuildHandler();

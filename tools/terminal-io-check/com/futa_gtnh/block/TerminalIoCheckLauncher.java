@@ -22,6 +22,7 @@ public final class TerminalIoCheckLauncher {
             Launch.classLoader = loader;
             Launch.blackboard = new HashMap<>();
             Thread.currentThread().setContextClassLoader(loader);
+            loader.registerTransformer("cpw.mods.fml.common.asm.transformers.EventSubscriptionTransformer");
             try {
                 Class.forName("com.futa_gtnh.block.TerminalIoRegression", true, loader)
                     .getMethod("main", String[].class)

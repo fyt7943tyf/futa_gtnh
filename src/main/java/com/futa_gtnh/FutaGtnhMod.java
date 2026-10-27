@@ -41,7 +41,7 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     version = Tags.VERSION,
     acceptedMinecraftVersions = "[1.7.10]",
     // 存储层的键、流体显示物品、流体灌装都直接用 GT 的 API（GTUtility），
-    // 所以 GT 是硬依赖；NEI 只是可选联动。
+    // 所以 GT 是硬依赖；矿辞输出直接使用 AE2 矿典过滤卡实现，AE2 也是硬依赖。
     // lwjgl3ify 也是硬依赖：本模组的目标运行时是「GTNH（LWJGL3 + 新 Java）」，
     // 搜索框的中文输入法支持建立它的 GuiTextField mixin 之上（能力探测见
     // client/ImeCompat.java，老版本会自动退回旧路径，不会崩）。
@@ -51,7 +51,7 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // after:enhancedlootbags / after:vendingmachine 同理：自选抽奖机要复用
     // ELB 已加载完的战利品组配置；VendingMachine 的团队钱包数据也是初始化好
     // 之后再读更稳妥。都是软依赖，缺席时只是不注册/不可用。
-    dependencies = "required-after:gregtech;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine")
+    dependencies = "required-after:gregtech;required-after:appliedenergistics2;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";

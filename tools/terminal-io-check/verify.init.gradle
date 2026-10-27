@@ -1,6 +1,7 @@
 // Run with gradlew -I tools/terminal-io-check/verify.init.gradle verifyTerminalIo --no-configuration-cache.
 gradle.projectsEvaluated {
     def project = gradle.rootProject
+    if (project.tasks.findByName('verifyTerminalIo') != null) return
     def main = project.sourceSets.main
     def compileChecks = project.tasks.register('compileTerminalIoChecks', JavaCompile) {
         dependsOn(project.tasks.named('classes'))
