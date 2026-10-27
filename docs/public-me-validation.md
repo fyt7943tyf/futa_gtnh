@@ -128,6 +128,22 @@ GT ME 设备使用基座坐标作为整机身份；此次未在完整 GT 产线�
 
 完整 `spotlessApply build spotlessCheck`、公共 ME 与跨维度普通盘、产线终端、双总线流速回归及 26 个真实 GL 页面通过。新世界不创建旧共享库存文件。以上测试不读取或修改生产服务器存档；初始迁移备份和验收存档均在独立开发目录。
 
+## 产线查询优化（2026-10-27，1.34.1）
+
+保留当前按 IO 记录、随当前绑定汇总的语义；历史不按发生时产线固化。新增固定 1/10/60 分钟累计、来源反向索引、有上限的 1 秒一致性快照、纯元数据绑定查询及有效成员缓存。库存、保存格式和网络包编号未改变。
+
+`verifySupplyTracking` 的查询优化对拍通过 103306 项断言，使用冻结的 1.34.0 代码比较实际查询 NBT，包含分钟过期、数值饱和恢复、NBT、排序和分页、容量、索引、改绑、自动继承、快照时效及返回 NBT 隔离。完整构建和 Spotless、30 项发版控制器测试通过。
+
+```sh
+./gradlew benchmarkProductionQueries --offline --console=plain
+./gradlew runClient17 -PuiSmoke \
+  -PrunClientWorkingDirectory=run/query-optimization-client --offline --console=plain
+```
+
+满额测试使用 16384 个组合、4096 个来源/资源、填满的 60 分钟窗口，各预热 150 次并测量 400 次查询。单产线冷查询 P50 从 5.47 ms 降为 0.14 ms，单 IO 冷查询从 6.44 ms 降为 0.38 ms，全量缓存翻页从 6.79 ms 降为 0.25 ms；全量冷查询从 6.51 ms 降为 5.29 ms。记录与过期有额外成本，完整结果、方法与适用边界见 [性能报告](1.34.1-产线查询性能对比.md)。这些不是生产服 TPS 数据。
+
+真实客户端与集成服务端通过 `PUBLIC_ME_SMOKE_SUCCESS`、`PRODUCTION_TERMINAL_SMOKE_SUCCESS`、`PUBLIC_ME_SUBNET_FLOW_SMOKE_SUCCESS`、`NATIVE_ME_MIGRATION_SMOKE_SUCCESS` 和 `UI_SMOKE_SUCCESS 26 screens`。实际普通盘与自动扩容媒体取料、双总线自动归属、库存归零后原料明细和产线汇总继续一致；旧数据升级、数量/NBT 及保存重挂载检查通过。界面截图部分仍为明确的展示夹具。
+
 ## 尚未替代的验收
 
 这不是对生产服全量旧存档、长时间运行、所有第三方机器和实际复杂合成产线的验收。原生合成计划器与 CPU 提交接口已接入，但截图中的合成计划是展示夹具，不代表一次真实复杂合成任务的完成证明。升级生产服前使用完整世界副本核对库存、机器区块、既有 CPU 任务和产线；迁移与恢复边界见 [迁移说明](public-me-migration.md)。

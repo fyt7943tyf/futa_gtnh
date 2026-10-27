@@ -165,6 +165,19 @@ tasks.register<JavaExec>("verifySupplyTracking") {
         files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/supply-check") +
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
+tasks.register<JavaExec>("benchmarkProductionQueries") {
+    group = "verification"
+    description = "Compares frozen v1.34.0 and optimized queries at 16384 pairs / 60 minutes; opt-in, not a TPS benchmark"
+    dependsOn(compileSupplyChecks, compileProspectorChecks, "extractTerminalClickLwjgl")
+    mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+    args("--tweakClass", "com.futa_gtnh.supplycheck.SupplyCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+    systemProperty("futa.supplyQueryBenchmark", "true")
+    maxHeapSize = "2g"
+    classpath = files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) + files(compileSupplyChecks.flatMap { it.destinationDirectory }) +
+        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/supply-check") +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
 tasks.named("check") { dependsOn("verifySupplyTracking") }
 
 // Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.

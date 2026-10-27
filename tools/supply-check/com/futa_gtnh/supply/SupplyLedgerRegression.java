@@ -20,6 +20,7 @@ public final class SupplyLedgerRegression {
     private static int checks;
     public static int run() throws Exception {
         rings(); bounds(); settings(); protocol(); trendAndWarnings(); watchBudget();
+        SupplyQueryOptimizationRegression.run();
         checks += ProductionLinesRegression.run();
         checks += PublicMeProtocolRegression.run();
         SupplyTracker.stop();

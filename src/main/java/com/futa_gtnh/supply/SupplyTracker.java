@@ -104,8 +104,11 @@ public final class SupplyTracker {
     }
 
     public static NBTTagCompound productionBindingSnapshot(ProductionTarget target, int minutes, int linePage) {
+        if (!SharedStorageManager.isServerThread()) throw new IllegalStateException("Server thread required");
         if (loaded && writable) PRODUCTION.refreshRelated(target.source, ProductionAttachments::scan);
-        NBTTagCompound tag = productionSnapshot("", target.source.id(), minutes, linePage, 0, 0);
+        NBTTagCompound tag = PRODUCTION.bindingPage(linePage);
+        tag.setBoolean("enabled", enabled());
+        tag.setBoolean("writable", loaded && writable);
         tag.setTag("bindingTarget", target.source.write());
         tag.setString("targetName", target.name);
         tag.setTag("currentBinding", PRODUCTION.binding(target.source));

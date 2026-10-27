@@ -70,6 +70,7 @@ public final class SupplyTrackingRegression {
         home.set(null, new File("build/supply-check"));
         appeng.core.AEConfig.instance = new appeng.core.AEConfig(new File(configDirectory, "AE2.cfg"));
         IRON=ItemKey.of(new ItemStack(Items.iron_ingot));
+        if(Boolean.getBoolean("futa.supplyQueryBenchmark")){com.futa_gtnh.supply.ProductionQueryBenchmark.run();return;}
         Class<?> type=Class.forName("sun.misc.Unsafe"); Field f=type.getDeclaredField("theUnsafe"); f.setAccessible(true);
         unsafe=f.get(null); allocate=type.getMethod("allocateInstance",Class.class);
         world=new MemoryWorld();

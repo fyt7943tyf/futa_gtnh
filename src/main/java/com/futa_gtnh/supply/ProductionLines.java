@@ -1,6 +1,10 @@
 package com.futa_gtnh.supply;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +27,28 @@ final class ProductionLines {
     // Derived membership is rebuilt from saved interface bindings, so the existing disk format stays intact.
     private final Map<String, Binding> attached = new LinkedHashMap<>();
     private int attachmentCursor;
+    private Map<String, Binding> effectiveCache;
+    private Map<String, List<Binding>> membersCache;
+    private List<Map.Entry<String, String>> lineRowsCache;
+    private final Map<String, Scope> scopes = new HashMap<>();
+    private final LinkedHashMap<QueryKey, View> snapshots = new LinkedHashMap<>(16, 0.75F, true);
+    private int cachedRows;
+    static final int MAX_CACHED_ROWS = 32768, MAX_SNAPSHOTS = 64;
+    static final long SNAPSHOT_MILLIS = 1000;
+
+    private void metadataChanged() {
+        effectiveCache = null;
+        membersCache = null;
+        lineRowsCache = null;
+        scopes.clear();
+        clearSnapshots();
+    }
+
+    /** Also used by the uncached benchmark; clearing these views never discards telemetry. */
+    void clearSnapshots() {
+        snapshots.clear();
+        cachedRows = 0;
+    }
 
     NBTTagCompound mutate(NBTTagCompound request, SupplyLedger ledger) {
         String action = request.getString("action");
@@ -37,6 +63,7 @@ final class ProductionLines {
             lineId = UUID.randomUUID()
                 .toString();
             lines.put(lineId, text);
+            metadataChanged();
             return result(true, "已创建产线", lineId);
         }
         if ("rename".equals(action) || "delete".equals(action) || "bind".equals(action)) {
@@ -44,7 +71,7 @@ final class ProductionLines {
         }
         if ("rename".equals(action)) {
             if (text.isEmpty()) return result(false, "产线名称不能为空", lineId);
-            lines.put(lineId, text);
+            if (!text.equals(lines.put(lineId, text))) metadataChanged();
             return result(true, "已重命名产线", lineId);
         }
         if ("delete".equals(action)) {
@@ -54,6 +81,7 @@ final class ProductionLines {
                 .removeIf(binding -> binding.lineId.equals(removed));
             attached.values()
                 .removeIf(binding -> !bindings.containsKey(binding.parentId));
+            metadataChanged();
             return result(true, "已删除产线分组；设备及库存未改变", "");
         }
         if ("bind".equals(action) || "unbind".equals(action)) {
@@ -70,11 +98,16 @@ final class ProductionLines {
                 final String removed = sourceId;
                 attached.values()
                     .removeIf(binding -> binding.parentId.equals(removed));
+                metadataChanged();
                 return result(true, "已解除设备绑定", lineId);
             }
             if (!bindings.containsKey(sourceId) && bindings.size() >= SupplyLedger.MAX_SOURCES)
                 return result(false, "绑定设备数量已达到上限", lineId);
-            bindings.put(sourceId, new Binding(lineId, source));
+            Binding previous = bindings.get(sourceId);
+            if (previous == null || !previous.lineId.equals(lineId) || !previous.source.equals(source)) {
+                bindings.put(sourceId, new Binding(lineId, source));
+                metadataChanged();
+            }
             return result(true, "已绑定设备；同一设备只归属一条产线", lineId);
         }
         return result(false, "未知产线操作", lineId);
@@ -135,17 +168,25 @@ final class ProductionLines {
         if (result == null) return; // An unloaded parent or neighbor must not erase known membership.
         Map<String, SupplySource> present = new LinkedHashMap<>();
         for (SupplySource source : result.buses) present.put(source.id(), source);
-        attached.values()
+        boolean changed = attached.values()
             .removeIf(
                 binding -> binding.parentId.equals(parent.source.id()) && (!result.interfacePresent
                     || result.checked.contains(binding.source.id()) && !present.containsKey(binding.source.id())));
         for (SupplySource source : present.values()) {
             if (!attached.containsKey(source.id()) && attached.size() >= SupplyLedger.MAX_SOURCES) continue;
-            attached.put(source.id(), new Binding(parent.lineId, source, parent.source.id()));
+            Binding before = attached.get(source.id());
+            if (before == null || !before.lineId.equals(parent.lineId)
+                || !before.parentId.equals(parent.source.id())
+                || !before.source.equals(source)) {
+                attached.put(source.id(), new Binding(parent.lineId, source, parent.source.id()));
+                changed = true;
+            }
         }
+        if (changed) metadataChanged();
     }
 
     private Map<String, Binding> effectiveBindings() {
+        if (effectiveCache != null) return effectiveCache;
         Map<String, Binding> effective = new LinkedHashMap<>(bindings);
         for (Binding child : attached.values()) {
             Binding parent = bindings.get(child.parentId);
@@ -153,7 +194,13 @@ final class ProductionLines {
                 && effective.size() < SupplyLedger.MAX_SOURCES)
                 effective.put(child.source.id(), new Binding(parent.lineId, child.source, child.parentId));
         }
-        return effective;
+        effectiveCache = Collections.unmodifiableMap(effective);
+        membersCache = new HashMap<>();
+        for (Binding binding : effective.values())
+            membersCache.computeIfAbsent(binding.lineId, ignored -> new ArrayList<>())
+                .add(binding);
+        lineRowsCache = new ArrayList<>(lines.entrySet());
+        return effectiveCache;
     }
 
     private String resolve(String id) {
@@ -176,101 +223,229 @@ final class ProductionLines {
         return result;
     }
 
+    /** Binding windows need metadata only, including inactive devices; no ledger or window reads. */
+    NBTTagCompound bindingPage(int linePage) {
+        NBTTagCompound root = new NBTTagCompound();
+        writeLines(root, linePage);
+        return root;
+    }
+
+    private void writeLines(NBTTagCompound root, int linePage) {
+        effectiveBindings();
+        int page = page(root, "line", linePage, lineRowsCache.size());
+        NBTTagList tags = new NBTTagList();
+        for (int i = page * SupplyTracker.PAGE_SIZE; i < end(page, lineRowsCache.size()); i++) {
+            Map.Entry<String, String> line = lineRowsCache.get(i);
+            NBTTagCompound tag = new NBTTagCompound();
+            tag.setString("id", line.getKey());
+            tag.setString("name", line.getValue());
+            List<Binding> members = membersCache.get(line.getKey());
+            tag.setInteger("sourceCount", members == null ? 0 : members.size());
+            tags.appendTag(tag);
+        }
+        root.setTag("lines", tags);
+    }
+
+    private Scope scope(SupplyLedger ledger, String line, boolean all) {
+        String id = all ? "" : line == null ? "?" : line;
+        Scope previous = scopes.get(id);
+        if (previous != null && previous.ledger == ledger && previous.sourcesRevision == ledger.sourceRevision())
+            return previous;
+        Map<String, Binding> effective = effectiveBindings();
+        LinkedHashMap<String, Identity> devices = new LinkedHashMap<>();
+        Iterable<Binding> members = all ? effective.values() : membersCache.getOrDefault(line, Collections.emptyList());
+        for (Binding member : members) devices.put(member.source.id(), new Identity(member.source, member.lineId));
+        if (all) for (SupplySource source : ledger.sources()) if (source.hasPosition()) {
+            Binding binding = effective.get(source.id());
+            devices.putIfAbsent(source.id(), new Identity(source, binding == null ? "" : binding.lineId));
+        }
+        Scope next = new Scope(ledger, ledger.sourceRevision(), devices);
+        scopes.put(id, next);
+        return next;
+    }
+
     NBTTagCompound snapshot(SupplyLedger ledger, String requestedLine, String sourceId, int minutes, int linePage,
         int sourcePage, int resourcePage, long now) {
         String lineId = resolve(requestedLine);
         boolean all = requestedLine == null || requestedLine.isEmpty();
-        String selectedSource = sourceId == null ? "" : sourceId;
-        Map<String, Binding> effective = effectiveBindings();
-        long observed = SupplyLedger.observedMillis(minutes, now);
+        String selected = sourceId == null ? "" : sourceId;
+        QueryKey key = new QueryKey(all ? "" : lineId == null ? "?" : lineId, selected, SupplyLedger.window(minutes));
+        View view = snapshots.get(key);
+        if (view == null || view.ledger != ledger
+            || view.generation != ledger.generation()
+            || view.structure != ledger.structureRevision()
+            || now < view.time
+            || now - view.time >= SNAPSHOT_MILLIS
+            || now / 60000L != view.time / 60000L) {
+            if (view != null) {
+                snapshots.remove(key);
+                cachedRows -= view.weight();
+            }
+            view = build(ledger, scope(ledger, lineId, all), selected, key.minutes, now);
+            snapshots.put(key, view);
+            cachedRows += view.weight();
+            Iterator<View> iterator = snapshots.values()
+                .iterator();
+            while (snapshots.size() > MAX_SNAPSHOTS || cachedRows > MAX_CACHED_ROWS) {
+                View removed = iterator.next();
+                cachedRows -= removed.weight();
+                iterator.remove();
+            }
+        }
+        long observed = SupplyLedger.observedMillis(key.minutes, view.time);
         NBTTagCompound root = new NBTTagCompound();
-        root.setInteger("minutes", SupplyLedger.window(minutes));
+        root.setInteger("minutes", key.minutes);
         root.setLong("observedMillis", observed);
         root.setBoolean("hasRate", observed > 0);
         root.setBoolean("bucketed", true);
-        root.setLong("age", now);
+        root.setLong("age", view.time);
         root.setLong("dropped", ledger.dropped());
         root.setString("lineId", lineId == null ? "" : lineId);
         root.setString("lineName", lineId == null ? "" : lines.get(lineId));
         root.setBoolean("lineFound", all || lineId != null);
-        root.setString("sourceId", selectedSource);
-
-        List<Map.Entry<String, String>> lineRows = new ArrayList<>(lines.entrySet());
-        int page = page(root, "line", linePage, lineRows.size());
-        NBTTagList lineTags = new NBTTagList();
-        for (int i = page * SupplyTracker.PAGE_SIZE; i < end(page, lineRows.size()); i++) {
-            Map.Entry<String, String> line = lineRows.get(i);
-            NBTTagCompound tag = new NBTTagCompound();
-            tag.setString("id", line.getKey());
-            tag.setString("name", line.getValue());
-            int count = 0;
-            for (Binding binding : effective.values()) if (binding.lineId.equals(line.getKey())) count++;
-            tag.setInteger("sourceCount", count);
-            lineTags.appendTag(tag);
-        }
-        root.setTag("lines", lineTags);
-
-        Map<String, Device> devices = new LinkedHashMap<>();
-        for (Binding binding : effective.values()) {
-            if (all || binding.lineId.equals(lineId))
-                devices.put(binding.source.id(), new Device(binding.source, binding.lineId));
-        }
-        for (SupplySource source : ledger.sources()) {
-            if (!source.hasPosition()) continue;
-            Binding binding = effective.get(source.id());
-            String member = binding == null ? "" : binding.lineId;
-            if (all || member.equals(lineId)) devices.putIfAbsent(source.id(), new Device(source, member));
-        }
-        Map<Object, Amounts> resources = new LinkedHashMap<>();
-        Device total = new Device(SupplySource.UNIDENTIFIED, "");
-        for (SupplyLedger.Flow flow : ledger.flows(minutes, now / 60_000L)) {
-            Device device = devices.get(flow.source.id());
-            if (device == null) continue;
-            device.add(flow);
-            if (!selectedSource.isEmpty() && !flow.source.id()
-                .equals(selectedSource)) continue;
-            total.add(flow);
-            if (flow.key instanceof ItemKey || flow.key instanceof FluidKey)
-                resources.computeIfAbsent(flow.key, ignored -> new Amounts())
-                    .add(flow.incoming, flow.outgoing);
-        }
-        root.setBoolean("sourceFound", selectedSource.isEmpty() || devices.containsKey(selectedSource));
-        root.setTag("totals", total.metrics(observed));
-        List<Device> sourceRows = new ArrayList<>(devices.values());
-        page = page(root, "source", sourcePage, sourceRows.size());
-        NBTTagList sourceTags = new NBTTagList();
-        for (int i = page * SupplyTracker.PAGE_SIZE; i < end(page, sourceRows.size()); i++) {
-            Device device = sourceRows.get(i);
-            NBTTagCompound tag = device.source.write();
-            NBTTagCompound metrics = device.metrics(observed);
+        root.setString("sourceId", selected);
+        root.setBoolean("sourceFound", selected.isEmpty() || view.scope.devices.containsKey(selected));
+        writeLines(root, linePage);
+        root.setTag("totals", view.total.metrics(observed));
+        int page = page(root, "source", sourcePage, view.devices.size());
+        NBTTagList sources = new NBTTagList();
+        for (int i = page * SupplyTracker.PAGE_SIZE; i < end(page, view.devices.size()); i++) {
+            Device device = view.devices.get(i);
+            NBTTagCompound tag = device.source.write(), metrics = device.metrics(observed);
             for (Object raw : metrics.func_150296_c()) {
-                String key = (String) raw;
-                tag.setTag(key, metrics.getTag(key));
+                String name = (String) raw;
+                tag.setTag(name, metrics.getTag(name));
             }
             tag.setString("id", device.source.id());
             tag.setString("name", SupplyTracker.name(device.source));
             tag.setString("lineId", device.lineId);
             tag.setString("lineName", lines.getOrDefault(device.lineId, ""));
-            Binding member = effective.get(device.source.id());
-            writeParent(tag, member);
+            writeParent(tag, effectiveBindings().get(device.source.id()));
             tag.setBoolean("active", device.active);
-            sourceTags.appendTag(tag);
+            sources.appendTag(tag);
         }
-        root.setTag("sources", sourceTags);
-        List<Map.Entry<Object, Amounts>> resourceRows = new ArrayList<>(resources.entrySet());
-        page = page(root, "resource", resourcePage, resourceRows.size());
-        NBTTagList resourceTags = new NBTTagList();
-        for (int i = page * SupplyTracker.PAGE_SIZE; i < end(page, resourceRows.size()); i++) {
-            Map.Entry<Object, Amounts> entry = resourceRows.get(i);
-            if (!SupplyTracker.boundedKey(entry.getKey())) continue;
-            NBTTagCompound tag = SupplyTracker.writeKey(entry.getKey());
-            tag.setString("unit", entry.getKey() instanceof FluidKey ? "mB" : "item");
-            entry.getValue()
-                .write(tag, "", observed);
-            resourceTags.appendTag(tag);
+        root.setTag("sources", sources);
+        page = page(root, "resource", resourcePage, view.resources.size());
+        NBTTagList resources = new NBTTagList();
+        for (int i = page * SupplyTracker.PAGE_SIZE; i < end(page, view.resources.size()); i++) {
+            Resource resource = view.resources.get(i);
+            if (!SupplyTracker.boundedKey(resource.key)) continue;
+            NBTTagCompound tag = SupplyTracker.writeKey(resource.key);
+            tag.setString("unit", resource.key instanceof FluidKey ? "mB" : "item");
+            resource.amounts.write(tag, "", observed);
+            resources.appendTag(tag);
         }
-        root.setTag("resources", resourceTags);
+        root.setTag("resources", resources);
         return root;
+    }
+
+    private View build(SupplyLedger ledger, Scope scope, String selected, int minutes, long now) {
+        ledger.advance(now / 60000L);
+        List<Device> devices = new ArrayList<>(scope.devices.size());
+        Device total = new Device(SupplySource.UNIDENTIFIED, "");
+        for (Identity identity : scope.devices.values()) {
+            SupplyLedger.Metrics metrics = ledger.metrics(identity.source.id(), minutes, now / 60000L);
+            Device device = new Device(identity.source, identity.line);
+            device.add(metrics);
+            devices.add(device);
+            if (selected.isEmpty() || selected.equals(identity.source.id())) total.add(metrics);
+        }
+        Map<Object, Resource> resources = new HashMap<>();
+        java.util.Collection<String> ids = selected.isEmpty() ? scope.devices.keySet()
+            : scope.devices.containsKey(selected) ? Collections.singletonList(selected) : Collections.emptyList();
+        ledger.visitFlows(ids, minutes, now / 60000L, (key, source, in, out, order) -> {
+            if (key instanceof ItemKey || key instanceof FluidKey)
+                resources.computeIfAbsent(key, ignored -> new Resource(key, order)).amounts.add(in, out);
+        });
+        List<Resource> ordered = new ArrayList<>(resources.values());
+        ordered.sort(Comparator.comparingLong(value -> value.order));
+        return new View(ledger, scope, now, devices, ordered, total);
+    }
+
+    private static final class Identity {
+
+        final SupplySource source;
+        final String line;
+
+        Identity(SupplySource source, String line) {
+            this.source = source;
+            this.line = line;
+        }
+    }
+
+    private static final class Scope {
+
+        final SupplyLedger ledger;
+        final long sourcesRevision;
+        final LinkedHashMap<String, Identity> devices;
+
+        Scope(SupplyLedger ledger, long revision, LinkedHashMap<String, Identity> devices) {
+            this.ledger = ledger;
+            this.sourcesRevision = revision;
+            this.devices = devices;
+        }
+    }
+
+    private static final class Resource {
+
+        final Object key;
+        final long order;
+        final Amounts amounts = new Amounts();
+
+        Resource(Object key, long order) {
+            this.key = key;
+            this.order = order;
+        }
+    }
+
+    private static final class View {
+
+        final SupplyLedger ledger;
+        final Scope scope;
+        final long time, generation, structure;
+        final List<Device> devices;
+        final List<Resource> resources;
+        final Device total;
+
+        View(SupplyLedger ledger, Scope scope, long time, List<Device> devices, List<Resource> resources,
+            Device total) {
+            this.ledger = ledger;
+            this.scope = scope;
+            this.time = time;
+            this.devices = devices;
+            this.resources = resources;
+            this.total = total;
+            generation = ledger.generation();
+            structure = ledger.structureRevision();
+        }
+
+        int weight() {
+            return devices.size() + resources.size() + 1;
+        }
+    }
+
+    private static final class QueryKey {
+
+        final String line, source;
+        final int minutes;
+
+        QueryKey(String line, String source, int minutes) {
+            this.line = line;
+            this.source = source;
+            this.minutes = minutes;
+        }
+
+        @Override
+        public int hashCode() {
+            return (line.hashCode() * 31 + source.hashCode()) * 31 + minutes;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof QueryKey key && minutes == key.minutes
+                && line.equals(key.line)
+                && source.equals(key.source);
+        }
     }
 
     private static int page(NBTTagCompound root, String prefix, int requested, int size) {
@@ -355,6 +530,7 @@ final class ProductionLines {
         bindings.putAll(nextBindings);
         attached.clear();
         attachmentCursor = 0;
+        metadataChanged();
     }
 
     void clear() {
@@ -362,6 +538,7 @@ final class ProductionLines {
         bindings.clear();
         attached.clear();
         attachmentCursor = 0;
+        metadataChanged();
     }
 
     private static final class Binding {
@@ -410,6 +587,12 @@ final class ProductionLines {
         Device(SupplySource source, String lineId) {
             this.source = source;
             this.lineId = lineId;
+        }
+
+        void add(SupplyLedger.Metrics metrics) {
+            items.add(metrics.itemIn, metrics.itemOut);
+            fluids.add(metrics.fluidIn, metrics.fluidOut);
+            active = metrics.itemIn != 0 || metrics.itemOut != 0 || metrics.fluidIn != 0 || metrics.fluidOut != 0;
         }
 
         void add(SupplyLedger.Flow flow) {

@@ -1,0 +1,137 @@
+{
+  "baseline": "v1.34.0 / 9a88d19a0ef94fbd3198ec57652a21479cca05ac (frozen Java classes)",
+  "java": "17.0.20.1+1-LTS",
+  "vm": "OpenJDK 64-Bit Server VM",
+  "os": "Mac OS X aarch64",
+  "processors": 10,
+  "maxHeapMiB": 2048,
+  "pairs": 16384,
+  "resources": 4096,
+  "sources": 4096,
+  "lines": 64,
+  "windowMinutes": 60,
+  "populatedMinutes": 60,
+  "originalBucketReadsPerFullQuery": 1966080,
+  "warmupQueriesPerVariant": 150,
+  "measuredQueriesPerVariant": 400,
+  "notes": "Synthetic in-process Java queries with real item/fluid keys and paginated NBT, no world/AE inventory IO; not a server TPS result. Cold rebuilds query aggregates but reuses metadata indexes; warm mode deliberately hits one coherent snapshot. Allocation counts include all allocations on the benchmark thread.",
+  "queries": [
+    {
+      "case": "all_cold",
+      "baseline": {
+        "p50Ms": 6.5065,
+        "p95Ms": 7.054084,
+        "p99Ms": 7.423458,
+        "maxMs": 7.625583,
+        "allocatedBytesPerQuery": 2646894.58,
+        "gcCollections": 6
+      },
+      "optimized": {
+        "p50Ms": 5.286708,
+        "p95Ms": 6.620917,
+        "p99Ms": 7.202708,
+        "maxMs": 14.189583,
+        "allocatedBytesPerQuery": 1603662.18,
+        "gcCollections": 4
+      },
+      "medianSpeedup": 1.2307280825799345
+    },
+    {
+      "case": "line_cold",
+      "baseline": {
+        "p50Ms": 5.470875,
+        "p95Ms": 5.882041,
+        "p99Ms": 6.121041,
+        "maxMs": 6.583,
+        "allocatedBytesPerQuery": 1248330.58,
+        "gcCollections": 3
+      },
+      "optimized": {
+        "p50Ms": 0.138459,
+        "p95Ms": 0.355375,
+        "p99Ms": 0.469375,
+        "maxMs": 0.599166,
+        "allocatedBytesPerQuery": 115658.58,
+        "gcCollections": 0
+      },
+      "medianSpeedup": 39.51259939765563
+    },
+    {
+      "case": "io_cold",
+      "baseline": {
+        "p50Ms": 6.439958,
+        "p95Ms": 6.838125,
+        "p99Ms": 7.056042,
+        "maxMs": 7.461709,
+        "allocatedBytesPerQuery": 2230866.58,
+        "gcCollections": 5
+      },
+      "optimized": {
+        "p50Ms": 0.382708,
+        "p95Ms": 1.319,
+        "p99Ms": 2.089959,
+        "maxMs": 2.187084,
+        "allocatedBytesPerQuery": 649946.58,
+        "gcCollections": 1
+      },
+      "medianSpeedup": 16.82734094923545
+    },
+    {
+      "case": "all_paginate_cache_hit",
+      "baseline": {
+        "p50Ms": 6.793042,
+        "p95Ms": 7.254709,
+        "p99Ms": 7.69125,
+        "maxMs": 8.60925,
+        "allocatedBytesPerQuery": 2644443.22,
+        "gcCollections": 5
+      },
+      "optimized": {
+        "p50Ms": 0.248833,
+        "p95Ms": 0.392959,
+        "p99Ms": 0.489208,
+        "maxMs": 1.36775,
+        "allocatedBytesPerQuery": 62918.7,
+        "gcCollections": 1
+      },
+      "medianSpeedup": 27.29960254467856
+    },
+    {
+      "case": "binding_metadata_only",
+      "baseline": {
+        "p50Ms": 6.452041,
+        "p95Ms": 6.817375,
+        "p99Ms": 7.638708,
+        "maxMs": 7.772959,
+        "allocatedBytesPerQuery": 2230530.58,
+        "gcCollections": 5
+      },
+      "optimized": {
+        "p50Ms": 7.5E-4,
+        "p95Ms": 0.001458,
+        "p99Ms": 0.006625,
+        "maxMs": 0.017541,
+        "allocatedBytesPerQuery": 2962.58,
+        "gcCollections": 0
+      },
+      "medianSpeedup": 8602.721333333333
+    }
+  ],
+  "recordHotPath": {
+    "records": 1000000,
+    "baselineNsPerRecord": 28.046875,
+    "optimizedNsPerRecord": 38.803125,
+    "baselineAllocatedBytesPerRecord": 0.0,
+    "optimizedAllocatedBytesPerRecord": 0.0
+  },
+  "minuteBoundary": {
+    "baselineMs": 6.888583,
+    "optimizedMs": 14.458417,
+    "samples": 1
+  },
+  "idleHourExpiry": {
+    "baselineMs": 1.736833,
+    "optimizedMs": 15.225334,
+    "samples": 1
+  }
+}
