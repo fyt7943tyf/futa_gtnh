@@ -71,6 +71,7 @@ public final class TerminalIoRegression {
         aeConfigDirectory.mkdirs();
         appeng.core.AEConfig.instance = new appeng.core.AEConfig(new File(aeConfigDirectory, "AE2.cfg"));
         TileEntity.addMapping(TileEntitySharedTerminal.class, "terminal-io-regression");
+        TileEntity.addMapping(TileEntityIoNode.class, "terminal-native-io-regression");
         checkConfig();
         checkOreCardParity();
         checkLegacyOreMigration();
@@ -79,7 +80,7 @@ public final class TerminalIoRegression {
         checkActiveTransfers();
         checkOutputPriority();
         checkManualSubtypeOutput();
-        checkManualIdleRetry();
+        checkOfflineNativeIo();
         checkBusAttachedFluidOutput();
         checkFluidPullCapacity();
         checkDirectFluidSelection();
@@ -621,59 +622,32 @@ public final class TerminalIoRegression {
         return tile;
     }
 
-    private static void checkManualIdleRetry() throws Exception {
-        boolean previousBackoff = com.futa_gtnh.Config.ioIdleBackoff;
+    private static void checkOfflineNativeIo() throws Exception {
         Field storageField = SharedStorageManager.class.getDeclaredField("storage");
         storageField.setAccessible(true);
         SharedStorage previousStorage = SharedStorageManager.getStorage();
         CountingStorage storage = new CountingStorage();
         storageField.set(null, storage);
-        com.futa_gtnh.Config.ioIdleBackoff = true;
         try {
             for (boolean node : new boolean[] { false, true }) {
-                for (boolean withOre : new boolean[] { false, true }) {
-                    TestWorld world = new TestWorld();
-                    TileEntity source = node ? new TileEntityIoNode() : new TileEntitySharedTerminal();
-                    TerminalIoConfig io = node ? ((TileEntityIoNode) source).getIo() : ((TileEntitySharedTerminal) source).getIo();
-                    TestInventory target = new TestInventory();
-                    world.source = source;
-                    world.target = target;
-                    source.setWorldObj(world);
-                    target.setWorldObj(world);
-                    io.setMode(EAST, false, Mode.PUSH);
-                    ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
-                    SharedStorageManager.getStorage().insertItemManual(iron, 1000);
-                    io.getOutputFilter(EAST).toggleItem(iron);
-                    if (withOre) io.getOutputFilter(EAST).setOreFilter("ingotGold");
-                    target.inventory.setInventorySlotContents(0, new ItemStack(Items.diamond, 64));
-                    for (int tick = 0; tick < 1000; tick++) source.updateEntity();
-                    Field idle = source.getClass().getDeclaredField("idleRounds");
-                    Field timer = source.getClass().getDeclaredField("ioTimer");
-                    idle.setAccessible(true);
-                    timer.setAccessible(true);
-                    check(idle.getInt(source) == TerminalIoEngine.IDLE_BACKOFF_STEPS.length, "full target reaches maximum scan backoff");
-                    int scansBeforeRetry = storage.scans;
-                    timer.setInt(source, 0);
-                    target.inventory.setInventorySlotContents(0, null);
-                    for (int tick = 1; tick < io.getIntervalTicks(); tick++) {
-                        source.updateEntity();
-                        check(target.inventory.getStackInSlot(0) == null, "manual retry never exceeds configured frequency");
-                    }
-                    source.updateEntity();
-                    check(target.inventory.getStackInSlot(0) != null && target.inventory.getStackInSlot(0).stackSize == 16, "manual output resumes within configured interval after target clears: node=" + node + ", ore=" + withOre);
-                    check(idle.getInt(source) == 0, "successful manual retry wakes normal IO");
-                    check(storage.scans == scansBeforeRetry, "manual idle retries do not scan warehouse or ore matches");
-                    idle.setInt(source, 6);
-                    timer.setInt(source, 20);
-                    if (node) ((TileEntityIoNode) source).onIoChanged();
-                    else ((TileEntitySharedTerminal) source).onIoChanged();
-                    check(idle.getInt(source) == 0 && timer.getInt(source) == 0, "editing IO clears previous idle delay");
-                }
+                TestWorld world = new TestWorld();
+                TileEntity source = node ? new TileEntityIoNode() : new TileEntitySharedTerminal();
+                TerminalIoConfig io = node ? ((TileEntityIoNode) source).getIo() : ((TileEntitySharedTerminal) source).getIo();
+                TestInventory target = new TestInventory(); world.source = source; world.target = target;
+                source.setWorldObj(world); target.setWorldObj(world);
+                io.setMode(EAST, false, Mode.PUSH);
+                ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
+                storage.insertItemManual(iron, 1000); io.getOutputFilter(EAST).toggleItem(iron);
+                long before = storage.getItemAmount(iron);
+                for (int tick = 0; tick < 1000; tick++) source.updateEntity();
+                check(target.inventory.getStackInSlot(0) == null && storage.getItemAmount(iron) == before,
+                    "offline native IO never falls back to the legacy transfer engine");
+                check(storage.scans == 0, "offline native IO never scans the old warehouse");
+                if (node) ((TileEntityIoNode) source).onIoChanged(); else ((TileEntitySharedTerminal) source).onIoChanged();
+                NBTTagCompound saved = new NBTTagCompound(); source.writeToNBT(saved);
+                check(saved.hasKey("nativeIo", 10), "legacy IO writes a versioned native checkpoint");
             }
-        } finally {
-            com.futa_gtnh.Config.ioIdleBackoff = previousBackoff;
-            storageField.set(null, previousStorage);
-        }
+        } finally { storageField.set(null, previousStorage); }
     }
 
     private static final class CountingStorage extends SharedStorage {
@@ -692,7 +666,7 @@ public final class TerminalIoRegression {
                 new net.minecraft.world.WorldSettings(0, net.minecraft.world.WorldSettings.GameType.SURVIVAL, false, false, net.minecraft.world.WorldType.DEFAULT),
                 new net.minecraft.world.WorldProviderSurface(), new net.minecraft.profiler.Profiler());
         }
-        @Override protected net.minecraft.world.chunk.IChunkProvider createChunkProvider() { return null; }
+        @Override protected net.minecraft.world.chunk.IChunkProvider createChunkProvider() { return (net.minecraft.world.chunk.IChunkProvider) java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {net.minecraft.world.chunk.IChunkProvider.class}, (p,m,a) -> m.getReturnType() == boolean.class ? m.getName().equals("chunkExists") : m.getReturnType() == int.class ? 0 : null); }
         @Override protected int func_152379_p() { return 0; }
         @Override public net.minecraft.entity.Entity getEntityByID(int id) { return null; }
         @Override public TileEntity getTileEntity(int x, int y, int z) { return y == 0 && z == 0 ? x == 0 ? source : x == 1 ? target : null : null; }

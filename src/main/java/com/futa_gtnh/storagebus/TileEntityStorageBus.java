@@ -10,7 +10,7 @@ import net.minecraft.world.World;
 import net.minecraftforge.common.util.ForgeDirection;
 
 import com.futa_gtnh.Config;
-import com.futa_gtnh.FutaGtnhMod;
+import com.futa_gtnh.me.logistics.NativeStorageRuntime;
 
 /**
  * 共享存储总线方块实体。
@@ -24,14 +24,14 @@ import com.futa_gtnh.FutaGtnhMod;
  * 它自己不存任何东西，只做三件事：
  * <ol>
  * <li>把每条总线的配置持久化；</li>
- * <li>每隔 {@link Config#storageBusRefreshTicks} 扫描一次各自的目标容器，更新镜像；</li>
- * <li>区块加载时向 {@link StorageBusRegistry} 登记，卸载时注销。</li>
+ * <li>每面托管原生物品和流体存储总线，由 AE 负责适配、读写和库存通知；</li>
+ * <li>区块加载后接入公共 ME，卸载时断开原生节点。</li>
  * </ol>
  *
  * <p>
  * 登记<b>不在 {@code validate()} 里做</b>：validate 发生在区块实体加载过程中，
  * 这时访问相邻区块会触发同步区块加载（和 IO 节点踩过的 StackOverflow 同一个坑）。
- * 这里只做记号，等第一个 {@code updateEntity()} 再登记和扫描。
+ * 这里只做记号，等第一个 {@code updateEntity()} 再准备原生部件。
  */
 public class TileEntityStorageBus extends TileEntity {
 
@@ -39,7 +39,7 @@ public class TileEntityStorageBus extends TileEntity {
 
     private final StorageBusConfig[] configs = new StorageBusConfig[FACES];
     private final StorageBusLink[] links = new StorageBusLink[FACES];
-    private final boolean[] linkRegistered = new boolean[FACES];
+    private final NativeStorageRuntime nativeBus = new NativeStorageRuntime(this);
 
     private boolean pendingRegister = true;
     private boolean refreshRequested;
@@ -122,16 +122,10 @@ public class TileEntityStorageBus extends TileEntity {
         int index = side.ordinal();
         if (configs[index] == null) return false;
 
-        if (linkRegistered[index]) {
-            linkRegistered[index] = false;
-            try {
-                StorageBusRegistry.unregister(links[index]);
-            } catch (Throwable t) {
-                FutaGtnhMod.LOG.warn("存储总线：注销面 {} 时出错（{} {} {}）", index, xCoord, yCoord, zCoord, t);
-            }
-        }
+        StorageBusRegistry.unregister(links[index]);
         links[index] = null;
         configs[index] = null;
+        nativeBus.update();
         recomputeFaceMask();
         markDirty();
         if (worldObj != null && !worldObj.isRemote) worldObj.markBlockForUpdate(xCoord, yCoord, zCoord);
@@ -141,48 +135,26 @@ public class TileEntityStorageBus extends TileEntity {
     /** 界面打开 / 配置改动时调用；把所有已配置但未登记的面登记上。 */
     public void ensureRegistered() {
         if (worldObj == null || worldObj.isRemote) return;
-        boolean changed = false;
-        for (int i = 0; i < FACES; i++) {
-            if (configs[i] == null || linkRegistered[i]) continue;
-            try {
-                StorageBusRegistry.register(links[i]);
-                linkRegistered[i] = true;
-                changed = true;
-            } catch (Throwable t) {
-                FutaGtnhMod.LOG.warn("存储总线：登记面 {} 失败（{} {} {}），下个周期重试", i, xCoord, yCoord, zCoord, t);
-            }
-        }
-        if (changed) {
-            pendingRegister = false;
-            refreshRequested = false;
-            refreshTimer = 0;
-        }
+        nativeBus.update();
     }
 
     public boolean isRegistered() {
-        for (int i = 0; i < FACES; i++) {
-            if (linkRegistered[i]) return true;
-        }
-        return false;
+        return failure().isEmpty() && com.futa_gtnh.me.PublicMeNetwork.isAttachable();
     }
 
-    /** 某一面的筛选 / 访问模式 / 优先级变化后调用。 */
+    public NativeStorageRuntime nativeBus() {
+        return nativeBus;
+    }
+
+    public String failure() {
+        return nativeBus.failure();
+    }
+
     public void onConfigChanged(ForgeDirection side) {
-        if (worldObj == null || worldObj.isRemote || side == null || side == ForgeDirection.UNKNOWN) return;
-        int index = side.ordinal();
-        if (configs[index] == null) return;
+        if (worldObj == null || worldObj.isRemote) return;
         markDirty();
-        if (!linkRegistered[index]) {
-            ensureRegistered();
-        } else {
-            try {
-                StorageBusRegistry.refresh(links[index]);
-            } catch (Throwable t) {
-                FutaGtnhMod.LOG.warn("存储总线：刷新面 {} 失败（{} {} {}）", index, xCoord, yCoord, zCoord, t);
-            }
-            refreshRequested = false;
-            refreshTimer = 0;
-        }
+        nativeBus.update();
+        nativeBus.changed(side);
         worldObj.markBlockForUpdate(xCoord, yCoord, zCoord);
     }
 
@@ -201,16 +173,16 @@ public class TileEntityStorageBus extends TileEntity {
 
     @Override
     public void invalidate() {
-        for (int i = 0; i < FACES; i++) {
-            if (!linkRegistered[i]) continue;
-            linkRegistered[i] = false;
-            try {
-                StorageBusRegistry.unregister(links[i]);
-            } catch (Throwable t) {
-                FutaGtnhMod.LOG.warn("存储总线：注销面 {} 时出错（{} {} {}）", i, xCoord, yCoord, zCoord, t);
-            }
-        }
+        for (StorageBusLink link : links) if (link != null) StorageBusRegistry.unregister(link);
+        nativeBus.close();
         super.invalidate();
+    }
+
+    @Override
+    public void onChunkUnload() {
+        for (StorageBusLink link : links) if (link != null) StorageBusRegistry.unregister(link);
+        nativeBus.close();
+        super.onChunkUnload();
     }
 
     @Override
@@ -237,19 +209,11 @@ public class TileEntityStorageBus extends TileEntity {
             return;
         }
 
-        int interval = Math.max(1, Config.storageBusRefreshTicks);
-        if (refreshRequested || ++refreshTimer >= interval) {
+        nativeBus.update();
+        if (refreshRequested || ++refreshTimer >= Math.max(1, Config.storageBusRefreshTicks)) {
             refreshRequested = false;
             refreshTimer = 0;
-            ensureRegistered();
-            for (int i = 0; i < FACES; i++) {
-                if (configs[i] == null || !linkRegistered[i]) continue;
-                try {
-                    StorageBusRegistry.refresh(links[i]);
-                } catch (Throwable t) {
-                    FutaGtnhMod.LOG.warn("存储总线：周期刷新面 {} 失败（{} {} {}），这一轮跳过", i, xCoord, yCoord, zCoord, t);
-                }
-            }
+            nativeBus.neighborsChanged();
         }
     }
 
@@ -278,6 +242,7 @@ public class TileEntityStorageBus extends TileEntity {
     @Override
     public void writeToNBT(NBTTagCompound tag) {
         super.writeToNBT(tag);
+        nativeBus.write(tag);
         NBTTagList buses = new NBTTagList();
         for (int i = 0; i < FACES; i++) {
             if (configs[i] == null) continue;
@@ -291,10 +256,10 @@ public class TileEntityStorageBus extends TileEntity {
     @Override
     public void readFromNBT(NBTTagCompound tag) {
         super.readFromNBT(tag);
+        nativeBus.read(tag);
         for (int i = 0; i < FACES; i++) {
             configs[i] = null;
             links[i] = null;
-            linkRegistered[i] = false;
         }
 
         NBTTagList buses = tag.getTagList("buses", 10);

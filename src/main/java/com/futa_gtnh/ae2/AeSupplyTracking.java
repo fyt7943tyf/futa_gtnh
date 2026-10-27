@@ -2,12 +2,16 @@ package com.futa_gtnh.ae2;
 
 import java.lang.ref.WeakReference;
 import java.util.Map;
+import java.util.Optional;
 import java.util.WeakHashMap;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import net.minecraft.tileentity.TileEntity;
 import net.minecraftforge.common.util.ForgeDirection;
 
+import com.futa_gtnh.me.logistics.NativeBusDedup;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorageManager;
@@ -16,6 +20,7 @@ import com.futa_gtnh.supply.SupplyTracker;
 
 import appeng.api.config.AccessRestriction;
 import appeng.api.config.Actionable;
+import appeng.api.config.IncludeExclude;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.IGridHost;
 import appeng.api.networking.IGridNode;
@@ -27,13 +32,18 @@ import appeng.api.networking.security.ReshuffleActionSource;
 import appeng.api.storage.IMEInventory;
 import appeng.api.storage.data.IAEStack;
 import appeng.api.storage.data.IAEStackType;
+import appeng.api.storage.data.IItemList;
 import appeng.api.util.DimensionalCoord;
 import appeng.me.helpers.IGridProxyable;
+import appeng.me.storage.MEInventoryHandler;
 import appeng.me.storage.StorageBusInventoryHandler;
 import appeng.parts.AEBasePart;
 import appeng.parts.misc.PartStorageBus;
 import appeng.util.item.AEFluidStackType;
 import appeng.util.item.AEItemStackType;
+import appeng.util.item.NetworkItemList;
+import appeng.util.item.PrioritizedNetworkItemList;
+import appeng.util.prioitylist.IPartitionList;
 
 /** Preserve cross-network inlet identity on real operations; queries and priority-list enumeration are unchanged. */
 public final class AeSupplyTracking {
@@ -43,10 +53,35 @@ public final class AeSupplyTracking {
 
     private AeSupplyTracking() {}
 
-    public static <T extends IAEStack<T>> StorageBusInventoryHandler<T> bus(IMEInventory<T> inventory,
-        IAEStackType<T> type, Supplier<AccessRestriction> access, PartStorageBus part) {
-        if (SharedStorageManager.isServerThread()) SOURCES.clear(); // Rebuilds, not steady-state transfers.
-        return new TrackedBus<>(inventory, type, access, part);
+    /** Native-constructor fixture entry; production wraps the already constructed native handler. */
+    @SuppressWarnings("unchecked")
+    public static <T extends IAEStack<T>> MEInventoryHandler<T> bus(IMEInventory<T> inventory, IAEStackType<T> type,
+        Supplier<AccessRestriction> access, PartStorageBus part) {
+        try {
+            MEInventoryHandler<T> nativeHandler;
+            try {
+                nativeHandler = (MEInventoryHandler<T>) StorageBusInventoryHandler.class
+                    .getConstructor(IMEInventory.class, IAEStackType.class, Supplier.class)
+                    .newInstance(inventory, type, access);
+            } catch (NoSuchMethodException oldApi) {
+                nativeHandler = (MEInventoryHandler<T>) StorageBusInventoryHandler.class
+                    .getConstructor(IMEInventory.class, IAEStackType.class)
+                    .newInstance(inventory, type);
+            }
+            return wrap(nativeHandler, type, part);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Unsupported native storage bus API", error);
+        }
+    }
+
+    public static <T extends IAEStack<T>> MEInventoryHandler<T> wrap(MEInventoryHandler<T> inventory,
+        IAEStackType<T> type, PartStorageBus part) {
+        if (SharedStorageManager.isServerThread()) SOURCES.clear();
+        return new TrackedBus<>(inventory, type, part);
+    }
+
+    public static boolean isTrackingHandler(IMEInventory<?> inventory) {
+        return inventory instanceof TrackedBus;
     }
 
     public static void record(Object key, long amount, boolean incoming, BaseActionSource action, IGrid mainGrid) {
@@ -139,7 +174,12 @@ public final class AeSupplyTracking {
             AEBasePart part = (AEBasePart) host;
             if (part.getHost() == null) return SupplySource.UNIDENTIFIED;
             return SupplySource.at(
-                host instanceof PartStorageBus ? SupplySource.AE_BUS : SupplySource.AE_MACHINE,
+                host instanceof PartStorageBus ? SupplySource.AE_BUS
+                    : part.getHost()
+                        .getTile() instanceof com.futa_gtnh.block.TileEntityIoNode
+                        || part.getHost()
+                            .getTile() instanceof com.futa_gtnh.block.TileEntitySharedTerminal ? SupplySource.IO
+                                : SupplySource.AE_MACHINE,
                 part.getHost()
                     .getTile(),
                 part.getSide());
@@ -179,15 +219,73 @@ public final class AeSupplyTracking {
         }
     }
 
-    static final class TrackedBus<T extends IAEStack<T>> extends StorageBusInventoryHandler<T> {
+    static final class TrackedBus<T extends IAEStack<T>> extends MEInventoryHandler<T> {
 
         private final PartStorageBus part;
         private SupplySource source;
 
-        TrackedBus(IMEInventory<T> inventory, IAEStackType<T> type, Supplier<AccessRestriction> access,
-            PartStorageBus part) {
-            super(inventory, type, access);
+        TrackedBus(MEInventoryHandler<T> inventory, IAEStackType<T> type, PartStorageBus part) {
+            super(inventory, type);
             this.part = part;
+        }
+
+        @SuppressWarnings("unchecked")
+        private MEInventoryHandler<T> nativeHandler() {
+            return (MEInventoryHandler<T>) super.getInternal();
+        }
+
+        // PartStorageBus configures its handler after assigning the field. Keep those policies on the actual
+        // native storage-bus handler as well, including its version-specific cross-network enumeration behavior.
+        @Override
+        public void setBaseAccess(AccessRestriction access) {
+            nativeHandler().setBaseAccess(access);
+            super.setBaseAccess(access);
+        }
+
+        @Override
+        public void setWhitelist(IncludeExclude mode) {
+            nativeHandler().setWhitelist(mode);
+            super.setWhitelist(mode);
+        }
+
+        @Override
+        public void setPriority(int priority) {
+            nativeHandler().setPriority(priority);
+            super.setPriority(priority);
+        }
+
+        @Override
+        public void setPartitionList(IPartitionList<T> list) {
+            nativeHandler().setPartitionList(list);
+            super.setPartitionList(list);
+        }
+
+        @Override
+        public void setExtractPartitionList(IPartitionList<T> list) {
+            nativeHandler().setExtractPartitionList(list);
+            super.setExtractPartitionList(list);
+        }
+
+        @Override
+        public void setIsExtractFilterActive(boolean enabled) {
+            nativeHandler().setIsExtractFilterActive(enabled);
+            super.setIsExtractFilterActive(enabled);
+        }
+
+        @Override
+        public void setSticky(boolean enabled) {
+            nativeHandler().setSticky(enabled);
+            super.setSticky(enabled);
+        }
+
+        @Override
+        public boolean isVisible() {
+            return nativeHandler().isVisible();
+        }
+
+        @Override
+        public PrioritizedNetworkItemList<T> getAvailableItemsWithPriority(int iteration) {
+            return nativeHandler().getAvailableItemsWithPriority(iteration);
         }
 
         private SupplySource inlet() {
@@ -223,8 +321,27 @@ public final class AeSupplyTracking {
         }
 
         @Override
+        public IItemList<T> getAvailableItems(IItemList<T> out, int iteration, Optional<Predicate<T>> filter) {
+            if (!NativeBusDedup.multiple(part)) return super.getAvailableItems(out, iteration, filter);
+            IItemList<T> local = super.getAvailableItems((IItemList<T>) getStackType().createList(), iteration, filter);
+            if (local instanceof NetworkItemList) return local;
+            for (T stack : local) if (NativeBusDedup.visible(part, stack, iteration)) out.add(stack);
+            return out;
+        }
+
+        @Override
+        public T getAvailableItem(T request, int iteration) {
+            T local = super.getAvailableItem(request, iteration);
+            return NativeBusDedup.visible(part, local, iteration) ? local : null;
+        }
+
+        @Override
         public T extractItems(T request, Actionable mode, BaseActionSource action) {
             if (excluded()) return null;
+            return guarded(request, mode, false, stack -> trackedExtraction(stack, mode, action));
+        }
+
+        private T trackedExtraction(T request, Actionable mode, BaseActionSource action) {
             if (mode != Actionable.MODULATE || !SupplyTracker.enabled())
                 return super.extractItems(request, mode, action);
             SupplySource previous = INLET.get();
@@ -239,6 +356,10 @@ public final class AeSupplyTracking {
         @Override
         public T injectItems(T input, Actionable mode, BaseActionSource action) {
             if (PublicStorageAccess.poolOnly() || excluded()) return input;
+            return guarded(input, mode, true, stack -> trackedInjection(stack, mode, action));
+        }
+
+        private T trackedInjection(T input, Actionable mode, BaseActionSource action) {
             if (mode != Actionable.MODULATE || !SupplyTracker.enabled()) return super.injectItems(input, mode, action);
             SupplySource previous = INLET.get();
             INLET.set(inlet());
@@ -248,5 +369,16 @@ public final class AeSupplyTracking {
                 INLET.set(previous);
             }
         }
+
+        private T guarded(T request, Actionable mode, boolean input, Function<T, T> operation) {
+            if (part.getHost() != null && part.getHost()
+                .getTile() instanceof com.futa_gtnh.storagebus.TileEntityStorageBus tile) {
+                T stable = request == null ? null : request.copy();
+                return com.futa_gtnh.me.logistics.NativeBusSafety
+                    .transfer(tile, stable, mode, input, () -> operation.apply(stable == null ? null : stable.copy()));
+            }
+            return operation.apply(request);
+        }
+
     }
 }

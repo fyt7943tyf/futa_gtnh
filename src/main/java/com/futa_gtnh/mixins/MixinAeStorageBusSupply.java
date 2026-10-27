@@ -1,31 +1,35 @@
 package com.futa_gtnh.mixins;
 
-import java.util.function.Supplier;
-
+import org.spongepowered.asm.lib.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 import com.futa_gtnh.ae2.AeSupplyTracking;
 
-import appeng.api.config.AccessRestriction;
-import appeng.api.storage.IMEInventory;
 import appeng.api.storage.data.IAEStackType;
-import appeng.me.storage.StorageBusInventoryHandler;
+import appeng.me.storage.MEInventoryHandler;
 import appeng.parts.misc.PartStorageBus;
 
-/** Wrap only storage-bus inventories, retaining all of AE's filtering and network-list optimizations. */
+/** Wrap the native result after construction; AE 1069 and 1082 use different constructor signatures. */
 @Mixin(value = PartStorageBus.class, remap = false)
 public abstract class MixinAeStorageBusSupply {
 
+    @Shadow
+    private MEInventoryHandler handler;
+
     @Redirect(
         method = "getInternalHandler",
-        at = @At(value = "NEW", target = "appeng/me/storage/StorageBusInventoryHandler"),
+        at = @At(
+            value = "FIELD",
+            target = "Lappeng/parts/misc/PartStorageBus;handler:Lappeng/me/storage/MEInventoryHandler;",
+            opcode = Opcodes.PUTFIELD),
         require = 1,
         remap = false)
     @SuppressWarnings({ "rawtypes", "unchecked" })
-    private StorageBusInventoryHandler futa$supplyInlet(IMEInventory inventory, IAEStackType type,
-        Supplier<AccessRestriction> access) {
-        return AeSupplyTracking.bus(inventory, type, access, (PartStorageBus) (Object) this);
+    private void futa$supplyInlet(PartStorageBus part, MEInventoryHandler nativeHandler) {
+        handler = nativeHandler == null ? null
+            : AeSupplyTracking.wrap(nativeHandler, (IAEStackType) part.getStackType(), part);
     }
 }

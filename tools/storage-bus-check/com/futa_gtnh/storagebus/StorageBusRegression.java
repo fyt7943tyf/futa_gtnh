@@ -619,6 +619,7 @@ public final class StorageBusRegression {
         other.xCoord = 2;
         other.setWorldObj(f.world);
         other.addFace(WEST);
+        StorageBusRegistry.register(other.getLink(WEST));
         check(f.storage.getItemAmount(iron) == 64 && f.storage.getFluidAmount(water) == 3000,
             "two faces on one target never double-count physical stock");
         check(f.storage.getItemTotal() == 72 && f.storage.itemTypeCount() == 2,
@@ -667,6 +668,7 @@ public final class StorageBusRegression {
         separate.bus = new TileEntityStorageBus();
         separate.bus.setWorldObj(separate);
         separate.bus.addFace(EAST);
+        StorageBusRegistry.register(separate.bus.getLink(EAST));
         check(f.storage.getItemAmount(iron) == 20, "different physical targets still sum their stock");
         separate.bus.invalidate();
         check(f.storage.getItemAmount(iron) == 7, "removing one target preserves the other target's contribution");
@@ -810,6 +812,7 @@ public final class StorageBusRegression {
         alias.xCoord = 2;
         alias.setWorldObj(f.world);
         alias.addFace(WEST);
+        StorageBusRegistry.register(alias.getLink(WEST));
         alias.getConfig(WEST).setPriority(20);
         StorageBusRegistry.refreshAll();
         appeng.api.storage.ICellProvider[] registered = new appeng.api.storage.ICellProvider[1];
@@ -945,6 +948,7 @@ public final class StorageBusRegression {
             world.bus = bus;
             bus.setWorldObj(world);
             bus.addFace(EAST);
+        StorageBusRegistry.register(bus.getLink(EAST));
             StorageBusRegistry.refresh(bus.getLink(EAST));
             return new Fixture(SharedStorageManager.getStorage(), world, target, bus);
         }

@@ -18,7 +18,7 @@ import com.futa_gtnh.shared.ItemKey;
  * 存储总线对「相邻容器」的底层读写。
  *
  * <p>
- * 这一层和 {@code TerminalIoEngine} 的主动搬运遵循同一套守恒规则：只认 Forge 的
+ * 离线旧存储解码器和回归夹具共用的容器适配遵循守恒规则：只认 Forge 的
  * {@link IInventory} / {@link IFluidHandler}，每次写入都按容器实际接受的量计数，
  * 每次抽取都以容器实际减少的量计数。区别在于它是<b>按需</b>调用的（共享终端取东西、
  * AE 网络注入、IO 节点搬运），不是每 tick 定时扫描。

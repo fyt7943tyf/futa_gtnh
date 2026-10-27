@@ -11,14 +11,13 @@ import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.FluidTankInfo;
 import net.minecraftforge.fluids.IFluidHandler;
 
-import com.futa_gtnh.Config;
-import com.futa_gtnh.FutaGtnhMod;
+import com.futa_gtnh.me.logistics.NativeIoRuntime;
 
 /**
  * 「IO 节点」方块实体：共享存储的自动化输入输出口，不带查看库存的界面。
  *
  * <p>
- * 和共享终端（{@link TileEntitySharedTerminal}）共用同一套搬运引擎（{@link TerminalIoEngine}）
+ * 和共享终端（{@link TileEntitySharedTerminal}）共同托管原生 AE/AE2FC 部件（{@link NativeIoRuntime}）
  * 与配置（{@link TerminalIoConfig}），区别只在「形态」：
  * <ul>
  * <li>方块本身<b>不占满整格</b>：中心一个小节点，只向「那一面真的挨着能搬东西的方块」伸出连接臂
@@ -40,10 +39,7 @@ public class TileEntityIoNode extends TileEntity {
 
     /** 六个面的主动搬运方向与输出白名单。 */
     private final TerminalIoConfig io = new TerminalIoConfig();
-    /** 主动搬运的节流计时，单位 tick。 */
-    private int ioTimer;
-    /** 连续空轮数：驱动空闲退避（搬不动东西时逐步拉长间隔，见 {@link TerminalIoEngine}）。 */
-    private int idleRounds;
+    private final NativeIoRuntime nativeIo = new NativeIoRuntime(this, io);
     /** 连接重算的兜底计时。 */
     private int recheckTimer;
 
@@ -95,8 +91,7 @@ public class TileEntityIoNode extends TileEntity {
 
     /** 配置改了之后调一次：存档重新落盘，渲染状态（端帽颜色）也刷一遍。 */
     public void onIoChanged() {
-        ioTimer = 0;
-        idleRounds = 0;
+        nativeIo.changed();
         markDirty();
         if (worldObj != null && !worldObj.isRemote) worldObj.markBlockForUpdate(xCoord, yCoord, zCoord);
     }
@@ -128,6 +123,8 @@ public class TileEntityIoNode extends TileEntity {
         int newItemMask = 0;
         int newFluidMask = 0;
         for (ForgeDirection face : ForgeDirection.VALID_DIRECTIONS) {
+            if (!worldObj.getChunkProvider()
+                .chunkExists((xCoord + face.offsetX) >> 4, (zCoord + face.offsetZ) >> 4)) continue;
             TileEntity neighbour = worldObj
                 .getTileEntity(xCoord + face.offsetX, yCoord + face.offsetY, zCoord + face.offsetZ);
             if (neighbour == null || neighbour instanceof TileEntitySharedTerminal
@@ -166,7 +163,7 @@ public class TileEntityIoNode extends TileEntity {
         // 拿它当「这一面有没有东西可搬」的判据既准确又能自愈 —— 机器还没初始化完的那一瞬间
         // 可能读到 0，但 updateEntity 每 100 tick 会重算一次（见 RECHECK_INTERVAL）。
         //
-        // 放宽是安全的：这个掩码只影响渲染。真正的每一次搬运都由 TerminalIoEngine 现场校验
+        // 放宽是安全的：这个掩码只影响渲染。真正的每一次搬运都由原生 AE 适配器现场校验
         // canInsertItem / canExtractItem，不会被这里放行。
         if (tile instanceof gregtech.api.interfaces.tileentity.IGregTechTileEntity) {
             try {
@@ -217,27 +214,23 @@ public class TileEntityIoNode extends TileEntity {
             refreshConnections();
         }
 
-        if (!io.hasAnyMode()) return;
+        nativeIo.update();
+    }
 
-        int interval = Math.max(1, io.getIntervalTicks());
-        boolean fullScan = ++ioTimer >= TerminalIoEngine.idleWaitTicks(interval, idleRounds);
-        if (!fullScan && ioTimer % interval != 0) return;
-        if (fullScan) ioTimer = 0;
+    public NativeIoRuntime nativeIo() {
+        return nativeIo;
+    }
 
-        boolean moved = false;
-        try {
-            moved = fullScan ? TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io)
-                : TerminalIoEngine.tickManualItems(worldObj, xCoord, yCoord, zCoord, io);
-        } catch (Throwable t) {
-            FutaGtnhMod.LOG.warn("IO 节点：主动搬运时出错（{} {} {}），这一轮跳过", xCoord, yCoord, zCoord, t);
-        }
-        if (moved) {
-            ioTimer = 0;
-            idleRounds = 0;
-        } else if (fullScan) {
-            idleRounds = !Config.ioIdleBackoff ? 0
-                : Math.min(idleRounds + 1, TerminalIoEngine.IDLE_BACKOFF_STEPS.length);
-        }
+    @Override
+    public void invalidate() {
+        nativeIo.close();
+        super.invalidate();
+    }
+
+    @Override
+    public void onChunkUnload() {
+        nativeIo.close();
+        super.onChunkUnload();
     }
 
     // ==================================================================
@@ -247,6 +240,7 @@ public class TileEntityIoNode extends TileEntity {
     @Override
     public void writeToNBT(NBTTagCompound tag) {
         super.writeToNBT(tag);
+        nativeIo.write(tag);
         if (io.hasAnyMode() || io.hasAnyFilter() || io.hasCustomRates()) {
             tag.setTag("io", io.writeToNbt());
         }
@@ -255,6 +249,7 @@ public class TileEntityIoNode extends TileEntity {
     @Override
     public void readFromNBT(NBTTagCompound tag) {
         super.readFromNBT(tag);
+        nativeIo.read(tag);
         if (tag.hasKey("io")) {
             io.readFromNbt(tag.getCompoundTag("io"));
         }

@@ -16,8 +16,7 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidTankInfo;
 import net.minecraftforge.fluids.IFluidHandler;
 
-import com.futa_gtnh.Config;
-import com.futa_gtnh.FutaGtnhMod;
+import com.futa_gtnh.me.logistics.NativeIoRuntime;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -48,16 +47,14 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
      * 漏斗也能取走。**绝不能丢**。
      */
     private ItemStack inputLeftover;
+    private NBTTagCompound unresolvedInput;
     private SharedStorage indexedStorage;
     private int indexedRevision = -1;
     private int indexedOutputRevision = -1;
 
     /** 六个面的主动搬运方向与主动/被动共用的输出白名单。输入不使用筛选。 */
     private final TerminalIoConfig io = new TerminalIoConfig();
-    /** 主动搬运的节流计时，单位 tick。 */
-    private int ioTimer;
-    /** 连续空轮数：驱动空闲退避（搬不动东西时逐步拉长间隔，见 {@link TerminalIoEngine}）。 */
-    private int idleRounds;
+    private final NativeIoRuntime nativeIo = new NativeIoRuntime(this, io);
     /**
      * 各条目的堆叠上限缓存。
      *
@@ -79,13 +76,21 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
      */
     public int getTargetMask(boolean fluid) {
         if (worldObj == null) return 0;
-        return TerminalIoEngine.targetMask(worldObj, xCoord, yCoord, zCoord, fluid);
+        int mask = 0;
+        for (ForgeDirection side : ForgeDirection.VALID_DIRECTIONS) {
+            int x = xCoord + side.offsetX, z = zCoord + side.offsetZ;
+            if (!worldObj.getChunkProvider()
+                .chunkExists(x >> 4, z >> 4)) continue;
+            TileEntity target = worldObj.getTileEntity(x, yCoord + side.offsetY, z);
+            if (fluid ? target instanceof IFluidHandler : target instanceof net.minecraft.inventory.IInventory)
+                mask |= 1 << side.ordinal();
+        }
+        return mask;
     }
 
     /** 配置改了之后调一次：存档要重新落盘。 */
     public void onIoChanged() {
-        ioTimer = 0;
-        idleRounds = 0;
+        nativeIo.changed();
         markDirty();
     }
 
@@ -99,28 +104,23 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     @Override
     public void updateEntity() {
         if (worldObj == null || worldObj.isRemote) return;
-        if (!io.hasAnyMode()) return;
+        nativeIo.update();
+    }
 
-        int interval = Math.max(1, io.getIntervalTicks());
-        boolean fullScan = ++ioTimer >= TerminalIoEngine.idleWaitTicks(interval, idleRounds);
-        if (!fullScan && ioTimer % interval != 0) return;
-        if (fullScan) ioTimer = 0;
+    public NativeIoRuntime nativeIo() {
+        return nativeIo;
+    }
 
-        boolean moved = false;
-        try {
-            moved = fullScan ? TerminalIoEngine.tick(worldObj, xCoord, yCoord, zCoord, io)
-                : TerminalIoEngine.tickManualItems(worldObj, xCoord, yCoord, zCoord, io);
-        } catch (Throwable t) {
-            // 相邻方块是别的模组写的，出什么怪事都不该把整个服务端 tick 带崩
-            FutaGtnhMod.LOG.warn("共享终端：主动搬运时出错（{} {} {}），这个面这一轮跳过", xCoord, yCoord, zCoord, t);
-        }
-        if (moved) {
-            ioTimer = 0;
-            idleRounds = 0;
-        } else if (fullScan) {
-            idleRounds = !Config.ioIdleBackoff ? 0
-                : Math.min(idleRounds + 1, TerminalIoEngine.IDLE_BACKOFF_STEPS.length);
-        }
+    @Override
+    public void invalidate() {
+        nativeIo.close();
+        super.invalidate();
+    }
+
+    @Override
+    public void onChunkUnload() {
+        nativeIo.close();
+        super.onChunkUnload();
     }
 
     private boolean allowsOutput(ForgeDirection face, ItemStack stack) {
@@ -376,6 +376,7 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
             out.stackSize = taken;
             inputLeftover.stackSize -= taken;
             if (inputLeftover.stackSize <= 0) inputLeftover = null;
+            markDirty();
             return out;
         }
         ItemKey key = keyForSlot(slot);
@@ -399,6 +400,9 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     public void setInventorySlotContents(int slot, ItemStack stack) {
         SharedStorage storage = SharedStorageManager.getStorage();
         if (slot == INPUT_SLOT) {
+            if (unresolvedInput != null)
+                throw new IllegalStateException("Input recovery contains an unregistered item; original NBT retained");
+            markDirty();
             // ★ 收不下的东西留在这个槽里，绝不吞掉。
             //
             // 这个槽是个「漏斗口」：放进去就被吸进共享仓库，正常时槽里是空的。
@@ -468,7 +472,10 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
 
     @Override
     public boolean isItemValidForSlot(int slot, ItemStack stack) {
-        return slot == INPUT_SLOT && stack != null && stack.getItem() != null && stack.stackSize > 0;
+        return slot == INPUT_SLOT && unresolvedInput == null
+            && stack != null
+            && stack.getItem() != null
+            && stack.stackSize > 0;
     }
 
     @Override
@@ -490,6 +497,9 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     @Override
     public void writeToNBT(NBTTagCompound tag) {
         super.writeToNBT(tag);
+        nativeIo.write(tag);
+        NBTTagCompound input = inputBufferTag();
+        if (input != null) tag.setTag("inputLeftover", input);
         if (io.hasAnyMode() || io.hasAnyFilter() || io.hasCustomRates()) {
             tag.setTag("io", io.writeToNbt());
         }
@@ -498,6 +508,57 @@ public class TileEntitySharedTerminal extends TileEntity implements IFluidHandle
     @Override
     public void readFromNBT(NBTTagCompound tag) {
         super.readFromNBT(tag);
+        nativeIo.read(tag);
+        restoreInputBuffer(tag.hasKey("inputLeftover", 10) ? tag.getCompoundTag("inputLeftover") : null);
         io.readFromNbt(tag.hasKey("io") ? tag.getCompoundTag("io") : null);
     }
+
+    /** Only the actual input remainder is physical; virtual output slots must never be dropped. */
+    public boolean hasUnresolvedInput() {
+        return unresolvedInput != null;
+    }
+
+    public NBTTagCompound inputBufferTag() {
+        if (unresolvedInput != null) return (NBTTagCompound) unresolvedInput.copy();
+        if (inputLeftover == null) return null;
+        NBTTagCompound tag = inputLeftover.writeToNBT(new NBTTagCompound());
+        tag.setInteger("futaOwnedCount", inputLeftover.stackSize);
+        return tag;
+    }
+
+    public void restoreInputBuffer(NBTTagCompound tag) {
+        inputLeftover = tag == null ? null : ItemStack.loadItemStackFromNBT(tag);
+        unresolvedInput = tag != null && inputLeftover == null ? (NBTTagCompound) tag.copy() : null;
+        if (inputLeftover != null && tag.hasKey("futaOwnedCount", 3))
+            inputLeftover.stackSize = tag.getInteger("futaOwnedCount");
+        markDirty();
+    }
+
+    public void dropInputBuffer() {
+        if (worldObj == null || worldObj.isRemote) return;
+        NBTTagCompound saved = inputBufferTag();
+        if (saved == null) return;
+        if (unresolvedInput != null) {
+            ItemStack recovery = new ItemStack(com.futa_gtnh.FutaGtnhMod.blockSharedTerminal);
+            recovery.setTagCompound(new NBTTagCompound());
+            recovery.getTagCompound()
+                .setTag("futaInputRecovery", saved);
+            appeng.util.Platform
+                .spawnDrops(worldObj, xCoord, yCoord, zCoord, java.util.Collections.singletonList(recovery));
+        } else {
+            java.util.List<ItemStack> drops = new ArrayList<>();
+            int left = inputLeftover.stackSize;
+            while (left > 0) {
+                ItemStack stack = inputLeftover.copy();
+                stack.stackSize = Math.min(left, Math.max(1, stack.getMaxStackSize()));
+                left -= stack.stackSize;
+                drops.add(stack);
+            }
+            appeng.util.Platform.spawnDrops(worldObj, xCoord, yCoord, zCoord, drops);
+        }
+        inputLeftover = null;
+        unresolvedInput = null;
+        markDirty();
+    }
+
 }

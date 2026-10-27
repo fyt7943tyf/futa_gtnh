@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.WorldServer;
 
@@ -45,6 +46,31 @@ public final class SharedStorageManager {
 
     private static NativeMeStorageData nativeData;
     private static WorldServer nativeWorld;
+    private static volatile boolean nativeLogisticsGuardPersisted;
+
+    /** Flush and verify the downgrade barrier before the first native logistics node can join a live grid. */
+    public static void requireNativeLogisticsGuard() {
+        if (nativeLogisticsGuardPersisted) return;
+        synchronized (SharedStorageManager.class) {
+            if (nativeLogisticsGuardPersisted) return;
+            if (!loaded || savingBlocked || nativeData == null || nativeWorld == null || worldDirectory == null)
+                throw new IllegalStateException("Native logistics requires writable native world data");
+            storage.enableNativeLogistics();
+            saveNow();
+            try (java.io.FileInputStream input = new java.io.FileInputStream(
+                NativeMeMigration.dataFile(worldDirectory))) {
+                NBTTagCompound metadata = net.minecraft.nbt.CompressedStreamTools.readCompressed(input)
+                    .getCompoundTag("data")
+                    .getCompoundTag("metadata");
+                if (metadata.getInteger("version") != 4 || !metadata.getBoolean("nativeLogistics"))
+                    throw new IllegalStateException("Native logistics downgrade barrier was not persisted");
+            } catch (java.io.IOException error) {
+                throw new IllegalStateException("Cannot verify native logistics downgrade barrier", error);
+            }
+            nativeLogisticsGuardPersisted = true;
+        }
+    }
+
     private static int transferCounter;
 
     /**
@@ -134,6 +160,7 @@ public final class SharedStorageManager {
         // 上一个世界/存档遗留的总线登记必须清掉：方块实体会在新区块加载后的
         // 第一次 tick 重新登记，旧 World 的引用不能留在静态表里。
         StorageBusRegistry.clear();
+        com.futa_gtnh.me.logistics.NativeBusDedup.clear();
 
         readApiThread = Thread.currentThread();
         readApiGeneration = UUID.randomUUID()
@@ -142,6 +169,7 @@ public final class SharedStorageManager {
         savingBlocked = false;
         nativeData = null;
         nativeWorld = null;
+        nativeLogisticsGuardPersisted = false;
 
         File dir = resolveWorldDirectory(server);
         if (dir == null) {
@@ -154,6 +182,7 @@ public final class SharedStorageManager {
             worldDirectory = null;
             nativeData = null;
             nativeWorld = null;
+            nativeLogisticsGuardPersisted = false;
             loaded = true;
             invalidateSnapshot();
             return;
@@ -190,7 +219,9 @@ public final class SharedStorageManager {
         } finally {
             // 清掉总线对 World / TileEntity 的引用：服务端停掉后它们不应该继续被静态表持有
             StorageBusRegistry.clear();
+            com.futa_gtnh.me.logistics.NativeBusDedup.clear();
             nativeWorld = null;
+            nativeLogisticsGuardPersisted = false;
             nativeData = null;
             loaded = false;
             readApiGeneration = UUID.randomUUID()
@@ -445,6 +476,7 @@ public final class SharedStorageManager {
         }
         savingBlocked = false;
         boolean networkAttached = storage.usesNetwork();
+        nativeLogisticsGuardPersisted = false;
         fresh.adoptListenersFrom(storage);
         storage = fresh;
         if (networkAttached) com.futa_gtnh.ae2.PublicStorageAccess.begin();

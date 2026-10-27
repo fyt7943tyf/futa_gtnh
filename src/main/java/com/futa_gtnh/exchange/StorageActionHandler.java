@@ -288,7 +288,7 @@ public final class StorageActionHandler {
                 case PacketStorageAction.SET_TERMINAL_IO: {
                     // 六个面怎么主动搬东西：整份配置在 keyTag 里。
                     // 客户端算出来的任何东西都不被信任 —— 配置只影响「搬什么、往哪搬」，
-                    // 真正搬的时候每一步仍然由服务端自己校验（见 TerminalIoEngine）
+                    // 真正搬的时候每一步仍然由服务端自己校验（见 原生 AE 搬运部件）
                     handleSetTerminalIo(player, container, packet.getLayoutTag());
                     return;
                 }
@@ -400,7 +400,7 @@ public final class StorageActionHandler {
      * <p>
      * 这里只做<b>形状</b>上的校验（是一份能读的 NBT），不做业务校验：
      * 配置本身只是「搬什么、往哪搬」的意愿，真正搬的每一步都由
-     * {@code TerminalIoEngine} 在服务端现查现搬，客户端改不出物品来。
+     * {@code 原生 AE 搬运部件} 在服务端现查现搬，客户端改不出物品来。
      * 改完回推一份权威值，客户端那份立刻对齐。
      */
     private static void handleSetTerminalIo(EntityPlayerMP player, ContainerSharedTerminal container,

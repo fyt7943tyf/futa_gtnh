@@ -158,11 +158,11 @@ val compileSupplyChecks = tasks.register<JavaCompile>("compileSupplyChecks") {
 tasks.register<JavaExec>("verifySupplyTracking") {
     group = "verification"
     description = "Checks AE subnet attribution, shared IO accounting, bounded history, watches and protocol"
-    dependsOn(compileSupplyChecks, compileProspectorChecks, "extractTerminalClickLwjgl")
+    dependsOn(compileSupplyChecks, compileProspectorChecks, "compileTerminalIoChecks", "extractTerminalClickLwjgl")
     mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
     args("--tweakClass", "com.futa_gtnh.supplycheck.SupplyCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
     classpath = files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) + files(compileSupplyChecks.flatMap { it.destinationDirectory }) +
-        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/supply-check") +
+        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files(layout.buildDirectory.dir("terminal-io-check/classes")) + files("tools/supply-check") +
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 tasks.register<JavaExec>("benchmarkProductionQueries") {
@@ -399,9 +399,9 @@ val compileStorageBusChecks = tasks.register<JavaCompile>("compileStorageBusChec
 tasks.register<JavaExec>("verifyStorageBus") {
     group = "verification"
     description = "Checks storage bus aggregation, priority routing, filters, access modes, fluids and unregistering"
-    dependsOn(compileStorageBusChecks)
+    dependsOn(compileStorageBusChecks, compileTerminalIoChecks)
     mainClass.set("com.futa_gtnh.storagebus.StorageBusCheckLauncher")
-    classpath = files(compileStorageBusChecks.flatMap { it.destinationDirectory }) +
+    classpath = files(compileStorageBusChecks.flatMap { it.destinationDirectory }) + files(compileTerminalIoChecks.flatMap { it.destinationDirectory }) +
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 tasks.named("check") { dependsOn("verifyStorageBus") }
@@ -409,9 +409,9 @@ tasks.named("check") { dependsOn("verifyStorageBus") }
 tasks.register<JavaExec>("verifyStorageBusWithoutDrawers") {
     group = "verification"
     description = "Checks storage bus loading and transfers without the optional Storage Drawers API"
-    dependsOn(compileStorageBusChecks)
+    dependsOn(compileStorageBusChecks, compileTerminalIoChecks)
     mainClass.set("com.futa_gtnh.storagebus.StorageBusCheckLauncher")
-    classpath = files(compileStorageBusChecks.flatMap { it.destinationDirectory }) +
+    classpath = files(compileStorageBusChecks.flatMap { it.destinationDirectory }) + files(compileTerminalIoChecks.flatMap { it.destinationDirectory }) +
         (sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath).filter {
             !it.name.startsWith("StorageDrawers-")
         }

@@ -74,6 +74,7 @@ public final class DrawerStorageRegression {
         alias.xCoord = 2;
         alias.setWorldObj(f.world);
         alias.addFace(WEST);
+        StorageBusRegistry.register(alias.getLink(WEST));
         check(f.storage.getItemAmount(iron) == 208, "two buses on the same drawer still count once");
         f.bus.getConfig(EAST).setItemFilter(0, iron);
         f.bus.getConfig(EAST).setFilterMode(StorageBusConfig.FilterMode.BLACKLIST);
@@ -248,6 +249,7 @@ public final class DrawerStorageRegression {
             world.bus = bus;
             bus.setWorldObj(world);
             bus.addFace(EAST);
+        StorageBusRegistry.register(bus.getLink(EAST));
         }
     }
 

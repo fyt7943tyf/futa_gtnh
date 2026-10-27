@@ -238,7 +238,7 @@ public final class PublicMeNetwork {
             && controller.zCoord == saved.z;
     }
 
-    static boolean isAttachable() {
+    public static boolean isAttachable() {
         return running && problem == null && grid() != null;
     }
 

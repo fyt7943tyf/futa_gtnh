@@ -82,6 +82,8 @@ public final class PublicStorageAccess implements StorageNetworkAccess {
         int routeDepth, queryDepth;
         TileEntity excluded;
         BaseActionSource source;
+        Object creditKey;
+        long credit;
     }
 
     public static TileEntity excludedTile() {
@@ -94,6 +96,31 @@ public final class PublicStorageAccess implements StorageNetworkAccess {
 
     public static boolean poolOnly() {
         return CONTEXT.get().direct;
+    }
+
+    public static long ownedTransferCredit(Object key) {
+        Context context = CONTEXT.get();
+        return key != null && key.equals(context.creditKey) ? context.credit : 0;
+    }
+
+    /** A worker's own escrow reserves ownership, not an additional copy of the incoming stock. */
+    public static <T> T withOwnedTransferCredit(Object key, long amount, Supplier<T> operation) {
+        Context context = CONTEXT.get();
+        Object oldKey = context.creditKey;
+        long oldCredit = context.credit;
+        context.creditKey = key;
+        context.credit = amount;
+        try {
+            return operation.get();
+        } finally {
+            context.creditKey = oldKey;
+            context.credit = oldCredit;
+        }
+    }
+
+    /** Native compatibility workers may never route a transfer back into its own source/target container. */
+    public static <T> T withExcludedTarget(TileEntity target, Supplier<T> operation) {
+        return INSTANCE.inContext(false, false, target, operation);
     }
 
     public static <T> T withPlayer(EntityPlayer player, Supplier<T> operation) {
@@ -154,7 +181,6 @@ public final class PublicStorageAccess implements StorageNetworkAccess {
 
     public static void install(IGrid newGrid) {
         if (INSTANCE.grid == newGrid) return;
-        com.futa_gtnh.storagebus.LegacyMeBusProvider.clear();
         INSTANCE.detachGrid();
         INSTANCE.attachPool();
         INSTANCE.changed();
@@ -169,7 +195,6 @@ public final class PublicStorageAccess implements StorageNetworkAccess {
         INSTANCE.fluidMonitor = (IMEMonitor<IAEFluidStack>) storage.getMEMonitor(AEFluidStackType.FLUID_STACK_TYPE);
         INSTANCE.itemMonitor.addListener(INSTANCE.itemListener, newGrid);
         INSTANCE.fluidMonitor.addListener(INSTANCE.fluidListener, newGrid);
-        com.futa_gtnh.storagebus.LegacyMeBusProvider.install(newGrid);
         INSTANCE.changed();
     }
 
@@ -190,7 +215,6 @@ public final class PublicStorageAccess implements StorageNetworkAccess {
     }
 
     public static void clear() {
-        com.futa_gtnh.storagebus.LegacyMeBusProvider.clear();
         INSTANCE.detachGrid();
         if (INSTANCE.pool != null) {
             INSTANCE.pool.setNetworkAccess(null);
@@ -208,7 +232,6 @@ public final class PublicStorageAccess implements StorageNetworkAccess {
     public static void tick() {
         if (!PublicMeNetwork.isRunning()) return;
         INSTANCE.attachPool();
-        com.futa_gtnh.storagebus.LegacyMeBusProvider.tick();
         boolean online = INSTANCE.online();
         if (online != INSTANCE.wasOnline) {
             INSTANCE.wasOnline = online;
@@ -289,6 +312,8 @@ public final class PublicStorageAccess implements StorageNetworkAccess {
         next.direct = direct;
         next.excluded = excluded;
         next.source = old.source;
+        next.creditKey = old.creditKey;
+        next.credit = old.credit;
         next.routeDepth = old.routeDepth + 1;
         next.queryDepth = old.queryDepth;
         CONTEXT.set(next);

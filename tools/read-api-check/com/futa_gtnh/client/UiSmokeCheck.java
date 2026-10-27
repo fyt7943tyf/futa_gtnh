@@ -55,6 +55,7 @@ public final class UiSmokeCheck {
         ProductionTerminalWorldSmoke.register();
         com.futa_gtnh.me.PublicMeSubnetFlowWorldSmoke.register();
         com.futa_gtnh.me.NativeMeStorageWorldSmoke.register();
+        com.futa_gtnh.me.logistics.NativeLogisticsWorldSmoke.register();
     }
 
     private void add(String name, Supplier<GuiScreen> factory) {
@@ -101,6 +102,8 @@ public final class UiSmokeCheck {
             if(System.currentTimeMillis()-smokeWaitSince>330000L)throw new AssertionError("NATIVE_ME_STORAGE_SMOKE_FAILED wall-clock timeout");
             return;
         }
+        if (com.futa_gtnh.me.logistics.NativeLogisticsWorldSmoke.failure()!=null) throw new AssertionError(com.futa_gtnh.me.logistics.NativeLogisticsWorldSmoke.failure());
+        if (!com.futa_gtnh.me.logistics.NativeLogisticsWorldSmoke.isComplete()) return;
         if (capturedAll) {
             if(com.futa_gtnh.me.PublicMeWorldSmoke.isComplete() && com.futa_gtnh.me.GtswnQuantumWorldSmoke.isComplete()) {
                 System.out.println("UI_SMOKE_SUCCESS " + screens.size() + " screens");mc.shutdown();

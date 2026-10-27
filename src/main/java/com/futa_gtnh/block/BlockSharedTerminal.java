@@ -5,7 +5,9 @@ import net.minecraft.block.BlockContainer;
 import net.minecraft.block.material.Material;
 import net.minecraft.client.renderer.texture.IIconRegister;
 import net.minecraft.creativetab.CreativeTabs;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.item.ItemStack;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.IIcon;
 import net.minecraft.world.World;
@@ -25,6 +27,7 @@ import cpw.mods.fml.relauncher.SideOnly;
 public class BlockSharedTerminal extends BlockContainer {
 
     public static final String NAME = "shared_terminal";
+    private static final java.util.Map<World, java.util.Map<String, Long>> RECOVERY_SHELLS = new java.util.WeakHashMap<>();
 
     /** 每个面一个材质，顺序就是 {@code side} / {@code ForgeDirection} 的顺序。 */
     private static final String[] FACE_SUFFIX = { "down", "up", "north", "south", "west", "east" };
@@ -54,6 +57,58 @@ public class BlockSharedTerminal extends BlockContainer {
     @Override
     public TileEntity createNewTileEntity(World world, int metadata) {
         return new TileEntitySharedTerminal();
+    }
+
+    @Override
+    public void breakBlock(World world, int x, int y, int z, Block block, int metadata) {
+        if (world.getTileEntity(x, y, z) instanceof TileEntitySharedTerminal terminal) {
+            if (!world.isRemote && terminal.hasUnresolvedInput()) recoveryShell(world, x, y, z, true);
+            terminal.dropInputBuffer();
+        }
+        super.breakBlock(world, x, y, z, block, metadata);
+    }
+
+    @Override
+    public void onBlockPlacedBy(World world, int x, int y, int z, EntityLivingBase entity, ItemStack stack) {
+        super.onBlockPlacedBy(world, x, y, z, entity, stack);
+        if (!world.isRemote) synchronized (RECOVERY_SHELLS) {
+            java.util.Map<String, Long> recent = RECOVERY_SHELLS.get(world);
+            if (recent != null) recent.remove(x + ":" + y + ":" + z);
+        }
+        if (!world.isRemote && stack.hasTagCompound()
+            && stack.getTagCompound()
+                .hasKey("futaInputRecovery", 10)
+            && world.getTileEntity(x, y, z) instanceof TileEntitySharedTerminal terminal)
+            terminal.restoreInputBuffer(
+                stack.getTagCompound()
+                    .getCompoundTag("futaInputRecovery"));
+    }
+
+    @Override
+    public java.util.ArrayList<ItemStack> getDrops(World world, int x, int y, int z, int metadata, int fortune) {
+        // The recovered block shell is already dropped by breakBlock, including creative/explosion removal.
+        // Suppress the ordinary shell both before and immediately after removal; no extra block can be duplicated.
+        if (!world.isRemote && ((world.getTileEntity(x, y, z) instanceof TileEntitySharedTerminal terminal
+            && terminal.hasUnresolvedInput()) || recoveryShell(world, x, y, z, false)))
+            return new java.util.ArrayList<>();
+        return super.getDrops(world, x, y, z, metadata, fortune);
+    }
+
+    private static boolean recoveryShell(World world, int x, int y, int z, boolean remember) {
+        synchronized (RECOVERY_SHELLS) {
+            java.util.Map<String, Long> recent = RECOVERY_SHELLS.get(world);
+            if (recent == null) {
+                if (!remember) return false;
+                recent = new java.util.HashMap<>();
+                RECOVERY_SHELLS.put(world, recent);
+            }
+            long now = world.getTotalWorldTime();
+            recent.values()
+                .removeIf(expiry -> expiry < now);
+            String position = x + ":" + y + ":" + z;
+            if (remember) recent.put(position, now + 1);
+            return recent.containsKey(position);
+        }
     }
 
     /**

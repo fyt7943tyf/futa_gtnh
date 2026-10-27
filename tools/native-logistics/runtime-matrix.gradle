@@ -1,0 +1,25 @@
+// Opt-in runtime-only ABI verification; never changes the compiler dependencies or production server files.
+// ./gradlew -I tools/native-logistics/runtime-matrix.gradle runClient17 -PuiSmoke \
+//   -PaeRuntimeJar=/path/to/ae-dev.jar -Pae2fcRuntimeJar=/path/to/ae2fc-dev.jar --no-configuration-cache
+
+gradle.projectsEvaluated {
+    def properties = gradle.startParameter.projectProperties
+    def ae = properties['aeRuntimeJar']
+    def fc = properties['ae2fcRuntimeJar']
+    if (!ae || !fc || !new File(ae).isFile() || !new File(fc).isFile()) {
+        throw new GradleException('Provide existing deobfuscated -PaeRuntimeJar and -Pae2fcRuntimeJar files')
+    }
+    def replacements = rootProject.files(ae, fc)
+    rootProject.tasks.withType(JavaExec).matching { it.name == 'runClient17' }.configureEach {
+        doFirst {
+            def previous = classpath.files.findAll {
+                it.name.startsWith('Applied-Energistics-2-Unofficial-') || it.name.startsWith('AE2FluidCraft-Rework-')
+            }
+            if (previous.size() != 2) {
+                throw new GradleException('Expected exactly two default AE runtime jars: ' + previous.collect { it.name })
+            }
+            classpath = classpath.filter { !previous.contains(it) } + replacements
+            logger.lifecycle('Native logistics runtime matrix; compiled Futa unchanged; replacement jars: ' + replacements.files.collect { it.name })
+        }
+    }
+}

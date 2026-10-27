@@ -49,11 +49,15 @@ public class SharedStorage {
     }
 
     public synchronized long nativeItemCeiling(ItemKey key, boolean manual) {
-        return Math.max(0, (manual ? MAX_AMOUNT : getItemLimit(key)) - craftingItems.getOrDefault(key, 0L));
+        long held = craftingItems.getOrDefault(key, 0L);
+        held -= Math.min(held, com.futa_gtnh.ae2.PublicStorageAccess.ownedTransferCredit(key));
+        return Math.max(0, (manual ? MAX_AMOUNT : getItemLimit(key)) - held);
     }
 
     public synchronized long nativeFluidCeiling(FluidKey key, boolean manual) {
-        return Math.max(0, (manual ? MAX_AMOUNT : getFluidLimit(key)) - craftingFluids.getOrDefault(key, 0L));
+        long held = craftingFluids.getOrDefault(key, 0L);
+        held -= Math.min(held, com.futa_gtnh.ae2.PublicStorageAccess.ownedTransferCredit(key));
+        return Math.max(0, (manual ? MAX_AMOUNT : getFluidLimit(key)) - held);
     }
 
     public synchronized long poolInsertItem(ItemKey key, long amount, boolean manual) {
@@ -87,7 +91,16 @@ public class SharedStorage {
     }
 
     /** 存档格式版本。将来改结构时靠它做迁移。 */
-    public static final int FORMAT_VERSION = 3;
+    public static final int FORMAT_VERSION = 4;
+    private boolean nativeLogistics;
+
+    /** The previous executor must never be restarted against an upgraded world. */
+    public synchronized boolean enableNativeLogistics() {
+        if (nativeLogistics) return false;
+        nativeLogistics = true;
+        markChanged();
+        return true;
+    }
 
     private StorageNetworkAccess networkAccess;
 
@@ -1042,6 +1055,15 @@ public class SharedStorage {
         return new OwnedTransfer(null, key, amount, craftingEpoch);
     }
 
+    /** A foreign handler returned a different known resource. Quarantine that actual return without replaying it. */
+    public synchronized void quarantineIoReturn(Object key, long amount) {
+        if (amount <= 0) return;
+        if (key instanceof ItemKey item) craftingItems.merge(item, amount, Math::addExact);
+        else if (key instanceof FluidKey fluid) craftingFluids.merge(fluid, amount, Math::addExact);
+        else throw new IllegalArgumentException("Unknown IO recovery resource");
+        markChanged();
+    }
+
     public final class OwnedTransfer {
 
         private final ItemKey item;
@@ -1229,7 +1251,8 @@ public class SharedStorage {
         boolean escrow = !craftingItems.isEmpty() || !craftingFluids.isEmpty()
             || !unreadableCraftingItems.isEmpty()
             || !unreadableCraftingFluids.isEmpty();
-        root.setInteger("version", escrow ? FORMAT_VERSION : 2);
+        root.setInteger("version", nativeLogistics ? FORMAT_VERSION : escrow ? 3 : 2);
+        if (nativeLogistics) root.setBoolean("nativeLogistics", true);
 
         NBTTagList itemList = new NBTTagList();
         for (Map.Entry<ItemKey, Long> entry : (legacyStock ? items : Collections.<ItemKey, Long>emptyMap())
@@ -1323,6 +1346,8 @@ public class SharedStorage {
     public synchronized int readFromNbt(NBTTagCompound root) {
         if (nativeCells != null)
             throw new IllegalStateException("Legacy decoder cannot overwrite live native AE cells");
+        nativeLogistics = root != null
+            && (root.getBoolean("nativeLogistics") || root.hasKey("version", 3) && root.getInteger("version") >= 4);
         itemRevision++;
         fluidRevision++;
         items.clear();
