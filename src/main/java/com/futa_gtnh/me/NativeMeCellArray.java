@@ -3,7 +3,6 @@ package com.futa_gtnh.me;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -12,14 +11,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTBase;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
+import net.minecraft.nbt.NBTTagString;
 import net.minecraftforge.fluids.FluidRegistry;
 
 import com.futa_gtnh.ae2.PublicStorageAccess;
+import com.futa_gtnh.mixins.MixinAeCellContents;
 import com.futa_gtnh.shared.FluidKey;
 import com.futa_gtnh.shared.ItemKey;
 import com.futa_gtnh.shared.SharedStorage;
@@ -52,11 +55,18 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
     private final Channel<IAEItemStack, ItemKey> items = new Channel<>(
         AEItemStackType.ITEM_STACK_TYPE,
         key -> AEItemStack.create(key.prototype()),
-        ItemKey::fromNative);
+        ItemKey::fromNative,
+        value -> value instanceof NativeMeItemIdentity ? ((NativeMeItemIdentity) value).futa$copyIdentity()
+            : AEItemStack.create(value.getItemStack()),
+        value -> value.getItem() != null);
     private final Channel<IAEFluidStack, FluidKey> fluids = new Channel<>(
         AEFluidStackType.FLUID_STACK_TYPE,
         key -> AEFluidStack.create(key.prototype()),
-        FluidKey::fromNative);
+        FluidKey::fromNative,
+        IAEFluidStack::copy,
+        value -> value.getFluid() != null && FluidRegistry.getFluidName(value.getFluid()) != null
+            && !FluidRegistry.getFluidName(value.getFluid())
+                .isEmpty());
     private final Function<Boolean, ItemStack> definitions;
     private Runnable dirty = () -> {};
     private Runnable topology = () -> {};
@@ -200,12 +210,14 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         final IAEStackType<T> type;
         final Function<K, T> stack;
         final Function<T, K> key;
+        final Function<T, T> snapshot;
+        final Predicate<T> valid;
         final List<Slot> slots = new ArrayList<>();
         final List<NBTTagCompound> frozen = new ArrayList<>();
-        // Locations only. Quantities always come from AE's own CellInventory.
+        // Optional immutable compatibility-key cache. Native identities below own all resource-to-cell locations.
         final Map<K, Resource> locations = new LinkedHashMap<>();
         // Private native identity keys never change; their count is only a key marker, never inventory.
-        final Map<T, Resource> identities = new HashMap<>();
+        final Map<T, Resource> identities = new LinkedHashMap<>();
         final Set<Slot> openSlots = new LinkedHashSet<>();
         final Set<Slot> batchChanged = new LinkedHashSet<>();
         boolean importing;
@@ -217,22 +229,22 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
 
             @Override
             public Long get(Object raw) {
-                Resource found = locations.get(raw);
-                if (found == null) return null;
+                if (!isKey(raw)) return null;
                 @SuppressWarnings("unchecked")
-                K requested = (K) raw;
-                long amount = amount(requested);
+                Resource found = resolve((K) raw);
+                if (found == null) return null;
+                long amount = amount(found, found.identity);
                 return amount == 0 ? null : amount;
             }
 
             @Override
             public int size() {
-                return locations.size();
+                return identities.size();
             }
 
             @Override
             public boolean isEmpty() {
-                return locations.isEmpty();
+                return identities.isEmpty();
             }
 
             @Override
@@ -260,8 +272,13 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             }
 
             @Override
+            public boolean containsKey(Object raw) {
+                return get(raw) != null;
+            }
+
+            @Override
             public Long remove(Object raw) {
-                if (!locations.containsKey(raw)) return null;
+                if (!containsKey(raw)) return null;
                 @SuppressWarnings("unchecked")
                 K requested = (K) raw;
                 return put(requested, 0L);
@@ -288,9 +305,9 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             @Override
             public Set<Entry<K, Long>> entrySet() {
                 Set<Entry<K, Long>> result = new LinkedHashSet<>();
-                for (K requested : new ArrayList<>(locations.keySet())) {
-                    long amount = amount(requested);
-                    if (amount > 0) result.add(new SimpleImmutableEntry<>(requested, amount));
+                for (Resource resource : new ArrayList<>(identities.values())) {
+                    long amount = amount(resource, resource.identity);
+                    if (amount > 0) result.add(new SimpleImmutableEntry<>(compatibilityKey(resource), amount));
                 }
                 return Collections.unmodifiableSet(result);
             }
@@ -328,16 +345,42 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             };
         }
 
-        Channel(IAEStackType<T> type, Function<K, T> stack, Function<T, K> key) {
+        Channel(IAEStackType<T> type, Function<K, T> stack, Function<T, K> key, Function<T, T> snapshot,
+            Predicate<T> valid) {
             this.type = type;
             this.stack = stack;
             this.key = key;
+            this.snapshot = snapshot;
+            this.valid = valid;
             allocator = newAllocator();
         }
 
         long amount(K requested) {
-            Resource found = locations.get(requested);
+            Resource found = resolve(requested);
             return found == null ? 0 : amount(found, found.identity);
+        }
+
+        boolean isKey(Object raw) {
+            return type == AEItemStackType.ITEM_STACK_TYPE ? raw instanceof ItemKey : raw instanceof FluidKey;
+        }
+
+        Resource resolve(K requested) {
+            Resource resource = locations.get(requested);
+            if (resource == null) {
+                resource = locate(stack.apply(requested));
+                if (resource == null || !compatibilityKey(resource).equals(requested)) return null;
+            }
+            return resource;
+        }
+
+        K compatibilityKey(Resource resource) {
+            if (resource.key == null) {
+                K decoded = key.apply(resource.identity);
+                if (decoded == null) throw new IllegalStateException("Unregistered native resource identity");
+                resource.key = decoded;
+                locations.put(decoded, resource);
+            }
+            return resource.key;
         }
 
         long amount(Resource found, T request) {
@@ -353,11 +396,12 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
 
         long room(T request) {
             Resource resource = locate(request);
-            K requested = resource == null ? key.apply(request) : resource.key;
-            if (requested == null) return 0;
+            if (resource == null && !valid.test(request)) return 0;
             long ceiling = Long.MAX_VALUE;
             boolean fluid = type == AEFluidStackType.FLUID_STACK_TYPE;
             if (settings != null && directWrites == 0 && settings.hasNativeConstraints(fluid)) {
+                K requested = resource == null ? key.apply(request) : compatibilityKey(resource);
+                if (requested == null) return 0;
                 ceiling = fluid ? settings.nativeFluidCeiling((FluidKey) requested, PublicStorageAccess.manual())
                     : settings.nativeItemCeiling((ItemKey) requested, PublicStorageAccess.manual());
             }
@@ -472,14 +516,13 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 ? probe
                 : identities.get(value);
             if (resource == null) {
-                K decoded = key.apply(value);
-                if (decoded == null) throw new IllegalStateException("Unregistered native resource identity");
-                // AEItemStack.copy shares its mutable AEItemDef. Recreate a private identity from our immutable key.
-                resource = new Resource(
-                    decoded,
-                    stack.apply(decoded)
-                        .setStackSize(1));
-                locations.put(resource.key, resource);
+                if (!valid.test(value)) throw new IllegalStateException("Unregistered native resource identity");
+                // Native locations need only a detached AE identity. Compatibility keys are materialized on demand.
+                T identity = probeStructure == structure && probeIdentity != null && probeIdentity.equals(value)
+                    ? probeIdentity
+                    : snapshot.apply(value)
+                        .setStackSize(1);
+                resource = new Resource(identity);
                 identities.put(resource.identity, resource);
                 structure++;
             }
@@ -494,7 +537,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             slot.keys.remove(resource);
             resource.slots.remove(slot);
             if (resource.slots.isEmpty()) {
-                locations.remove(resource.key);
+                if (resource.key != null) locations.remove(resource.key);
                 identities.remove(resource.identity);
                 structure++;
             }
@@ -505,9 +548,8 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             if (probeStructure == structure && probeIdentity != null && probeIdentity.equals(request)) return probe;
             probe = identities.get(request);
             if (probe == null) {
-                K decoded = key.apply(request);
-                probeIdentity = decoded == null ? null
-                    : stack.apply(decoded)
+                probeIdentity = !valid.test(request) ? null
+                    : snapshot.apply(request)
                         .setStackSize(1);
             } else probeIdentity = probe.identity;
             probeStructure = structure;
@@ -604,12 +646,11 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
 
         final class Resource {
 
-            final K key;
+            K key;
             final T identity;
-            final List<Slot> slots = new ArrayList<>();
+            final List<Slot> slots = new ArrayList<>(1);
 
-            Resource(K key, T identity) {
-                this.key = key;
+            Resource(T identity) {
                 this.identity = identity;
             }
         }
@@ -654,8 +695,21 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 Slot slot = new Slot(cell);
                 slots.add(slot);
                 watch(slot);
-                index(slot);
+                indexLoaded(slot);
             }
+        }
+
+        /** Read-only visit after validation; native decoding finishes before any handler is published. */
+        @SuppressWarnings("unchecked")
+        void indexLoaded(Slot slot) {
+            Object inventory = ((ICellInventoryHandler<?>) slot.nativeInventory).getCellInv();
+            if (inventory instanceof MixinAeCellContents) {
+                for (Object raw : ((MixinAeCellContents) inventory).futa$loadedStacks()) {
+                    T value = (T) raw;
+                    if (value.getStackSize() > 0) register(slot, value);
+                }
+                capacity(slot);
+            } else index(slot);
         }
 
         /** Check every counter before native decoding can discard missing rows; true quarantines the entire medium. */
@@ -666,27 +720,73 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             int types = tag.getShort(item ? "it" : "ft");
             long count = tag.getLong(item ? "ic" : "fc");
             if (types < 0 || types > 63 || count < 0) throw new IllegalStateException("Invalid native cell counters");
-            long actual = 0;
+            long actual = 0, seen = 0;
+            boolean missing = false, invalidExtra = false;
+            NBTTagCompound[] rows = new NBTTagCompound[types];
+            long[] amounts = new long[types];
+            // Visit both #n rows and @n counts directly; never repeat a per-entry map lookup or parse full AE tags.
+            for (Map.Entry<String, NBTBase> entry : NativeMeNbtEntries.read(tag)) {
+                String name = entry.getKey();
+                if (name.isEmpty() || (name.charAt(0) != '#' && name.charAt(0) != '@')) continue;
+                NBTBase encoded = entry.getValue();
+                int index = rowIndex(name, types);
+                if (name.charAt(0) == '@') {
+                    if (index >= 0 && encoded instanceof NBTBase.NBTPrimitive)
+                        amounts[index] = ((NBTBase.NBTPrimitive) encoded).func_150291_c();
+                    continue;
+                }
+                if (!(encoded instanceof NBTTagCompound)) {
+                    if (index >= 0) throw new IllegalStateException("Missing native cell stack");
+                    // Earlier versions stop registry inspection at the first missing mod. Keep its whole-cell
+                    // quarantine decision even if a later, unused extra field is malformed.
+                    if (!missing) invalidExtra = true;
+                    continue;
+                }
+                NBTTagCompound value = (NBTTagCompound) encoded;
+                if (index >= 0) {
+                    seen |= 1L << index;
+                    rows[index] = value;
+                }
+                if (missing || invalidExtra) continue;
+                if (item) {
+                    NBTBase id = value.getTag("id");
+                    short number = id instanceof NBTBase.NBTPrimitive ? ((NBTBase.NBTPrimitive) id).func_150289_e() : 0;
+                    if (Item.getItemById(number) == null) missing = true;
+                } else {
+                    NBTBase fluid = value.getTag("FluidName");
+                    String fluidName = fluid instanceof NBTTagString ? ((NBTTagString) fluid).func_150285_a_()
+                        : value.getString("FluidName");
+                    if (FluidRegistry.getFluid(fluidName) == null) missing = true;
+                }
+            }
+            if (seen != (1L << types) - 1) throw new IllegalStateException("Missing native cell stack");
             for (int index = 0; index < types; index++) {
-                if (!tag.hasKey("#" + index, 10)) throw new IllegalStateException("Missing native cell stack");
-                long amount = tag.getLong("@" + index);
-                if (amount <= 0) amount = tag.getCompoundTag("#" + index)
-                    .getLong("Cnt");
+                long amount = amounts[index] > 0 ? amounts[index] : nativeLong(rows[index], "Cnt");
                 if (amount <= 0) throw new IllegalStateException("Invalid native cell quantity");
                 actual = Math.addExact(actual, amount);
             }
+            // Do not let a missing mod short-circuit quantity, overflow, missing-row or total checks.
             if (actual != count) throw new IllegalStateException("Native cell counters do not match stack quantities");
-            // These are exactly the missing-registry tests in ItemStack/FluidStack.loadFromNBT, which AE delegates to.
-            // Native CellInventory still decodes full stacks/NBT below; this pass needs no temporary stack/AE identity.
-            // Include extra # tags as before: a missing entry must retain the complete original cell NBT.
-            for (Object raw : tag.func_150296_c()) {
-                String name = (String) raw;
-                if (!name.startsWith("#")) continue;
-                NBTTagCompound value = tag.getCompoundTag(name);
-                if (item ? Item.getItemById(value.getShort("id")) == null
-                    : FluidRegistry.getFluid(value.getString("FluidName")) == null) return true;
+            if (invalidExtra) throw new IllegalStateException("Invalid native cell stack");
+            return missing;
+        }
+
+        long nativeLong(NBTTagCompound tag, String name) {
+            NBTBase value = tag.getTag(name);
+            return value instanceof NBTBase.NBTPrimitive ? ((NBTBase.NBTPrimitive) value).func_150291_c() : 0;
+        }
+
+        /** Only canonical #0..#62 are declared rows; aliases such as #00 remain extra fields. */
+        int rowIndex(String name, int types) {
+            if (name.length() < 2 || name.length() > 3) return -1;
+            int index = name.charAt(1) - '0';
+            if (index < 0 || index > 9) return -1;
+            if (name.length() == 3) {
+                int digit = name.charAt(2) - '0';
+                if (index == 0 || digit < 0 || digit > 9) return -1;
+                index = index * 10 + digit;
             }
-            return false;
+            return index < types ? index : -1;
         }
 
         final class Slot {

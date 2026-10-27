@@ -212,6 +212,9 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         if ("com.futa_gtnh.mixins.MixinAeNetworkMonitorSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkInventorySupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeFluidStackNbt".equals(mixinClassName)) return true;
+        if ("com.futa_gtnh.mixins.MixinAeItemDefIdentity".equals(mixinClassName)) return true;
+        if ("com.futa_gtnh.mixins.MixinAeItemStackIdentity".equals(mixinClassName)) return true;
+        if ("com.futa_gtnh.mixins.MixinAeCellContents".equals(mixinClassName)) return true;
         if (mixinClassName.startsWith("com.futa_gtnh.mixins.MixinShimmerGT")) return true;
         if (NEI_MIXIN.equals(mixinClassName)) return neiPresent();
         // lootgames 目标的 mixin：装了 lootgames 才应用，没装连碰都不碰

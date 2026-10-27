@@ -17,8 +17,10 @@ import net.minecraft.nbt.NBTTagList;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 
-import com.futa_gtnh.me.FrozenNativeMeCellArray1342;
+import com.futa_gtnh.me.FrozenNativeMeCellArray1343;
 import com.futa_gtnh.me.NativeMeCellArray;
+import com.futa_gtnh.me.NativeMeItemIdentity;
+import com.futa_gtnh.mixins.MixinAeCellContents;
 
 import appeng.api.config.Actionable;
 import appeng.api.storage.ICellInventoryHandler;
@@ -83,6 +85,9 @@ public final class NativeMeIndexRegression {
         nativeBypassAndMutableRequests();
         nativeKeySnapshots();
         loadingIntegrity();
+        detachedNativeIdentity();
+        compatibilityKeyCache();
+        pairedIntegrityFuzz();
         System.out.println(
             "Native ME incremental index: " + checks
                 + " checks passed (native amounts, per-key membership, no transfer scans, batching, simulation, overflow, limits and remount)");
@@ -204,7 +209,7 @@ public final class NativeMeIndexRegression {
                     break;
             }
             NBTTagCompound original = (NBTTagCompound) input.copy();
-            FrozenNativeMeCellArray1342 before = new FrozenNativeMeCellArray1342(
+            FrozenNativeMeCellArray1343 before = new FrozenNativeMeCellArray1343(
                 f -> new ItemStack(f ? fluidMedia : itemMedia));
             NativeMeCellArray after = array();
             boolean oldFailed = false, newFailed = false;
@@ -257,6 +262,291 @@ public final class NativeMeIndexRegression {
                     && after.fluidView()
                         .equals(source.fluidView()),
                 "all initial tagged and long quantities survive");
+        }
+    }
+
+    private static void detachedNativeIdentity() throws Exception {
+        for (int i = 0; i < 64; i++) {
+            ItemKey key = item(i);
+            IAEItemStack original = request(key, 10000000000L + i);
+            check(original instanceof NativeMeItemIdentity, "real AE item identity bridge loaded");
+            IAEItemStack copy = ((NativeMeItemIdentity) original).futa$copyIdentity();
+            check(
+                copy != original && copy.equals(original) && copy.hashCode() == original.hashCode(),
+                "detached copy preserves full identity/hash");
+            check(
+                copy.getStackSize() == original.getStackSize(),
+                "identity helper follows native quantity copy semantics");
+            check(
+                field(AEItemStack.class, "def").get(copy) != field(AEItemStack.class, "def").get(original),
+                "native mutable definitions are independent");
+            copy.setTagCompound(item(1000 + i).copyNbt());
+            check(
+                ItemKey.fromNative(original)
+                    .equals(key),
+                "changing private definition does not mutate caller definition");
+            original.setTagCompound(item(2000 + i).copyNbt());
+            check(
+                ItemKey.fromNative(copy)
+                    .equals(item(1000 + i)),
+                "changing caller definition does not mutate private definition");
+            IAEItemStack rehashed = ((NativeMeItemIdentity) original).futa$copyIdentity();
+            IAEItemStack expected = request(item(2000 + i), 1);
+            check(
+                rehashed.equals(expected) && rehashed.hashCode() == expected.hashCode(),
+                "copied definition rehashes even after native setter left caller hash stale");
+        }
+    }
+
+    private static int cacheSize(NativeMeCellArray array, String name) throws Exception {
+        Object channel = field(array.getClass(), name).get(array);
+        return ((Map<?, ?>) field(channel.getClass(), "locations").get(channel)).size();
+    }
+
+    private static void compatibilityKeyCache() throws Exception {
+        NativeMeCellArray seed = array();
+        for (int i = 0; i < 140; i++) {
+            seed.itemView()
+                .put(item(i), 100L + i);
+            seed.fluidView()
+                .put(fluid(i), 1000L + i);
+        }
+        NBTTagCompound saved = new NBTTagCompound();
+        seed.writeToNBT(saved);
+        NativeMeCellArray cells = array();
+        cells.readFromNBT(saved);
+        cells.setPublished(true);
+        check(
+            cells.itemView()
+                .size() == 140
+                && cells.fluidView()
+                    .size() == 140,
+            "all native locations are ready before compatibility keys");
+        check(
+            cacheSize(cells, "items") == 0 && cacheSize(cells, "fluids") == 0,
+            "loading does not manufacture unused compatibility keys");
+        for (String name : new String[] { "items", "fluids" }) {
+            Object channel = field(cells.getClass(), name).get(cells);
+            for (Object resource : ((Map<?, ?>) field(channel.getClass(), "identities").get(channel)).values()) {
+                check(
+                    field(resource.getClass(), "key").get(resource) == null,
+                    "cold resources have no duplicate compatibility identity");
+                check(
+                    ((appeng.api.storage.data.IAEStack<?>) field(resource.getClass(), "identity").get(resource))
+                        .getStackSize() == 1,
+                    "private identities never cache native quantities");
+            }
+        }
+        // Full AE enumeration and actual native transfers must work before the first compatibility query.
+        appeng.api.storage.data.IItemList<IAEItemStack> nativeItems = AEItemStackType.ITEM_STACK_TYPE.createList();
+        for (IMEInventoryHandler<?> handler : cells.getCellArray(AEItemStackType.ITEM_STACK_TYPE)) {
+            @SuppressWarnings("unchecked")
+            IMEInventoryHandler<IAEItemStack> typed = (IMEInventoryHandler<IAEItemStack>) handler;
+            typed.getAvailableItems(nativeItems, 0);
+            if (handler instanceof ICellInventoryHandler<?>) check(
+                ((ICellInventoryHandler<?>) handler).getCellInv() instanceof MixinAeCellContents,
+                "native decoder visit bridge loaded");
+        }
+        check(
+            nativeItems.size() == 140,
+            "fully decoded native inventory enumerates every resource before compatibility use");
+        check(
+            transfer(cells, item(0), 100, false, false) == 100 && transfer(cells, fluid(0), 1000, false, false) == 1000,
+            "cold native locations support exact depletion");
+        check(
+            cells.itemView()
+                .size() == 139
+                && cells.fluidView()
+                    .size() == 139,
+            "cold depletion removes native membership without a compatibility key");
+        check(
+            transfer(cells, item(0), 100, true, false) == 100 && transfer(cells, fluid(0), 1000, true, false) == 1000,
+            "cold depleted resource can return");
+        check(
+            cacheSize(cells, "items") == 0 && cacheSize(cells, "fluids") == 0,
+            "native requests and full native enumeration do not materialize compatibility keys");
+        check(
+            cells.itemView()
+                .get(null) == null
+                && cells.itemView()
+                    .get("wrong") == null
+                && !cells.fluidView()
+                    .containsKey("wrong")
+                && cells.itemView()
+                    .remove("wrong") == null,
+            "map view rejects null and foreign key types without enumeration");
+        check(
+            cells.itemView()
+                .get(item(1)) == 101
+                && cells.fluidView()
+                    .get(fluid(1)) == 1001,
+            "first compatibility lookup reads original exact quantities");
+        check(
+            cacheSize(cells, "items") == 1 && cacheSize(cells, "fluids") == 1,
+            "one lookup caches only the requested immutable key");
+        check(
+            cells.itemView()
+                .get(item(1)) == 101 && cacheSize(cells, "items") == 1,
+            "repeated compatibility lookup reuses its key cache");
+        check(
+            transfer(cells, item(1), 101, false, false) == 101 && cacheSize(cells, "items") == 0,
+            "depletion removes an already materialized compatibility key");
+        check(
+            transfer(cells, item(1), 101, true, false) == 101 && cells.itemView()
+                .get(item(1)) == 101,
+            "returning resource cannot use a stale compatibility location");
+        check(
+            cells.itemView()
+                .equals(seed.itemView())
+                && cells.fluidView()
+                    .equals(seed.fluidView()),
+            "first full compatibility snapshot preserves all quantities/tags");
+        check(
+            cacheSize(cells, "items") == 140 && cacheSize(cells, "fluids") == 140,
+            "first full compatibility snapshot caches all immutable keys");
+        NBTTagCompound after = new NBTTagCompound();
+        cells.writeToNBT(after);
+        NativeMeCellArray remount = array();
+        remount.readFromNBT(after);
+        check(
+            cacheSize(remount, "items") == 0 && remount.itemView()
+                .equals(cells.itemView())
+                && remount.fluidView()
+                    .equals(cells.fluidView()),
+            "compatibility cache is not persisted and remount retains complete stock");
+        cells.itemView()
+            .clear();
+        cells.fluidView()
+            .clear();
+        check(
+            cells.cellCount() == 0 && cacheSize(cells, "items") == 0 && cacheSize(cells, "fluids") == 0,
+            "clear invalidates both native and compatibility indices");
+    }
+
+    private static String validation(Object channel, ItemStack cell) throws Exception {
+        java.lang.reflect.Method method = channel.getClass()
+            .getDeclaredMethod("validateContents", ItemStack.class);
+        method.setAccessible(true);
+        try {
+            return (boolean) method.invoke(channel, cell) ? "frozen" : "valid";
+        } catch (InvocationTargetException e) {
+            if (!(e.getCause() instanceof IllegalStateException) && !(e.getCause() instanceof ArithmeticException)
+                && !(e.getCause() instanceof net.minecraft.util.ReportedException)) throw e;
+            return "rejected";
+        }
+    }
+
+    /** Same vanilla numeric coercions and whole-medium decisions, across unordered rows and malformed extras. */
+    private static void pairedIntegrityFuzz() throws Exception {
+        Random random = new Random(79431344L);
+        NativeMeCellArray current = array();
+        FrozenNativeMeCellArray1343 frozen = new FrozenNativeMeCellArray1343(
+            f -> new ItemStack(f ? fluidMedia : itemMedia));
+        for (String channel : new String[] { "items", "fluids" }) {
+            boolean fluid = channel.equals("fluids");
+            Object before = field(frozen.getClass(), channel).get(frozen);
+            Object after = field(current.getClass(), channel).get(current);
+            for (int sample = 0; sample < 1200; sample++) {
+                int types = sample % 64;
+                NBTTagCompound tag = new NBTTagCompound();
+                long total = 0;
+                for (int i = 0; i < types; i++) {
+                    NBTTagCompound row = new NBTTagCompound();
+                    if (fluid) row.setString("FluidName", FluidRegistry.getFluidName(FluidRegistry.WATER));
+                    else row.setShort("id", (short) Item.getIdFromItem(Items.paper));
+                    long amount = 20 + random.nextInt(100);
+                    switch (i % 6) {
+                        case 0:
+                            tag.setByte("@" + i, (byte) amount);
+                            break;
+                        case 1:
+                            tag.setShort("@" + i, (short) amount);
+                            break;
+                        case 2:
+                            tag.setInteger("@" + i, (int) amount);
+                            break;
+                        case 3:
+                            tag.setLong("@" + i, amount);
+                            break;
+                        case 4:
+                            tag.setFloat("@" + i, amount + .75f);
+                            break;
+                        default:
+                            tag.setDouble("@" + i, amount + .75);
+                            break;
+                    }
+                    row.setLong("Cnt", amount);
+                    tag.setTag("#" + i, row);
+                    total += tag.getLong("@" + i);
+                }
+                String count = fluid ? "fc" : "ic", type = fluid ? "ft" : "it";
+                tag.setShort(type, (short) types);
+                tag.setLong(count, total);
+                int index = types == 0 ? 0 : random.nextInt(types);
+                switch (sample % 12) {
+                    case 1:
+                        tag.removeTag("#" + index);
+                        break;
+                    case 2:
+                        tag.setLong("@" + index, -1);
+                        tag.getCompoundTag("#" + index)
+                            .setLong("Cnt", -1);
+                        break;
+                    case 3:
+                        tag.setLong(count, total + 1);
+                        break;
+                    case 4:
+                        tag.setShort(type, (short) (sample % 2 == 0 ? -1 : 64));
+                        break;
+                    case 5:
+                        tag.setLong("@0", Long.MAX_VALUE);
+                        tag.setLong("@1", Long.MAX_VALUE);
+                        break;
+                    case 6:
+                        tag.getCompoundTag("#" + index)
+                            .setString(fluid ? "FluidName" : "id", "missing");
+                        break;
+                    case 7:
+                        tag.setLong(count, -1);
+                        break;
+                    case 8:
+                        tag.removeTag("@" + index);
+                        break;
+                    case 9:
+                        tag.setTag(
+                            "#00",
+                            tag.getCompoundTag("#0")
+                                .copy());
+                        tag.removeTag("#0");
+                        break;
+                    case 10:
+                        tag.setInteger("#" + index, 1);
+                        break;
+                    default:
+                        break;
+                }
+                String[] extras = { "#", "#00", "#01", "#-1", "#63", "#999", "#2147483647", "#a", "#0a" };
+                String extra = extras[sample % extras.length];
+                if (sample % 3 == 0) tag.setTag(
+                    extra,
+                    tag.getCompoundTag("#0")
+                        .copy());
+                if (sample % 17 == 0) tag.setString(extra, "wrong type");
+                NBTTagCompound unchanged = (NBTTagCompound) tag.copy();
+                ItemStack cell = new ItemStack(fluid ? fluidMedia : itemMedia);
+                if (sample % 2 == 0) {
+                    NBTTagCompound fallback = new NBTTagCompound() {};
+                    for (Object raw : tag.func_150296_c()) {
+                        String name = (String) raw;
+                        fallback.setTag(name, tag.getTag(name));
+                    }
+                    cell.setTagCompound(fallback);
+                } else cell.setTagCompound(tag);
+                check(
+                    validation(before, cell).equals(validation(after, cell)),
+                    "paired complete integrity decision sample " + channel + "/" + sample);
+                check(tag.equals(unchanged), "integrity checker never edits original NBT");
+            }
         }
     }
 
