@@ -20,6 +20,7 @@ import net.minecraft.nbt.NBTTagList;
 import net.minecraft.nbt.NBTTagString;
 import net.minecraftforge.fluids.FluidRegistry;
 
+import com.futa_gtnh.Config;
 import com.futa_gtnh.ae2.PublicStorageAccess;
 import com.futa_gtnh.mixins.MixinAeCellContents;
 import com.futa_gtnh.shared.FluidKey;
@@ -202,7 +203,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
 
     @Override
     public int getPriority() {
-        return 0;
+        return Config.publicMeStoragePriority;
     }
 
     @Override
@@ -886,6 +887,13 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                     .getStoredItemTypes();
                 keys = new HashSet<>(mapCapacity((int) Math.max(12, Math.min(63, types))));
                 limited = new MEInventoryHandler<T>(nativeInventory, type) {
+
+                    @Override
+                    public int getPriority() {
+                        // AE sorts individual handlers as well as providers. Existing stock must also yield
+                        // to routing buses; lowering only the allocator does not change their destination.
+                        return NativeMeCellArray.this.getPriority();
+                    }
 
                     @Override
                     public AccessRestriction getAccess() {

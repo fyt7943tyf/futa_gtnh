@@ -68,6 +68,9 @@ public class Config {
     public static boolean enableAe2Cell = true;
     public static int publicMeCoreX = 8, publicMeCoreY = 240, publicMeCoreZ = 8;
 
+    /** Native public cells yield to ordinary priority-0 routing buses; configurable on the server. */
+    public static int publicMeStoragePriority = -100;
+
     /**
      * AE 网络往共享背包元件写入时，是否遵守共享背包的「存量上限」。
      *
@@ -668,6 +671,13 @@ public class Config {
             .getInt("coreX", "publicME", 8, -29999000, 29999000, "首次自动建立公共ME核心的首选X；已创建世界沿用存档位置");
         publicMeCoreY = configuration.getInt("coreY", "publicME", 240, 16, 250, "首次公共核心高度，只在空位置创建");
         publicMeCoreZ = configuration.getInt("coreZ", "publicME", 8, -29999000, 29999000, "首次自动建立公共ME核心的首选Z");
+        publicMeStoragePriority = configuration.getInt(
+            "storagePriority",
+            "publicME",
+            -100,
+            -1000000,
+            1000000,
+            "公共内置物品/流体元件的存储优先级；数值越大越先写入。默认 -100，让优先级 0 的矿辞分发总线先接货。修改后重启服务端；不改变外接驱动器和总线的优先级。");
 
         enableDebugLogging = configuration
             .getBoolean("enableDebugLogging", Configuration.CATEGORY_GENERAL, enableDebugLogging, "打开后会输出更多调试日志");
