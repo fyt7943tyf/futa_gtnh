@@ -17,7 +17,7 @@ import net.minecraft.nbt.NBTTagList;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 
-import com.futa_gtnh.me.FrozenNativeMeCellArray1343;
+import com.futa_gtnh.me.FrozenNativeMeCellArray1344;
 import com.futa_gtnh.me.NativeMeCellArray;
 import com.futa_gtnh.me.NativeMeItemIdentity;
 import com.futa_gtnh.mixins.MixinAeCellContents;
@@ -88,6 +88,8 @@ public final class NativeMeIndexRegression {
         detachedNativeIdentity();
         compatibilityKeyCache();
         pairedIntegrityFuzz();
+        allocationOptimizations();
+        compactMembershipTransitions();
         System.out.println(
             "Native ME incremental index: " + checks
                 + " checks passed (native amounts, per-key membership, no transfer scans, batching, simulation, overflow, limits and remount)");
@@ -209,7 +211,7 @@ public final class NativeMeIndexRegression {
                     break;
             }
             NBTTagCompound original = (NBTTagCompound) input.copy();
-            FrozenNativeMeCellArray1343 before = new FrozenNativeMeCellArray1343(
+            FrozenNativeMeCellArray1344 before = new FrozenNativeMeCellArray1344(
                 f -> new ItemStack(f ? fluidMedia : itemMedia));
             NativeMeCellArray after = array();
             boolean oldFailed = false, newFailed = false;
@@ -424,11 +426,19 @@ public final class NativeMeIndexRegression {
     }
 
     private static String validation(Object channel, ItemStack cell) throws Exception {
-        java.lang.reflect.Method method = channel.getClass()
-            .getDeclaredMethod("validateContents", ItemStack.class);
+        return validation(channel, cell, null);
+    }
+
+    private static String validation(Object channel, ItemStack cell, Object context) throws Exception {
+        java.lang.reflect.Method method = context == null ? channel.getClass()
+            .getDeclaredMethod("validateContents", ItemStack.class)
+            : channel.getClass()
+                .getDeclaredMethod("validateContents", ItemStack.class, context.getClass());
         method.setAccessible(true);
         try {
-            return (boolean) method.invoke(channel, cell) ? "frozen" : "valid";
+            return (boolean) (context == null ? method.invoke(channel, cell) : method.invoke(channel, cell, context))
+                ? "frozen"
+                : "valid";
         } catch (InvocationTargetException e) {
             if (!(e.getCause() instanceof IllegalStateException) && !(e.getCause() instanceof ArithmeticException)
                 && !(e.getCause() instanceof net.minecraft.util.ReportedException)) throw e;
@@ -440,12 +450,17 @@ public final class NativeMeIndexRegression {
     private static void pairedIntegrityFuzz() throws Exception {
         Random random = new Random(79431344L);
         NativeMeCellArray current = array();
-        FrozenNativeMeCellArray1343 frozen = new FrozenNativeMeCellArray1343(
+        FrozenNativeMeCellArray1344 frozen = new FrozenNativeMeCellArray1344(
             f -> new ItemStack(f ? fluidMedia : itemMedia));
         for (String channel : new String[] { "items", "fluids" }) {
             boolean fluid = channel.equals("fluids");
             Object before = field(frozen.getClass(), channel).get(frozen);
             Object after = field(current.getClass(), channel).get(current);
+            java.lang.reflect.Constructor<?> contextFactory = Class
+                .forName("com.futa_gtnh.me.NativeMeValidationContext")
+                .getDeclaredConstructor();
+            contextFactory.setAccessible(true);
+            Object reusedContext = contextFactory.newInstance();
             for (int sample = 0; sample < 1200; sample++) {
                 int types = sample % 64;
                 NBTTagCompound tag = new NBTTagCompound();
@@ -543,11 +558,200 @@ public final class NativeMeIndexRegression {
                     cell.setTagCompound(fallback);
                 } else cell.setTagCompound(tag);
                 check(
-                    validation(before, cell).equals(validation(after, cell)),
+                    validation(before, cell).equals(validation(after, cell, reusedContext)),
                     "paired complete integrity decision sample " + channel + "/" + sample);
                 check(tag.equals(unchanged), "integrity checker never edits original NBT");
             }
         }
+    }
+
+    private static void allocationOptimizations() throws Exception {
+        Class<?> type = Class.forName("com.futa_gtnh.me.NativeMeValidationContext");
+        java.lang.reflect.Constructor<?> factory = type
+            .getDeclaredConstructor(java.util.function.IntPredicate.class, java.util.function.Predicate.class);
+        factory.setAccessible(true);
+        int[] itemCalls = { 0 }, fluidCalls = { 0 };
+        java.util.Set<Integer> registeredItems = new java.util.HashSet<>();
+        java.util.Set<String> registeredFluids = new java.util.HashSet<>();
+        for (int i = 0; i < 32; i++) {
+            registeredItems.add(i);
+            registeredFluids.add("test" + i);
+        }
+        java.util.function.IntPredicate itemLookup = i -> {
+            itemCalls[0]++;
+            return registeredItems.contains(i);
+        };
+        java.util.function.Predicate<String> fluidLookup = name -> {
+            fluidCalls[0]++;
+            return registeredFluids.contains(name);
+        };
+        Object context = factory.newInstance(itemLookup, fluidLookup);
+        java.lang.reflect.Method itemExists = type.getDeclaredMethod("itemExists", int.class),
+            fluidExists = type.getDeclaredMethod("fluidExists", String.class),
+            reset = type.getDeclaredMethod("resetRows");
+        itemExists.setAccessible(true);
+        fluidExists.setAccessible(true);
+        reset.setAccessible(true);
+        for (int repeat = 0; repeat < 20; repeat++) for (int i = 0; i < 33; i++) {
+            check(
+                (boolean) itemExists.invoke(context, i) == (i < 32),
+                "load-local item registry cache preserves presence/absence");
+            check(
+                (boolean) fluidExists.invoke(context, "test" + i) == (i < 32),
+                "load-local fluid registry cache preserves presence/absence");
+        }
+        check(
+            itemCalls[0] == 33 && fluidCalls[0] == 33,
+            "each repeated registry identity is resolved only once per load");
+        registeredItems.add(32);
+        registeredFluids.add("test32");
+        Object nextLoad = factory.newInstance(itemLookup, fluidLookup);
+        check(
+            (boolean) itemExists.invoke(nextLoad, 32) && (boolean) fluidExists.invoke(nextLoad, "test32"),
+            "fresh load sees restored registry entries without stale negative cache");
+        for (int i = 33; i < 1000; i++) {
+            check(
+                !(boolean) itemExists.invoke(context, i) && !(boolean) fluidExists.invoke(context, "test" + i),
+                "distinct-heavy registry lookups remain correct past memoization budget");
+        }
+        check(
+            field(type, "itemCache").get(context) == null && field(type, "fluidCache").get(context) == null,
+            "load-local maps stop growing after bounded distinct entries");
+        NBTTagCompound[] rows = (NBTTagCompound[]) field(type, "rows").get(context);
+        long[] amounts = (long[]) field(type, "amounts").get(context);
+        for (int i = 0; i < 63; i++) {
+            rows[i] = new NBTTagCompound();
+            amounts[i] = 77;
+        }
+        reset.invoke(context);
+        for (int i = 0; i < 63; i++)
+            check(rows[i] == null && amounts[i] == 0, "reused scratch clears every prior row/count");
+
+        NativeMeCellArray cells = array();
+        SharedStorage access = new SharedStorage();
+        access.attachNativeCells(cells, () -> {});
+        cells.setPublished(true);
+        for (int i = 0; i < 140; i++) {
+            cells.itemView()
+                .put(item(i), 100L + i);
+            cells.fluidView()
+                .put(fluid(i), 1000L + i);
+        }
+        for (String name : new String[] { "items", "fluids" }) {
+            Object channel = field(cells.getClass(), name).get(cells);
+            for (Object resource : ((Map<?, ?>) field(channel.getClass(), "identities").get(channel)).values()) check(
+                field(resource.getClass(), "firstSlot").get(resource) != null
+                    && field(resource.getClass(), "extraSlots").get(resource) == null,
+                "single-medium resources allocate no relationship list");
+        }
+        List<Map.Entry<ItemKey, Long>> items = access.snapshotPoolItems();
+        List<Map.Entry<FluidKey, Long>> fluids = access.snapshotPoolFluids();
+        check(
+            items.equals(
+                new java.util.ArrayList<>(
+                    cells.itemView()
+                        .entrySet()))
+                && fluids.equals(
+                    new java.util.ArrayList<>(
+                        cells.fluidView()
+                            .entrySet())),
+            "direct final snapshots preserve complete keys/quantities/order");
+        try {
+            items.clear();
+            throw new AssertionError("mutable snapshot list");
+        } catch (UnsupportedOperationException expected) {
+            checks++;
+        }
+        try {
+            items.get(0)
+                .setValue(1L);
+            throw new AssertionError("mutable snapshot row");
+        } catch (UnsupportedOperationException expected) {
+            checks++;
+        }
+        ItemKey selected = items.get(0)
+            .getKey();
+        long original = items.get(0)
+            .getValue();
+        check(
+            transfer(cells, selected, 1, false, false) == 1 && items.get(0)
+                .getValue() == original && access.getItemAmountPool(selected) == original - 1,
+            "snapshot quantities are independent while live quantities remain native");
+        Object savedItems = field(SharedStorage.class, "items").get(access),
+            savedFluids = field(SharedStorage.class, "fluids").get(access);
+        java.util.AbstractMap<Object, Long> rejectEntrySet = new java.util.AbstractMap<Object, Long>() {
+
+            @Override
+            public java.util.Set<Entry<Object, Long>> entrySet() {
+                throw new AssertionError("snapshot built an intermediate entry set");
+            }
+        };
+        field(SharedStorage.class, "items").set(access, rejectEntrySet);
+        field(SharedStorage.class, "fluids").set(access, rejectEntrySet);
+        try {
+            check(
+                access.snapshotPoolItems()
+                    .size() == 140
+                    && access.snapshotPoolFluids()
+                        .size() == 140,
+                "native facade snapshots bypass intermediate map entry sets");
+        } finally {
+            field(SharedStorage.class, "items").set(access, savedItems);
+            field(SharedStorage.class, "fluids").set(access, savedFluids);
+        }
+    }
+
+    private static void compactMembershipTransitions() throws Exception {
+        NativeMeCellArray seed = array();
+        seed.itemView()
+            .put(item(600), 50L);
+        seed.fluidView()
+            .put(fluid(600), 500L);
+        NBTTagCompound data = new NBTTagCompound();
+        seed.writeToNBT(data);
+        for (String name : new String[] { "itemCells", "fluidCells" }) {
+            NBTTagCompound cell = data.getTagList(name, 10)
+                .getCompoundTagAt(0);
+            net.minecraft.nbt.NBTTagList copies = new net.minecraft.nbt.NBTTagList();
+            for (int i = 0; i < 3; i++) copies.appendTag(cell.copy());
+            data.setTag(name, copies);
+        }
+        NativeMeCellArray cells = array();
+        cells.readFromNBT(data);
+        cells.setPublished(true);
+        for (String name : new String[] { "items", "fluids" }) {
+            Object channel = field(cells.getClass(), name).get(cells);
+            Object resource = ((Map<?, ?>) field(channel.getClass(), "identities").get(channel)).values()
+                .iterator()
+                .next();
+            check(
+                ((List<?>) field(resource.getClass(), "extraSlots").get(resource)).size() == 2,
+                "three-media resource records inline first plus two extra locations");
+            Object key = name.equals("items") ? item(600) : fluid(600);
+            long perCell = name.equals("items") ? 50 : 500;
+            check(transfer(cells, key, perCell, false, false) == perCell, "first physical medium drains exactly");
+            check(
+                ((List<?>) field(resource.getClass(), "extraSlots").get(resource)).size() == 1
+                    && field(resource.getClass(), "firstSlot").get(resource) != null,
+                "depleting first medium promotes the next without losing later locations");
+            check(
+                transfer(cells, key, perCell, false, false) == perCell
+                    && field(resource.getClass(), "extraSlots").get(resource) == null,
+                "two media collapse to one inline location");
+            check(
+                transfer(cells, key, perCell, false, false) == perCell
+                    && field(resource.getClass(), "firstSlot").get(resource) == null,
+                "last medium removes the complete relationship");
+            check(
+                transfer(cells, key, 7, true, false) == 7,
+                "empty native media can be reused after compact relation removal");
+        }
+        check(
+            cells.itemView()
+                .get(item(600)) == 7
+                && cells.fluidView()
+                    .get(fluid(600)) == 7,
+            "all compact transitions conserve exact item/fluid quantities");
     }
 
     private static NativeMeCellArray array() {

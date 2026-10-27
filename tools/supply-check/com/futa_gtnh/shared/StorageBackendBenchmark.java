@@ -30,7 +30,7 @@ import net.minecraftforge.fluids.FluidStack;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.me.FrozenNativeMeCellArray1341;
-import com.futa_gtnh.me.FrozenNativeMeCellArray1343;
+import com.futa_gtnh.me.FrozenNativeMeCellArray1344;
 import com.futa_gtnh.me.NativeMeCellArray;
 import com.futa_gtnh.mixins.MixinAeCellContents;
 import com.glodblock.github.common.item.ItemFluidExtremeStorageCell;
@@ -117,7 +117,7 @@ public final class StorageBackendBenchmark {
                 .toString());
         report.put("baselineTag", "v1.33.10");
         report.put("baselineCommit", "e0f2358e6e8f5804a389a7ffbe67592706a0a010");
-        report.put("publicVersion", "1.34.4-candidate");
+        report.put("publicVersion", "1.34.5-candidate");
         report.put("nativeBaseline", "v1.34.1 / d191ba5d1cd1b0df2181778e35351570bd4b9a37");
         report.put(
             "storageHelper",
@@ -171,8 +171,8 @@ public final class StorageBackendBenchmark {
             "startedAtUtc",
             java.time.Instant.now()
                 .toString());
-        report.put("baseline", "v1.34.3 / f3027afb02c46e55caa32d4cbda6d1fcf7e4f1b8");
-        report.put("candidate", "1.34.4");
+        report.put("baseline", "v1.34.4 / 4c8370b3cd0b18b472185f9085b57ccadf7333ed");
+        report.put("candidate", "1.34.5");
         report.put("profile", PROFILE);
         report.put("java", System.getProperty("java.runtime.version"));
         report.put("aeVersion", "rv3-beta-1082-GTNH");
@@ -189,7 +189,7 @@ public final class StorageBackendBenchmark {
             "real native storage helper");
         report.put(
             "notes",
-            "Identical native-cell NBT/bytes per arm, fully materialized native contents before return. Frozen v1.34.3 source differs only by class name. Public arms include full counter validation, missing-mod quarantine and resource index; plain AE mounts the same actual CellInventory without public checks/index. gunzip case includes decompression; decoded case starts with already decoded immutable input NBT. No lazy loading shortcut, no disk/world tick/TPS measurement. All quantities and tags verified outside timed regions; arm order rotates. Native baseline forces the native decoder directly without constructing a second item list. Native-catalogue timing additionally enumerates all loaded stock in every arm. Compatibility-key caches are optional and built on first compatibility use; a separate first-full-snapshot case includes that work. Service metadata and source backup validation are measured separately by the full backend benchmark.");
+            "Identical native-cell NBT/bytes per arm, fully materialized native contents before return. Frozen v1.34.4 source differs only by class name. Public arms include full counter validation, missing-mod quarantine and resource index; plain AE mounts the same actual CellInventory without public checks/index. gunzip case includes decompression; decoded case starts with already decoded immutable input NBT. No lazy loading shortcut, no disk/world tick/TPS measurement. All quantities and tags verified outside timed regions; arm order rotates. Native baseline forces the native decoder directly without constructing a second item list. Native-catalogue timing additionally enumerates all loaded stock in every arm. Compatibility-key caches are optional and built on first compatibility use; a separate first-full-snapshot case includes that work. First-pool-snapshot additionally measures the old facade's verbatim entrySet-to-list copying against the actual new native snapshot API, without metadata/GUI overhead. Service metadata and source backup validation are measured separately by the full backend benchmark.");
         int warmup = Integer.getInteger("futa.storageLoadWarmup", 20);
         int samples = Integer.getInteger("futa.storageLoadSamples", 60);
         report.put("warmupSamples", warmup);
@@ -215,7 +215,7 @@ public final class StorageBackendBenchmark {
             NBTTagCompound root = seedCells(items, fluids);
             NBTTagCompound unchanged = (NBTTagCompound) root.copy();
             byte[] compressed = compress(root);
-            String[] names = { "public_1343", "public_1344", "plain_native_ae" };
+            String[] names = { "public_1344", "public_1345", "plain_native_ae" };
             IntToLongFunction[] decoded = { i -> loadedCount(root, 0), i -> loadedCount(root, 1),
                 i -> loadedCount(root, 2) };
             IntToLongFunction[] gzip = { i -> loadedCount(decompress(compressed), 0),
@@ -243,7 +243,18 @@ public final class StorageBackendBenchmark {
                     1,
                     warmup,
                     samples));
-            FrozenNativeMeCellArray1343 before = loadBefore(root);
+            IntToLongFunction[] poolSnapshot = { i -> firstPoolSnapshot(root, false),
+                i -> firstPoolSnapshot(root, true) };
+            scale.put(
+                "decoded_mount_first_pool_snapshot",
+                compare(
+                    "decoded_mount_first_pool_snapshot",
+                    new String[] { names[0], names[1] },
+                    poolSnapshot,
+                    1,
+                    warmup,
+                    samples));
+            FrozenNativeMeCellArray1344 before = loadBefore(root);
             NativeMeCellArray after = array();
             after.readFromNBT(root);
             Map<ItemKey, Long> plainItems = new LinkedHashMap<>();
@@ -298,8 +309,8 @@ public final class StorageBackendBenchmark {
         System.out.println("STORAGE_LOADING_BENCHMARK_SUCCESS " + output.getAbsolutePath() + " checks=" + checks);
     }
 
-    private static FrozenNativeMeCellArray1343 loadBefore(NBTTagCompound root) {
-        FrozenNativeMeCellArray1343 cells = new FrozenNativeMeCellArray1343(
+    private static FrozenNativeMeCellArray1344 loadBefore(NBTTagCompound root) {
+        FrozenNativeMeCellArray1344 cells = new FrozenNativeMeCellArray1344(
             fluid -> new ItemStack(fluid ? fluidCell : itemCell));
         cells.readFromNBT(root);
         return cells;
@@ -308,7 +319,7 @@ public final class StorageBackendBenchmark {
     @SuppressWarnings("rawtypes")
     private static long loadedCount(NBTTagCompound root, int arm) {
         if (arm == 0) {
-            FrozenNativeMeCellArray1343 cells = loadBefore(root);
+            FrozenNativeMeCellArray1344 cells = loadBefore(root);
             return cells.itemView()
                 .size()
                 + cells.fluidView()
@@ -340,7 +351,7 @@ public final class StorageBackendBenchmark {
                     .entrySet()
                     .size();
         }
-        FrozenNativeMeCellArray1343 cells = loadBefore(root);
+        FrozenNativeMeCellArray1344 cells = loadBefore(root);
         return cells.itemView()
             .entrySet()
             .size()
@@ -349,11 +360,31 @@ public final class StorageBackendBenchmark {
                 .size();
     }
 
+    private static <K> List<Map.Entry<K, Long>> oldPoolSnapshot(Map<K, Long> view) {
+        List<Map.Entry<K, Long>> result = new ArrayList<>();
+        for (Map.Entry<K, Long> row : view.entrySet())
+            result.add(new java.util.AbstractMap.SimpleImmutableEntry<>(row));
+        return Collections.unmodifiableList(result);
+    }
+
+    private static long firstPoolSnapshot(NBTTagCompound root, boolean current) {
+        if (current) {
+            NativeMeCellArray cells = array();
+            cells.readFromNBT(root);
+            return cells.snapshotItems()
+                .size()
+                + cells.snapshotFluids()
+                    .size();
+        }
+        FrozenNativeMeCellArray1344 cells = loadBefore(root);
+        return oldPoolSnapshot(cells.itemView()).size() + oldPoolSnapshot(cells.fluidView()).size();
+    }
+
     @SuppressWarnings({ "rawtypes", "unchecked" })
     private static long loadedCatalogue(NBTTagCompound root, int arm) {
         List<IMEInventoryHandler> items, fluids;
         if (arm == 0) {
-            FrozenNativeMeCellArray1343 cells = loadBefore(root);
+            FrozenNativeMeCellArray1344 cells = loadBefore(root);
             cells.setPublished(true);
             items = cells.getCellArray(AEItemStackType.ITEM_STACK_TYPE);
             fluids = cells.getCellArray(AEFluidStackType.FLUID_STACK_TYPE);

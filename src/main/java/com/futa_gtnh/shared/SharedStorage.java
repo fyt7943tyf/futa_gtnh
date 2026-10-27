@@ -73,12 +73,14 @@ public class SharedStorage {
     }
 
     public synchronized List<Map.Entry<ItemKey, Long>> snapshotPoolItems() {
+        if (nativeCells != null) return nativeCells.snapshotItems();
         List<Map.Entry<ItemKey, Long>> copy = new ArrayList<>();
         for (Map.Entry<ItemKey, Long> row : items.entrySet()) copy.add(new AbstractMap.SimpleImmutableEntry<>(row));
         return Collections.unmodifiableList(copy);
     }
 
     public synchronized List<Map.Entry<FluidKey, Long>> snapshotPoolFluids() {
+        if (nativeCells != null) return nativeCells.snapshotFluids();
         List<Map.Entry<FluidKey, Long>> copy = new ArrayList<>();
         for (Map.Entry<FluidKey, Long> row : fluids.entrySet()) copy.add(new AbstractMap.SimpleImmutableEntry<>(row));
         return Collections.unmodifiableList(copy);

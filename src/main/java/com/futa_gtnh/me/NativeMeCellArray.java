@@ -13,7 +13,6 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTBase;
 import net.minecraft.nbt.NBTTagCompound;
@@ -122,6 +121,14 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         return fluids.view;
     }
 
+    public List<Map.Entry<ItemKey, Long>> snapshotItems() {
+        return items.snapshot();
+    }
+
+    public List<Map.Entry<FluidKey, Long>> snapshotFluids() {
+        return fluids.snapshot();
+    }
+
     public int cellCount() {
         return items.slots.size() + fluids.slots.size();
     }
@@ -177,8 +184,9 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
     public void readFromNBT(NBTTagCompound tag) {
         if (!tag.hasKey("itemCells", 9) || !tag.hasKey("fluidCells", 9))
             throw new IllegalStateException("Missing native AE cell arrays");
-        items.read(tag.getTagList("itemCells", 10));
-        fluids.read(tag.getTagList("fluidCells", 10));
+        NativeMeValidationContext context = new NativeMeValidationContext();
+        items.read(tag.getTagList("itemCells", 10), context);
+        fluids.read(tag.getTagList("fluidCells", 10), context);
     }
 
     @Override
@@ -205,6 +213,10 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         return Collections.emptyList();
     }
 
+    private static int mapCapacity(int expected) {
+        return (expected * 4 + 2) / 3;
+    }
+
     private final class Channel<T extends IAEStack<T>, K> {
 
         final IAEStackType<T> type;
@@ -212,12 +224,12 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         final Function<T, K> key;
         final Function<T, T> snapshot;
         final Predicate<T> valid;
-        final List<Slot> slots = new ArrayList<>();
+        final ArrayList<Slot> slots = new ArrayList<>();
         final List<NBTTagCompound> frozen = new ArrayList<>();
         // Optional immutable compatibility-key cache. Native identities below own all resource-to-cell locations.
         final Map<K, Resource> locations = new LinkedHashMap<>();
         // Private native identity keys never change; their count is only a key marker, never inventory.
-        final Map<T, Resource> identities = new LinkedHashMap<>();
+        Map<T, Resource> identities = new LinkedHashMap<>();
         final Set<Slot> openSlots = new LinkedHashSet<>();
         final Set<Slot> batchChanged = new LinkedHashSet<>();
         boolean importing;
@@ -384,14 +396,28 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         }
 
         long amount(Resource found, T request) {
-            long amount = 0;
-            for (Slot slot : found.slots) {
-                T stored = slot.nativeInventory.getAvailableItem(request, 0);
-                long n = stored == null ? 0 : stored.getStackSize();
+            long amount = found.firstSlot == null ? 0 : slotAmount(found.firstSlot, request);
+            if (found.extraSlots != null) for (Slot slot : found.extraSlots) {
+                long n = slotAmount(slot, request);
                 if (n > Long.MAX_VALUE - amount) throw new IllegalStateException("Native AE quantity overflow");
                 amount += n;
             }
             return amount;
+        }
+
+        long slotAmount(Slot slot, T request) {
+            T stored = slot.nativeInventory.getAvailableItem(request, 0);
+            return stored == null ? 0 : stored.getStackSize();
+        }
+
+        List<Map.Entry<K, Long>> snapshot() {
+            List<Resource> stable = new ArrayList<>(identities.values());
+            List<Map.Entry<K, Long>> result = new ArrayList<>(stable.size());
+            for (Resource resource : stable) {
+                long amount = amount(resource, resource.identity);
+                if (amount > 0) result.add(new AbstractMap.SimpleImmutableEntry<>(compatibilityKey(resource), amount));
+            }
+            return Collections.unmodifiableList(result);
         }
 
         long room(T request) {
@@ -434,7 +460,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             T remaining = input.copy()
                 .setStackSize(accepted);
             Resource present = locate(input);
-            List<Slot> known = present == null ? Collections.emptyList() : new ArrayList<>(present.slots);
+            List<Slot> known = present == null ? Collections.emptyList() : present.slotsSnapshot();
             if (!allocationOnly) for (Slot slot : known) {
                 remaining = inject(slot, remaining, mode, source);
                 if (remaining == null || remaining.getStackSize() == 0) break;
@@ -481,7 +507,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             long taken = 0;
             Resource found = locate(request);
             if (found == null) return null;
-            for (Slot slot : new ArrayList<>(found.slots)) {
+            for (Slot slot : found.slotsSnapshot()) {
                 T result = extract(
                     slot,
                     request.copy()
@@ -526,7 +552,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 identities.put(resource.identity, resource);
                 structure++;
             }
-            if (slot.keys.add(resource)) resource.slots.add(slot);
+            if (slot.keys.add(resource)) resource.addSlot(slot);
             probe = resource;
             probeIdentity = resource.identity;
             probeStructure = structure;
@@ -535,8 +561,8 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
 
         void unlink(Slot slot, Resource resource) {
             slot.keys.remove(resource);
-            resource.slots.remove(slot);
-            if (resource.slots.isEmpty()) {
+            resource.removeSlot(slot);
+            if (resource.firstSlot == null) {
                 if (resource.key != null) locations.remove(resource.key);
                 identities.remove(resource.identity);
                 structure++;
@@ -648,10 +674,38 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
 
             K key;
             final T identity;
-            final List<Slot> slots = new ArrayList<>(1);
+            Slot firstSlot;
+            List<Slot> extraSlots;
 
             Resource(T identity) {
                 this.identity = identity;
+            }
+
+            boolean hasSlot(Slot slot) {
+                return firstSlot == slot || extraSlots != null && extraSlots.contains(slot);
+            }
+
+            void addSlot(Slot slot) {
+                if (firstSlot == null) firstSlot = slot;
+                else {
+                    if (extraSlots == null) extraSlots = new ArrayList<>(1);
+                    extraSlots.add(slot);
+                }
+            }
+
+            void removeSlot(Slot slot) {
+                if (firstSlot == slot) firstSlot = extraSlots == null ? null : extraSlots.remove(0);
+                else if (extraSlots != null) extraSlots.remove(slot);
+                if (extraSlots != null && extraSlots.isEmpty()) extraSlots = null;
+            }
+
+            List<Slot> slotsSnapshot() {
+                if (firstSlot == null) return Collections.emptyList();
+                if (extraSlots == null) return Collections.singletonList(firstSlot);
+                List<Slot> result = new ArrayList<>(extraSlots.size() + 1);
+                result.add(firstSlot);
+                result.addAll(extraSlots);
+                return result;
             }
         }
 
@@ -670,14 +724,24 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             return result;
         }
 
-        void read(NBTTagList list) {
+        void read(NBTTagList list, NativeMeValidationContext context) {
             for (Slot slot : slots) {
                 slot.active = false;
                 nativeChanges.remove(((ICellInventoryHandler<?>) slot.nativeInventory).getCellInv());
             }
             slots.clear();
             locations.clear();
-            identities.clear();
+            // Capacity hints are bounded allocations, never storage limits or trusted integrity evidence.
+            int expected = 0;
+            for (int i = 0; i < list.tagCount() && expected < 16384; i++) {
+                NBTTagCompound raw = list.getCompoundTagAt(i);
+                if (!raw.hasKey("tag", 10)) continue;
+                int types = raw.getCompoundTag("tag")
+                    .getShort(type == AEItemStackType.ITEM_STACK_TYPE ? "it" : "ft");
+                expected += Math.max(0, Math.min(63, types));
+            }
+            identities = new LinkedHashMap<>(mapCapacity(Math.min(16384, expected)));
+            slots.ensureCapacity(Math.min(16384, list.tagCount()));
             structure++;
             probe = null;
             probeIdentity = null;
@@ -688,7 +752,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 ItemStack cell = ItemStack.loadItemStackFromNBT(raw);
                 if (cell == null || cell.stackSize != 1) throw new IllegalStateException(
                     "Missing or invalid native storage cell item; refusing an empty replacement");
-                if (validateContents(cell)) {
+                if (validateContents(cell, context)) {
                     frozen.add((NBTTagCompound) raw.copy());
                     continue;
                 }
@@ -714,6 +778,11 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
 
         /** Check every counter before native decoding can discard missing rows; true quarantines the entire medium. */
         boolean validateContents(ItemStack cell) {
+            return validateContents(cell, new NativeMeValidationContext());
+        }
+
+        boolean validateContents(ItemStack cell, NativeMeValidationContext context) {
+            context.resetRows();
             NBTTagCompound tag = cell.getTagCompound();
             if (tag == null) return false;
             boolean item = type == AEItemStackType.ITEM_STACK_TYPE;
@@ -722,8 +791,8 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             if (types < 0 || types > 63 || count < 0) throw new IllegalStateException("Invalid native cell counters");
             long actual = 0, seen = 0;
             boolean missing = false, invalidExtra = false;
-            NBTTagCompound[] rows = new NBTTagCompound[types];
-            long[] amounts = new long[types];
+            NBTTagCompound[] rows = context.rows;
+            long[] amounts = context.amounts;
             // Visit both #n rows and @n counts directly; never repeat a per-entry map lookup or parse full AE tags.
             for (Map.Entry<String, NBTBase> entry : NativeMeNbtEntries.read(tag)) {
                 String name = entry.getKey();
@@ -751,12 +820,12 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 if (item) {
                     NBTBase id = value.getTag("id");
                     short number = id instanceof NBTBase.NBTPrimitive ? ((NBTBase.NBTPrimitive) id).func_150289_e() : 0;
-                    if (Item.getItemById(number) == null) missing = true;
+                    if (!context.itemExists(number)) missing = true;
                 } else {
                     NBTBase fluid = value.getTag("FluidName");
                     String fluidName = fluid instanceof NBTTagString ? ((NBTTagString) fluid).func_150285_a_()
                         : value.getString("FluidName");
-                    if (FluidRegistry.getFluid(fluidName) == null) missing = true;
+                    if (!context.fluidExists(fluidName)) missing = true;
                 }
             }
             if (seen != (1L << types) - 1) throw new IllegalStateException("Missing native cell stack");
@@ -794,7 +863,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             final ItemStack cell;
             final IMEInventoryHandler<T> nativeInventory;
             final IMEInventoryHandler<T> limited;
-            final Set<Resource> keys = new HashSet<>();
+            final Set<Resource> keys;
             boolean active = true;
             boolean open;
 
@@ -813,6 +882,9 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 if (((ICellInventoryHandler<?>) nativeInventory).getCellInv()
                     .isOverflow())
                     throw new IllegalStateException("Void-overflow upgrades are not valid public storage");
+                long types = ((ICellInventoryHandler<?>) nativeInventory).getCellInv()
+                    .getStoredItemTypes();
+                keys = new HashSet<>(mapCapacity((int) Math.max(12, Math.min(63, types))));
                 limited = new MEInventoryHandler<T>(nativeInventory, type) {
 
                     @Override
@@ -855,7 +927,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                         if (!active || !published) return null;
                         if (input == null || input.getStackSize() <= 0) return null;
                         Resource present = locate(input);
-                        if (present == null || !present.slots.contains(Slot.this)) return null;
+                        if (present == null || !present.hasSlot(Slot.this)) return null;
                         return extract(Slot.this, input, mode, source);
                     }
 

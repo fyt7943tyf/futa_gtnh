@@ -1,0 +1,596 @@
+{
+  "startedAtUtc": "2026-10-27T09:38:37.902786Z",
+  "baselineTag": "v1.33.10",
+  "baselineCommit": "e0f2358e6e8f5804a389a7ffbe67592706a0a010",
+  "publicVersion": "1.34.5-candidate",
+  "nativeBaseline": "v1.34.1 / d191ba5d1cd1b0df2181778e35351570bd4b9a37",
+  "storageHelper": "appeng.core.api.ApiStorage",
+  "aeVersion": "rv3-beta-1082-GTNH",
+  "ae2fcVersion": "1.5.108-gtnh",
+  "java": "17.0.20.1+1-LTS",
+  "os": "Mac OS X aarch64",
+  "processors": 10,
+  "maxHeapMiB": 2048,
+  "quantityPerResource": 1000000,
+  "warmupSamples": 300,
+  "samples": 600,
+  "profile": "nbt",
+  "monitorCachePrimedAndVerified": true,
+  "notes": "Same real AE NetworkMonitor/NetworkInventoryHandler and native Universe media. Plain AE has no public storage wrapper or allocator; no cable/world tick, security host, listeners, telemetry or external inventories. Same JVM includes Futa mixins in every arm. Synthetic isolated timings, not a TPS or full-server comparison. Profile nbt uses tagged variants, profile plain uses metadata-distinct items and separately registered fluids without NBT. Requests are prebuilt, copied by actual engine as needed. A roundtrip is one extraction plus one matching insertion.",
+  "scales": [
+    {
+      "typesPerChannel": 4096,
+      "totalResources": 8192,
+      "publicCellCount": 132,
+      "plainCellCount": 132,
+      "queries": [
+        {
+          "operation": "monitor_cached_amount",
+          "batch": 64,
+          "samples": 600,
+          "gcCollectionsAllArms": 0,
+          "legacy_shared_pool": {
+            "p50Us": 0.041671875,
+            "p95Us": 0.1640625,
+            "p99Us": 0.23046875,
+            "maxUs": 0.540359375,
+            "allocatedBytesPerOp": 0.0
+          },
+          "public_native_ae_1341": {
+            "p50Us": 0.030609375,
+            "p95Us": 0.150390625,
+            "p99Us": 0.212234375,
+            "maxUs": 0.591796875,
+            "allocatedBytesPerOp": 0.0
+          },
+          "public_native_ae": {
+            "p50Us": 0.029296875,
+            "p95Us": 0.153,
+            "p99Us": 0.218109375,
+            "maxUs": 0.294921875,
+            "allocatedBytesPerOp": 0.0
+          },
+          "plain_native_ae": {
+            "p50Us": 0.029953125,
+            "p95Us": 0.151046875,
+            "p99Us": 0.196625,
+            "maxUs": 1.147140625,
+            "allocatedBytesPerOp": 0.0
+          }
+        },
+        {
+          "operation": "precise_provider_amount",
+          "batch": 16,
+          "samples": 600,
+          "gcCollectionsAllArms": 3,
+          "legacy_shared_pool": {
+            "p50Us": 1.2734375,
+            "p95Us": 2.3801875,
+            "p99Us": 3.4791875,
+            "maxUs": 9.627625,
+            "allocatedBytesPerOp": 1381.9733333333334
+          },
+          "public_native_ae_1341": {
+            "p50Us": 106.247375,
+            "p95Us": 128.2838125,
+            "p99Us": 138.0989375,
+            "maxUs": 200.7239375,
+            "allocatedBytesPerOp": 9736.0
+          },
+          "public_native_ae": {
+            "p50Us": 107.3854375,
+            "p95Us": 130.03125,
+            "p99Us": 142.5546875,
+            "maxUs": 162.78125,
+            "allocatedBytesPerOp": 9736.0
+          },
+          "plain_native_ae": {
+            "p50Us": 101.8255,
+            "p95Us": 120.10675,
+            "p99Us": 125.203125,
+            "maxUs": 174.9453125,
+            "allocatedBytesPerOp": 8704.0
+          }
+        },
+        {
+          "operation": "simulate_item_extract",
+          "batch": 8,
+          "samples": 600,
+          "gcCollectionsAllArms": 0,
+          "legacy_shared_pool": {
+            "p50Us": 0.43225,
+            "p95Us": 1.0625,
+            "p99Us": 1.50525,
+            "maxUs": 3.515625,
+            "allocatedBytesPerOp": 744.2133333333334
+          },
+          "public_native_ae_1341": {
+            "p50Us": 1.182375,
+            "p95Us": 7.677,
+            "p99Us": 12.052125,
+            "maxUs": 17.19275,
+            "allocatedBytesPerOp": 160.32
+          },
+          "public_native_ae": {
+            "p50Us": 0.666625,
+            "p95Us": 6.604125,
+            "p99Us": 8.06775,
+            "maxUs": 9.88025,
+            "allocatedBytesPerOp": 160.26166666666666
+          },
+          "plain_native_ae": {
+            "p50Us": 1.041625,
+            "p95Us": 7.270875,
+            "p99Us": 11.989625,
+            "maxUs": 15.510375,
+            "allocatedBytesPerOp": 160.21333333333334
+          }
+        },
+        {
+          "operation": "simulate_fluid_extract",
+          "batch": 8,
+          "samples": 600,
+          "gcCollectionsAllArms": 1,
+          "legacy_shared_pool": {
+            "p50Us": 0.484375,
+            "p95Us": 0.703125,
+            "p99Us": 1.083375,
+            "maxUs": 4.354125,
+            "allocatedBytesPerOp": 765.0666666666667
+          },
+          "public_native_ae_1341": {
+            "p50Us": 1.203125,
+            "p95Us": 2.44275,
+            "p99Us": 3.114625,
+            "maxUs": 3.442625,
+            "allocatedBytesPerOp": 197.06666666666666
+          },
+          "public_native_ae": {
+            "p50Us": 0.5625,
+            "p95Us": 1.4895,
+            "p99Us": 1.614625,
+            "maxUs": 150.526,
+            "allocatedBytesPerOp": 197.09
+          },
+          "plain_native_ae": {
+            "p50Us": 0.984375,
+            "p95Us": 1.96875,
+            "p99Us": 2.515625,
+            "maxUs": 2.96875,
+            "allocatedBytesPerOp": 197.06666666666666
+          }
+        },
+        {
+          "operation": "simulate_item_insert",
+          "batch": 8,
+          "samples": 600,
+          "gcCollectionsAllArms": 0,
+          "legacy_shared_pool": {
+            "p50Us": 0.59375,
+            "p95Us": 0.895875,
+            "p99Us": 2.24475,
+            "maxUs": 5.349,
+            "allocatedBytesPerOp": 1672.0
+          },
+          "public_native_ae_1341": {
+            "p50Us": 3.197875,
+            "p95Us": 5.776125,
+            "p99Us": 8.5105,
+            "maxUs": 26.099,
+            "allocatedBytesPerOp": 1781.07
+          },
+          "public_native_ae": {
+            "p50Us": 1.6615,
+            "p95Us": 2.44275,
+            "p99Us": 3.703125,
+            "maxUs": 5.849,
+            "allocatedBytesPerOp": 616.0
+          },
+          "plain_native_ae": {
+            "p50Us": 1.635375,
+            "p95Us": 3.5625,
+            "p99Us": 5.25,
+            "maxUs": 9.9635,
+            "allocatedBytesPerOp": 504.0
+          }
+        },
+        {
+          "operation": "simulate_fluid_insert",
+          "batch": 8,
+          "samples": 600,
+          "gcCollectionsAllArms": 0,
+          "legacy_shared_pool": {
+            "p50Us": 0.645875,
+            "p95Us": 1.09375,
+            "p99Us": 2.583375,
+            "maxUs": 5.515625,
+            "allocatedBytesPerOp": 1648.0
+          },
+          "public_native_ae_1341": {
+            "p50Us": 3.598875,
+            "p95Us": 5.948,
+            "p99Us": 8.145875,
+            "maxUs": 14.3855,
+            "allocatedBytesPerOp": 2360.0
+          },
+          "public_native_ae": {
+            "p50Us": 1.65625,
+            "p95Us": 2.38025,
+            "p99Us": 3.666625,
+            "maxUs": 8.447875,
+            "allocatedBytesPerOp": 632.0
+          },
+          "plain_native_ae": {
+            "p50Us": 1.651125,
+            "p95Us": 3.208375,
+            "p99Us": 4.40625,
+            "maxUs": 5.953125,
+            "allocatedBytesPerOp": 512.0
+          }
+        },
+        {
+          "operation": "missing_item_extract",
+          "batch": 1,
+          "samples": 600,
+          "gcCollectionsAllArms": 10,
+          "legacy_shared_pool": {
+            "p50Us": 0.834,
+            "p95Us": 4.167,
+            "p99Us": 7.375,
+            "maxUs": 14.958,
+            "allocatedBytesPerOp": 704.0
+          },
+          "public_native_ae_1341": {
+            "p50Us": 1263.042,
+            "p95Us": 2048.084,
+            "p99Us": 2826.209,
+            "maxUs": 3491.667,
+            "allocatedBytesPerOp": 3175968.0
+          },
+          "public_native_ae": {
+            "p50Us": 4.25,
+            "p95Us": 16.333,
+            "p99Us": 23.166,
+            "maxUs": 44.125,
+            "allocatedBytesPerOp": 216.0
+          },
+          "plain_native_ae": {
+            "p50Us": 6.167,
+            "p95Us": 19.25,
+            "p99Us": 25.291,
+            "maxUs": 46.583,
+            "allocatedBytesPerOp": 216.0
+          }
+        },
+        {
+          "operation": "missing_fluid_extract",
+          "batch": 1,
+          "samples": 600,
+          "gcCollectionsAllArms": 9,
+          "legacy_shared_pool": {
+            "p50Us": 1.125,
+            "p95Us": 6.959,
+            "p99Us": 9.667,
+            "maxUs": 15.5,
+            "allocatedBytesPerOp": 677.12
+          },
+          "public_native_ae_1341": {
+            "p50Us": 1351.875,
+            "p95Us": 2064.875,
+            "p99Us": 3084.208,
+            "maxUs": 3767.916,
+            "allocatedBytesPerOp": 3123373.12
+          },
+          "public_native_ae": {
+            "p50Us": 3.292,
+            "p95Us": 13.375,
+            "p99Us": 21.167,
+            "maxUs": 36.667,
+            "allocatedBytesPerOp": 205.04
+          },
+          "plain_native_ae": {
+            "p50Us": 5.166,
+            "p95Us": 16.833,
+            "p99Us": 22.458,
+            "maxUs": 58.875,
+            "allocatedBytesPerOp": 205.12
+          }
+        },
+        {
+          "operation": "item_roundtrip_first",
+          "batch": 1,
+          "samples": 600,
+          "gcCollectionsAllArms": 1,
+          "legacy_shared_pool": {
+            "p50Us": 2.0,
+            "p95Us": 8.375,
+            "p99Us": 25.459,
+            "maxUs": 57.125,
+            "allocatedBytesPerOp": 2911.6133333333332
+          },
+          "public_native_ae_1341": {
+            "p50Us": 76.625,
+            "p95Us": 110.0,
+            "p99Us": 221.417,
+            "maxUs": 2125.5,
+            "allocatedBytesPerOp": 143751.82666666666
+          },
+          "public_native_ae": {
+            "p50Us": 48.458,
+            "p95Us": 71.875,
+            "p99Us": 100.75,
+            "maxUs": 137.75,
+            "allocatedBytesPerOp": 45047.49333333333
+          },
+          "plain_native_ae": {
+            "p50Us": 47.625,
+            "p95Us": 64.459,
+            "p99Us": 119.916,
+            "maxUs": 153.291,
+            "allocatedBytesPerOp": 44823.49333333333
+          }
+        },
+        {
+          "operation": "item_roundtrip_last",
+          "batch": 1,
+          "samples": 600,
+          "gcCollectionsAllArms": 5,
+          "legacy_shared_pool": {
+            "p50Us": 1.792,
+            "p95Us": 9.167,
+            "p99Us": 13.625,
+            "maxUs": 38.666,
+            "allocatedBytesPerOp": 2682.346666666667
+          },
+          "public_native_ae_1341": {
+            "p50Us": 506.708,
+            "p95Us": 935.5,
+            "p99Us": 1200.75,
+            "maxUs": 2532.083,
+            "allocatedBytesPerOp": 1616906.3466666667
+          },
+          "public_native_ae": {
+            "p50Us": 3.166,
+            "p95Us": 22.041,
+            "p99Us": 35.291,
+            "maxUs": 60.042,
+            "allocatedBytesPerOp": 1858.24
+          },
+          "plain_native_ae": {
+            "p50Us": 3.417,
+            "p95Us": 17.167,
+            "p99Us": 23.542,
+            "maxUs": 57.667,
+            "allocatedBytesPerOp": 1634.3466666666666
+          }
+        },
+        {
+          "operation": "fluid_roundtrip_first",
+          "batch": 1,
+          "samples": 600,
+          "gcCollectionsAllArms": 0,
+          "legacy_shared_pool": {
+            "p50Us": 1.625,
+            "p95Us": 3.542,
+            "p99Us": 15.5,
+            "maxUs": 24.709,
+            "allocatedBytesPerOp": 2687.84
+          },
+          "public_native_ae_1341": {
+            "p50Us": 55.875,
+            "p95Us": 66.625,
+            "p99Us": 121.459,
+            "maxUs": 190.75,
+            "allocatedBytesPerOp": 157647.81333333332
+          },
+          "public_native_ae": {
+            "p50Us": 24.375,
+            "p95Us": 33.25,
+            "p99Us": 59.583,
+            "maxUs": 89.875,
+            "allocatedBytesPerOp": 59975.8
+          },
+          "plain_native_ae": {
+            "p50Us": 24.167,
+            "p95Us": 29.5,
+            "p99Us": 46.125,
+            "maxUs": 111.917,
+            "allocatedBytesPerOp": 59735.84
+          }
+        },
+        {
+          "operation": "fluid_roundtrip_last",
+          "batch": 1,
+          "samples": 600,
+          "gcCollectionsAllArms": 4,
+          "legacy_shared_pool": {
+            "p50Us": 1.875,
+            "p95Us": 11.084,
+            "p99Us": 17.084,
+            "maxUs": 65.125,
+            "allocatedBytesPerOp": 2664.0
+          },
+          "public_native_ae_1341": {
+            "p50Us": 538.375,
+            "p95Us": 934.292,
+            "p99Us": 1191.375,
+            "maxUs": 2180.542,
+            "allocatedBytesPerOp": 1591256.0
+          },
+          "public_native_ae": {
+            "p50Us": 2.875,
+            "p95Us": 18.5,
+            "p99Us": 26.916,
+            "maxUs": 31.291,
+            "allocatedBytesPerOp": 2416.0
+          },
+          "plain_native_ae": {
+            "p50Us": 3.5,
+            "p95Us": 13.542,
+            "p99Us": 18.042,
+            "maxUs": 28.084,
+            "allocatedBytesPerOp": 2176.0
+          }
+        },
+        {
+          "operation": "mixed_roundtrip_random",
+          "batch": 1,
+          "samples": 600,
+          "gcCollectionsAllArms": 9,
+          "legacy_shared_pool": {
+            "p50Us": 9.583,
+            "p95Us": 23.291,
+            "p99Us": 29.459,
+            "maxUs": 59.709,
+            "allocatedBytesPerOp": 5328.0
+          },
+          "public_native_ae_1341": {
+            "p50Us": 1734.166,
+            "p95Us": 3837.209,
+            "p99Us": 5740.25,
+            "maxUs": 8055.291,
+            "allocatedBytesPerOp": 3362035.2266666666
+          },
+          "public_native_ae": {
+            "p50Us": 67.833,
+            "p95Us": 115.833,
+            "p99Us": 134.833,
+            "maxUs": 152.917,
+            "allocatedBytesPerOp": 87584.0
+          },
+          "plain_native_ae": {
+            "p50Us": 69.166,
+            "p95Us": 118.167,
+            "p99Us": 143.375,
+            "maxUs": 201.917,
+            "allocatedBytesPerOp": 87120.0
+          }
+        },
+        {
+          "operation": "enumerate_both_channels",
+          "batch": 1,
+          "samples": 600,
+          "gcCollectionsAllArms": 39,
+          "legacy_shared_pool": {
+            "p50Us": 6579.584,
+            "p95Us": 7491.209,
+            "p99Us": 7943.917,
+            "maxUs": 8662.875,
+            "allocatedBytesPerOp": 8937607.573333334
+          },
+          "public_native_ae_1341": {
+            "p50Us": 3166.666,
+            "p95Us": 3619.334,
+            "p99Us": 4351.584,
+            "maxUs": 4847.584,
+            "allocatedBytesPerOp": 2402264.84
+          },
+          "public_native_ae": {
+            "p50Us": 3146.667,
+            "p95Us": 3610.208,
+            "p99Us": 3939.875,
+            "maxUs": 4903.834,
+            "allocatedBytesPerOp": 2402264.52
+          },
+          "plain_native_ae": {
+            "p50Us": 3106.166,
+            "p95Us": 3473.333,
+            "p99Us": 4262.5,
+            "maxUs": 4493.417,
+            "allocatedBytesPerOp": 2401704.4133333336
+          }
+        }
+      ],
+      "persistence": {
+        "operations": [
+          {
+            "operation": "serialize_gzip",
+            "batch": 1,
+            "samples": 50,
+            "gcCollectionsAllArms": 2,
+            "legacy_shared_pool": {
+              "p50Us": 52846.666,
+              "p95Us": 54822.208,
+              "p99Us": 55711.834,
+              "maxUs": 55711.834,
+              "allocatedBytesPerOp": 6389330.56
+            },
+            "public_native_ae": {
+              "p50Us": 96575.125,
+              "p95Us": 97759.5,
+              "p99Us": 98843.125,
+              "maxUs": 98843.125,
+              "allocatedBytesPerOp": 3097392.0
+            },
+            "plain_native_ae": {
+              "p50Us": 97061.667,
+              "p95Us": 98576.667,
+              "p99Us": 99285.042,
+              "maxUs": 99285.042,
+              "allocatedBytesPerOp": 3106840.0
+            }
+          },
+          {
+            "operation": "gunzip_decode_mount",
+            "batch": 1,
+            "samples": 50,
+            "gcCollectionsAllArms": 10,
+            "legacy_shared_pool": {
+              "p50Us": 4545.375,
+              "p95Us": 5078.375,
+              "p99Us": 6076.5,
+              "maxUs": 6076.5,
+              "allocatedBytesPerOp": 1.0631008E7
+            },
+            "public_native_ae": {
+              "p50Us": 13490.333,
+              "p95Us": 16435.959,
+              "p99Us": 16776.125,
+              "maxUs": 16776.125,
+              "allocatedBytesPerOp": 1.8342344E7
+            },
+            "plain_native_ae": {
+              "p50Us": 10940.667,
+              "p95Us": 13580.292,
+              "p99Us": 13957.583,
+              "maxUs": 13957.583,
+              "allocatedBytesPerOp": 1.661582768E7
+            }
+          }
+        ],
+        "legacy_shared_poolCompressedBytes": 27017,
+        "public_native_aeCompressedBytes": 35243,
+        "plain_native_aeCompressedBytes": 46384
+      },
+      "migration": {
+        "engineDecodeAndConvertMs": 55.92475,
+        "allocatedBytes": 114544776,
+        "samples": 1,
+        "notes": "Separate one-shot measurements of in-memory conversion and real on-disk NativeMeMigration.load (backup/hash/fsync/remount verification/atomic ownership commit). Startup validates the original backup before native load. Under build/ only; these are not warm percentile measurements.",
+        "completeMigrationMs": 136.408458,
+        "validatedNativeStartupMs": 14.828958
+      },
+      "compatibilityPool": {
+        "operation": "direct_pool_recovery_roundtrip_both_channels",
+        "batch": 1,
+        "samples": 60,
+        "gcCollectionsAllArms": 0,
+        "legacy_shared_pool": {
+          "p50Us": 1.542,
+          "p95Us": 2.875,
+          "p99Us": 5.709,
+          "maxUs": 5.709,
+          "allocatedBytesPerOp": 96.0
+        },
+        "public_native_ae": {
+          "p50Us": 63.333,
+          "p95Us": 90.209,
+          "p99Us": 93.958,
+          "maxUs": 93.958,
+          "allocatedBytesPerOp": 92025.6
+        }
+      }
+    }
+  ],
+  "checks": 217104
+}
