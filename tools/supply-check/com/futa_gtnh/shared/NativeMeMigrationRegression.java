@@ -75,6 +75,7 @@ public final class NativeMeMigrationRegression {
         check(Arrays.equals(original,Files.readAllBytes(old.toPath())),"failed restart leaves old source unchanged");
         interrupted();newWorld();nativeSemantics();corruption();stableLegacyIdentity();
         NativeMeIndexRegression.run(itemCell,fluidCell);
+        NativeMePriorityRegression.run(itemCell,fluidCell);
         System.out.println("Native ME migration: "+checks+" checks passed");
     }
     private static void interrupted() throws Exception {
