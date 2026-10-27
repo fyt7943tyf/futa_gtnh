@@ -45,6 +45,7 @@ tasks.register<JavaExec>("verifySharedStorageReadApi") {
 }
 
 tasks.named("check") {
+    dependsOn(tasks.named("verifyProspectorChineseNames"))
     dependsOn(tasks.named("verifySharedStorageReadApi"))
     dependsOn(tasks.named("verifyDisassembler"))
     dependsOn(tasks.named("verifyDisassemblerUi"))
@@ -52,6 +53,29 @@ tasks.named("check") {
     dependsOn(tasks.named("verifyBookmarkWithdrawal"))
     dependsOn(tasks.named("verifyTerminalSearch"))
     dependsOn(tasks.named("verifyTerminalNeiSearch"))
+}
+
+// LaunchWrapper + real Mixin transformation, without starting a world or a graphical client.
+val compileProspectorChecks = tasks.register<JavaCompile>("compileProspectorChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/prospector-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output +
+        sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("prospector-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifyProspectorChineseNames") {
+    group = "verification"
+    description = "Checks transformed GT scanner Chinese names, dictionary overrides and packet round trips"
+    dependsOn(compileProspectorChecks)
+    mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+    args("--tweakClass", "com.futa_gtnh.prospectorcheck.ProspectorCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+    classpath = files(compileProspectorChecks.flatMap { it.destinationDirectory }) +
+        files("tools/prospector-check") + sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 
 // Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.

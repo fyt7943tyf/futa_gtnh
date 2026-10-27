@@ -117,6 +117,9 @@ public class FutaGtnhMod {
 
     @Mod.EventHandler
     public void serverStarting(FMLServerStartingEvent event) {
+        com.futa_gtnh.common.ProspectorChineseNames.reload(
+            event.getServer()
+                .getFile("GregTech_zh_CN.lang"));
         proxy.serverStarting(event);
     }
 

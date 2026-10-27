@@ -160,6 +160,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        // GregTech is required by this mod; this hook must not depend on optional TinkersConstruct.
+        if ("com.futa_gtnh.mixins.MixinProspectingPacket".equals(mixinClassName)) return true;
         if (mixinClassName.startsWith("com.futa_gtnh.mixins.MixinShimmerGT")) return true;
         if (NEI_MIXIN.equals(mixinClassName)) return neiPresent();
         // lootgames 目标的 mixin：装了 lootgames 才应用，没装连碰都不碰
