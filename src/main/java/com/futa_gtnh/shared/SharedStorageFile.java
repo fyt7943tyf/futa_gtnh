@@ -19,20 +19,9 @@ import org.apache.logging.log4j.Logger;
 import com.futa_gtnh.FutaGtnhMod;
 
 /**
- * 共享存储的落盘逻辑。
- *
- * <p>
- * 刻意<b>不用</b> {@code WorldSavedData}/{@code MapStorage}：那两个东西的落盘时机
- * 和路径（level.dat 还是 data/ 目录）在 1.7.10 里各版本行为不一致，而且没法控制
- * 写入的原子性。这份数据是全服唯一的，写坏了整个服务器的东西就没了，所以自己管：
- *
- * <ul>
- * <li>写到 {@code <存档目录>/data/futa_gtnh_shared.dat}，和存档一起走，
- * 不会被别的模组碰到；</li>
- * <li>先写 {@code .tmp}，再原子替换正式文件 —— 中途断电/崩服不会留下半个文件；</li>
- * <li>替换前把上一份留成 {@code .bak}。读到坏文件时自动回退到备份，
- * 而不是把玩家的东西清空。</li>
- * </ul>
+ * Legacy file codec used only during native AE migration and by offline legacy regression fixtures.
+ * Once native ownership is committed, both legacy loading and writing are rejected. Normal runtime
+ * persistence is Minecraft WorldSavedData containing the original native storage-cell ItemStack NBT.
  */
 public final class SharedStorageFile {
 
@@ -58,6 +47,8 @@ public final class SharedStorageFile {
      * 避免把读取失败当成新仓库，并在后续保存中覆盖原文件和备份。
      */
     public static synchronized SharedStorage load(File worldDirectory) {
+        if (NativeMeMigration.isCommitted(worldDirectory))
+            throw new IllegalStateException("Legacy shared inventory is archived; use native ME storage");
         SharedMigrationState.checkReady(worldDirectory, true);
         return loadSource(worldDirectory).storage;
     }
@@ -68,6 +59,8 @@ public final class SharedStorageFile {
      * must abort startup; they must never fall back to a new writable pool.
      */
     public static synchronized SharedStorage loadForAe(File worldDirectory) {
+        if (NativeMeMigration.isCommitted(worldDirectory))
+            throw new IllegalStateException("Legacy shared inventory is archived; use native ME storage");
         if (SharedMigrationState.isCommitted(worldDirectory)) {
             SharedMigrationState.checkReady(worldDirectory, true);
             return loadSource(worldDirectory).storage;
@@ -89,6 +82,15 @@ public final class SharedStorageFile {
     /** Stable across restarts and reloads; available only after a successful AE migration. */
     public static synchronized String getAeStorageId(File worldDirectory) {
         return SharedMigrationState.storageId(worldDirectory);
+    }
+
+    /** Read-only decoder used by the one-time native-cell migration; never creates a legacy file. */
+    static LoadedStorage readForNativeMigration(File worldDirectory) {
+        if (SharedMigrationState.isCommitted(worldDirectory)) SharedMigrationState.checkReady(worldDirectory, true);
+        File primary = fileFor(worldDirectory);
+        if (!primary.exists() && !new File(primary.getPath() + BAK_SUFFIX).exists())
+            return new LoadedStorage(new SharedStorage(), null);
+        return loadSource(worldDirectory);
     }
 
     private static LoadedStorage loadSource(File worldDirectory) {
@@ -171,6 +173,10 @@ public final class SharedStorageFile {
      * @return 是否成功
      */
     public static synchronized boolean save(File worldDirectory, SharedStorage storage) {
+        if (NativeMeMigration.isCommitted(worldDirectory) || storage.nativeCells() != null) {
+            LOG.error("原生 ME 迁移后禁止写入旧共享池文件");
+            return false;
+        }
         try {
             SharedMigrationState.checkReady(worldDirectory, false);
         } catch (IllegalStateException error) {
@@ -235,10 +241,10 @@ public final class SharedStorageFile {
         }
     }
 
-    private static final class LoadedStorage {
+    static final class LoadedStorage {
 
-        private final SharedStorage storage;
-        private final File source;
+        final SharedStorage storage;
+        final File source;
 
         private LoadedStorage(SharedStorage storage, File source) {
             this.storage = storage;

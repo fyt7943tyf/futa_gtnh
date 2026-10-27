@@ -25,24 +25,21 @@ import appeng.api.networking.security.BaseActionSource;
 import appeng.api.networking.security.PlayerSource;
 import appeng.api.networking.storage.IBaseMonitor;
 import appeng.api.networking.storage.IStorageGrid;
-import appeng.api.storage.ICellProvider;
-import appeng.api.storage.IMEInventory;
-import appeng.api.storage.IMEInventoryHandler;
 import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.IMEMonitorHandlerReceiver;
 import appeng.api.storage.data.IAEFluidStack;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IAEStack;
-import appeng.api.storage.data.IAEStackType;
-import appeng.api.storage.data.IItemList;
-import appeng.me.storage.MEInventoryHandler;
 import appeng.util.item.AEFluidStack;
 import appeng.util.item.AEFluidStackType;
 import appeng.util.item.AEItemStack;
 import appeng.util.item.AEItemStackType;
 
-/** One authoritative ME route. Only the cell provider and explicit recovery may touch durable pool data. */
-public final class PublicStorageAccess implements StorageNetworkAccess, ICellProvider {
+/**
+ * One authoritative ME route. The native cell array publishes actual AE storage; this class provides routing and
+ * compatibility views.
+ */
+public final class PublicStorageAccess implements StorageNetworkAccess {
 
     private static final PublicStorageAccess INSTANCE = new PublicStorageAccess();
     private static final ThreadLocal<Context> CONTEXT = ThreadLocal.withInitial(Context::new);
@@ -75,8 +72,7 @@ public final class PublicStorageAccess implements StorageNetworkAccess, ICellPro
             refresh = true;
         }
     };
-    private IMEInventoryHandler<IAEItemStack> itemCell;
-    private IMEInventoryHandler<IAEFluidStack> fluidCell;
+    private com.futa_gtnh.me.NativeMeCellArray nativeCells;
 
     private PublicStorageAccess() {}
 
@@ -90,6 +86,10 @@ public final class PublicStorageAccess implements StorageNetworkAccess, ICellPro
 
     public static TileEntity excludedTile() {
         return CONTEXT.get().excluded;
+    }
+
+    public static boolean manual() {
+        return CONTEXT.get().manual;
     }
 
     public static boolean poolOnly() {
@@ -131,11 +131,22 @@ public final class PublicStorageAccess implements StorageNetworkAccess, ICellPro
     private void attachPool() {
         SharedStorage current = SharedStorageManager.getStorage();
         if (pool == current) return;
+        if (grid != null && nativeCells != null) {
+            ((IStorageGrid) grid.getCache(IStorageGrid.class)).unregisterCellProvider(nativeCells);
+            nativeCells.onTopologyChanged(null);
+            nativeCells.setPublished(false);
+        }
         if (pool != null) {
             pool.setNetworkAccess(null);
             pool.removeListener(poolListener);
         }
         pool = current;
+        nativeCells = current.nativeCells();
+        if (nativeCells != null) {
+            nativeCells.onTopologyChanged(() -> refresh = true);
+            nativeCells.setPublished(grid != null);
+            if (grid != null) ((IStorageGrid) grid.getCache(IStorageGrid.class)).registerCellProvider(nativeCells);
+        }
         pool.addListener(poolListener);
         pool.setNetworkAccess(this);
         refresh = true;
@@ -149,12 +160,11 @@ public final class PublicStorageAccess implements StorageNetworkAccess, ICellPro
         INSTANCE.changed();
         if (newGrid == null) return;
         INSTANCE.grid = newGrid;
-        if (INSTANCE.itemCell == null) {
-            INSTANCE.itemCell = new MEInventoryHandler<>(INSTANCE.new ItemPool(), AEItemStackType.ITEM_STACK_TYPE);
-            INSTANCE.fluidCell = new MEInventoryHandler<>(INSTANCE.new FluidPool(), AEFluidStackType.FLUID_STACK_TYPE);
-        }
+        if (INSTANCE.nativeCells == null) throw new IllegalStateException("Public ME requires native AE cell storage");
+        INSTANCE.nativeCells.onTopologyChanged(() -> INSTANCE.refresh = true);
+        INSTANCE.nativeCells.setPublished(true);
         IStorageGrid storage = newGrid.getCache(IStorageGrid.class);
-        storage.registerCellProvider(INSTANCE);
+        storage.registerCellProvider(INSTANCE.nativeCells);
         INSTANCE.itemMonitor = (IMEMonitor<IAEItemStack>) storage.getMEMonitor(AEItemStackType.ITEM_STACK_TYPE);
         INSTANCE.fluidMonitor = (IMEMonitor<IAEFluidStack>) storage.getMEMonitor(AEFluidStackType.FLUID_STACK_TYPE);
         INSTANCE.itemMonitor.addListener(INSTANCE.itemListener, newGrid);
@@ -168,7 +178,11 @@ public final class PublicStorageAccess implements StorageNetworkAccess, ICellPro
         if (fluidMonitor != null) fluidMonitor.removeListener(fluidListener);
         if (grid != null) {
             IStorageGrid storage = grid.getCache(IStorageGrid.class);
-            storage.unregisterCellProvider(this);
+            if (nativeCells != null) storage.unregisterCellProvider(nativeCells);
+            if (nativeCells != null) {
+                nativeCells.onTopologyChanged(null);
+                nativeCells.setPublished(false);
+            }
         }
         itemMonitor = null;
         fluidMonitor = null;
@@ -298,7 +312,7 @@ public final class PublicStorageAccess implements StorageNetworkAccess, ICellPro
                 accepted = accepted(amount, rest);
             }
             // Manual callers already own these items (crafting returns, replacement tools, recovery).
-            // A network outage must not discard them; the durable pool remains the recovery destination.
+            // A network outage must not discard them; native AE cells remain the recovery destination.
             if (manual && accepted < amount) accepted += pool.poolInsertItem(key, amount - accepted, true);
             return accepted;
         });
@@ -407,20 +421,6 @@ public final class PublicStorageAccess implements StorageNetworkAccess, ICellPro
         return fluidRevision;
     }
 
-    @Override
-    public int getPriority() {
-        return 0;
-    }
-
-    @Override
-    @SuppressWarnings("rawtypes")
-    public List<IMEInventoryHandler> getCellArray(IAEStackType<?> type) {
-        if (!attached()) return Collections.emptyList();
-        if (type == AEItemStackType.ITEM_STACK_TYPE) return Collections.singletonList(itemCell);
-        if (type == AEFluidStackType.FLUID_STACK_TYPE) return Collections.singletonList(fluidCell);
-        return Collections.emptyList();
-    }
-
     private final class Listener<T extends IAEStack<T>> implements IMEMonitorHandlerReceiver<T> {
 
         final boolean item;
@@ -467,135 +467,4 @@ public final class PublicStorageAccess implements StorageNetworkAccess, ICellPro
         }
     }
 
-    private boolean attached() {
-        return pool != null && grid != null && grid == PublicMeNetwork.grid();
-    }
-
-    private final class ItemPool implements IMEInventory<IAEItemStack> {
-
-        @Override
-        public IAEItemStack injectItems(IAEItemStack input, Actionable mode, BaseActionSource source) {
-            if (input == null || !attached() || input.getStackSize() <= 0) return input;
-            ItemKey key = ItemKey.of(input.getItemStack());
-            long amount = Math.min(input.getStackSize(), pool.poolItemSpace(key, CONTEXT.get().manual));
-            if (mode == Actionable.MODULATE) {
-                providerWrites++;
-                try {
-                    amount = pool.poolInsertItem(key, amount, CONTEXT.get().manual);
-                } finally {
-                    providerWrites--;
-                }
-            }
-            if (amount == input.getStackSize()) return null;
-            IAEItemStack rest = input.copy();
-            rest.setStackSize(input.getStackSize() - amount);
-            return rest;
-        }
-
-        @Override
-        public IAEItemStack extractItems(IAEItemStack input, Actionable mode, BaseActionSource source) {
-            if (input == null || !attached() || input.getStackSize() <= 0) return null;
-            ItemKey key = ItemKey.of(input.getItemStack());
-            long amount = Math.min(input.getStackSize(), pool.getItemAmountPool(key));
-            if (mode == Actionable.MODULATE) {
-                providerWrites++;
-                try {
-                    amount = pool.poolExtractItem(key, amount);
-                } finally {
-                    providerWrites--;
-                }
-            }
-            if (amount <= 0) return null;
-            IAEItemStack result = input.copy();
-            result.setStackSize(amount);
-            return result;
-        }
-
-        @Override
-        public IAEItemStack getAvailableItem(IAEItemStack request, int iteration) {
-            if (request == null || !attached()) return null;
-            ItemKey key = ItemKey.of(request.getItemStack());
-            long amount = Math.min(REPORT_CAP, pool.getItemAmountPool(key));
-            if (amount <= 0) return null;
-            IAEItemStack result = request.copy();
-            result.setStackSize(amount);
-            return result;
-        }
-
-        @Override
-        public IItemList<IAEItemStack> getAvailableItems(IItemList<IAEItemStack> out, int iteration) {
-            if (attached()) for (Map.Entry<ItemKey, Long> row : pool.snapshotPoolItems()) {
-                IAEItemStack value = AEItemStack.create(
-                    row.getKey()
-                        .prototype());
-                value.setStackSize(Math.min(REPORT_CAP, row.getValue()));
-                out.add(value);
-            }
-            return out;
-        }
-    }
-
-    private final class FluidPool implements IMEInventory<IAEFluidStack> {
-
-        @Override
-        public IAEFluidStack injectItems(IAEFluidStack input, Actionable mode, BaseActionSource source) {
-            if (input == null || !attached() || input.getStackSize() <= 0) return input;
-            FluidKey key = FluidKey.of(input.getFluidStack());
-            long amount = Math.min(input.getStackSize(), pool.poolFluidSpace(key, CONTEXT.get().manual));
-            if (mode == Actionable.MODULATE) {
-                providerWrites++;
-                try {
-                    amount = pool.poolInsertFluid(key, amount, CONTEXT.get().manual);
-                } finally {
-                    providerWrites--;
-                }
-            }
-            if (amount == input.getStackSize()) return null;
-            IAEFluidStack rest = input.copy();
-            rest.setStackSize(input.getStackSize() - amount);
-            return rest;
-        }
-
-        @Override
-        public IAEFluidStack extractItems(IAEFluidStack input, Actionable mode, BaseActionSource source) {
-            if (input == null || !attached() || input.getStackSize() <= 0) return null;
-            FluidKey key = FluidKey.of(input.getFluidStack());
-            long amount = Math.min(input.getStackSize(), pool.getFluidAmountPool(key));
-            if (mode == Actionable.MODULATE) {
-                providerWrites++;
-                try {
-                    amount = pool.poolExtractFluid(key, amount);
-                } finally {
-                    providerWrites--;
-                }
-            }
-            if (amount <= 0) return null;
-            IAEFluidStack result = input.copy();
-            result.setStackSize(amount);
-            return result;
-        }
-
-        @Override
-        public IAEFluidStack getAvailableItem(IAEFluidStack request, int iteration) {
-            if (request == null || !attached()) return null;
-            FluidKey key = FluidKey.of(request.getFluidStack());
-            long amount = Math.min(REPORT_CAP, pool.getFluidAmountPool(key));
-            if (amount <= 0) return null;
-            IAEFluidStack result = request.copy();
-            result.setStackSize(amount);
-            return result;
-        }
-
-        @Override
-        public IItemList<IAEFluidStack> getAvailableItems(IItemList<IAEFluidStack> out, int iteration) {
-            if (attached()) for (Map.Entry<FluidKey, Long> row : pool.snapshotPoolFluids()) {
-                IAEFluidStack value = AEFluidStack.create(
-                    row.getKey()
-                        .prototype());
-                value.setStackSize(Math.min(REPORT_CAP, row.getValue()));
-                out.add(value);
-            }
-            return out;
-        }
-    }
 }

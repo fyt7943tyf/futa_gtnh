@@ -5,7 +5,10 @@ import java.util.Map;
 
 import net.minecraft.tileentity.TileEntity;
 
-/** Network operations are server-thread-only. Persistence and recovery remain owned by the pool. */
+/**
+ * Network operations are server-thread-only. Native AE cells own spendable stock; the facade retains service metadata
+ * only.
+ */
 public interface StorageNetworkAccess {
 
     long itemAmount(ItemKey key);

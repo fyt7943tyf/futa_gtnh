@@ -220,7 +220,7 @@ public final class PublicMeWorldSmoke {
         PublicMeWorldData saved=(PublicMeWorldData)world.loadItemData(PublicMeWorldData.class,PublicMeWorldData.NAME);
         require(saved!=null && saved.located && saved.storageId!=null,"persisted public anchor identity exists");
         File directory=world.getSaveHandler().getWorldDirectory();
-        require(saved.storageId.toString().equals(SharedStorageFile.getAeStorageId(directory)),"public anchor and warehouse file use the same UUID");
+        require(saved.storageId.toString().equals(SharedStorageManager.storageId().toString()),"public anchor and warehouse file use the same UUID");
         File file=new File(directory,"public-me-smoke-baseline.dat");
         if(file.isFile()){
             NBTTagCompound previous;

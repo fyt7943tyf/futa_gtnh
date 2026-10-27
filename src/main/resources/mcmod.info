@@ -13,7 +13,7 @@
 		"logoFile": "",
 		"screenshots": [],
 		"parent": "",
-		"requiredMods": ["gregtech", "modularui2", "appliedenergistics2", "lwjgl3ify"],
+		"requiredMods": ["gregtech", "modularui2", "appliedenergistics2", "ae2fc", "lwjgl3ify"],
 		"dependencies": [],
 		"dependants": [],
 		"useDependencyInformation": false

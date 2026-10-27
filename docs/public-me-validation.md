@@ -111,6 +111,23 @@ GT ME 设备使用基座坐标作为整机身份；此次未在完整 GT 产线�
 
 完整 `spotlessApply build spotlessCheck`、原有世界和终端烟测、26 个 GL 页面检查以及发版控制器 30 项测试通过。以上数量是服务端实际存取断言，不是 GUI 展示夹具，也不代表对所有第三方机器组合的逐一实测。
 
+## 原生存储介质迁移（2026-10-27，1.34.0）
+
+这次替换运行时的共享池存储提供者：直接发布原生 AE2 / AE2FC Universe 元件的真实库存处理器，保留标准 `CellInventory` 存取和原生元件 ItemStack NBT。公共网按需增加原生媒体；共享背包仅为访问和兼容 API。旧文件只在首次迁移时读取，不再定时保存。
+
+`verifySupplyTracking` 新增 46 项真实原生媒体及迁移回归，包含近 `Long.MAX_VALUE` 的物品/流体、完整 NBT、超过 63 类型扩容、模拟不分配元件、限额部分接受、脱网和清空后的旧句柄失效、原生盘独立读取、未知条目冻结原盘 NBT、损坏计数、版本未知、备份损坏、中断所有权续接、旧 UUID 及旧版本防误读。
+
+```sh
+./gradlew runClient17 -PuiSmoke \
+  -PrunClientWorkingDirectory=run/native-ae-migration-client-v3 --offline --console=plain
+```
+
+`NativeMeStorageWorldSmoke.prepare` 在模组注册完成、集成服务端启动前，仅在严格匹配名称的隔离目录生成上一版共享库存和 v1 迁移标记。实际初始数据为带标签的 4,294,967,311 件物品和 27,000,000,013 mB 流体，其中 3 件、5 mB 为未决托管，限额分别设为 1、2。迁移保留原 UUID、完整数量、NBT、限额和托管。
+
+首次启动通过 `NATIVE_ME_MIGRATION_SMOKE_SUCCESS`：从公共 AE 网真实取走 101 件和 203 mB，显式调用正常世界数据保存，完成 Hodgepodge 异步写入后重新挂载元件核对。相同目录再次启动通过 `NATIVE_ME_RESTART_SMOKE_SUCCESS`，已消耗库存未恢复，旧源文件 SHA-256 不变。实际重载推进只读 API generation；故意损坏原生版本号时保留当前库存并暂停保存，恢复后可正常重载且数量不变。
+
+完整 `spotlessApply build spotlessCheck`、公共 ME 与跨维度普通盘、产线终端、双总线流速回归及 26 个真实 GL 页面通过。新世界不创建旧共享库存文件。以上测试不读取或修改生产服务器存档；初始迁移备份和验收存档均在独立开发目录。
+
 ## 尚未替代的验收
 
 这不是对生产服全量旧存档、长时间运行、所有第三方机器和实际复杂合成产线的验收。原生合成计划器与 CPU 提交接口已接入，但截图中的合成计划是展示夹具，不代表一次真实复杂合成任务的完成证明。升级生产服前使用完整世界副本核对库存、机器区块、既有 CPU 任务和产线；迁移与恢复边界见 [迁移说明](public-me-migration.md)。

@@ -26,21 +26,8 @@ public final class SharedStoragePersistenceRegression {
         File root = new File("build/shared-storage-persistence-check");
         root.mkdirs();
         checkLoadFailures(Files.createTempDirectory(root.toPath(), "load-").toFile());
-        Object oldStorage = getManagerField("storage");
-        Object oldDirectory = getManagerField("worldDirectory");
-        Object oldLoaded = getManagerField("loaded");
-        Object oldBlocked = getManagerField("savingBlocked");
-        try {
-            setManagerField("loaded", true);
-            setManagerField("savingBlocked", false);
-            checkReloadFailure(Files.createTempDirectory(root.toPath(), "reload-").toFile());
-            checkConcurrentSave(Files.createTempDirectory(root.toPath(), "concurrent-").toFile());
-        } finally {
-            setManagerField("storage", oldStorage);
-            setManagerField("worldDirectory", oldDirectory);
-            setManagerField("loaded", oldLoaded);
-            setManagerField("savingBlocked", oldBlocked);
-        }
+        checkReloadFailure(Files.createTempDirectory(root.toPath(), "reload-").toFile());
+        checkConcurrentSave(Files.createTempDirectory(root.toPath(), "concurrent-").toFile());
         SharedStorageMigrationRegression.run();
         StorageNetworkAccessRegression.run();
         System.out.println("Shared storage persistence regression passed: " + checks + " checks");
@@ -80,35 +67,21 @@ public final class SharedStoragePersistenceRegression {
         check(SharedStorageFile.load(world).itemTypeCount() == 0, "new worlds with no files start empty");
     }
 
+    /** Legacy files remain migration inputs; live-world reload/persistence is covered by the native world smoke. */
     private static void checkReloadFailure(File world) throws Exception {
-        ItemKey iron = ItemKey.of(new ItemStack(Items.iron_ingot));
-        SharedStorage current = new SharedStorage();
-        current.insertItemManual(iron, 12);
-        setManagerField("storage", current);
-        setManagerField("worldDirectory", world);
-        File primary = SharedStorageFile.fileFor(world);
-        primary.getParentFile().mkdirs();
-        NBTTagCompound future = current.writeToNbt();
-        future.setInteger("version", SharedStorage.FORMAT_VERSION + 1);
-        write(primary, future);
-        byte[] original = Files.readAllBytes(primary.toPath());
-        check(SharedStorageManager.reloadFromDisk() == -1 && SharedStorageManager.getStorage() == current,
-            "failed reload retains the exact in-memory pool");
-        check(current.getItemAmount(iron) == 12 && SharedStorageManager.isSavingBlocked(),
-            "failed reload retains stock and blocks subsequent saves");
-        SharedStorageManager.saveNow();
-        current.insertItemManual(iron, 1);
-        SharedStorageManager.saveNow();
-        check(Arrays.equals(original, Files.readAllBytes(primary.toPath()))
-            && !new File(primary.getPath() + ".bak").exists(), "repeated saves cannot destroy an unreadable file");
-        SharedStorage repaired = new SharedStorage();
-        repaired.insertItemManual(iron, 7);
-        write(primary, repaired.writeToNbt());
-        check(SharedStorageManager.reloadFromDisk() == 1 && !SharedStorageManager.isSavingBlocked(),
-            "successful reload re-enables persistence after repair");
-        SharedStorageManager.getStorage().insertItemManual(iron, 1);
-        SharedStorageManager.saveNow();
-        check(SharedStorageFile.load(world).getItemAmount(iron) == 8, "repaired warehouse saves normally");
+        ItemKey iron=ItemKey.of(new ItemStack(Items.iron_ingot));SharedStorage current=new SharedStorage();current.insertItemManual(iron,12);
+        File primary=SharedStorageFile.fileFor(world);primary.getParentFile().mkdirs();
+        NBTTagCompound future=current.writeToNbt();future.setInteger("version",SharedStorage.FORMAT_VERSION+1);write(primary,future);
+        byte[] original=Files.readAllBytes(primary.toPath());expectLoadFailure(world);
+        check(current.getItemAmount(iron)==12 && Arrays.equals(original,Files.readAllBytes(primary.toPath())),"failed legacy decode changes neither current stock nor source bytes");
+        SharedStorage repaired=new SharedStorage();repaired.insertItemManual(iron,7);write(primary,repaired.writeToNbt());
+        check(SharedStorageFile.load(world).getItemAmount(iron)==7,"repaired legacy input remains readable for migration");
+    }
+
+    private static void saveLegacyFixture(File world, SharedStorage current) {
+        long revision=current.getPersistenceRevision();
+        check(SharedStorageFile.save(world,current),"legacy fixture writer succeeds");
+        current.markCleanIfUnchanged(revision);
     }
 
     private static void checkConcurrentSave(File world) throws Exception {
@@ -116,8 +89,6 @@ public final class SharedStoragePersistenceRegression {
         FluidKey water = FluidKey.of(FluidRegistry.WATER, null);
         PausingStorage current = new PausingStorage();
         current.insertItemManual(iron, 1);
-        setManagerField("storage", current);
-        setManagerField("worldDirectory", world);
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Thread writer = new Thread(() -> {
             try {
@@ -133,14 +104,14 @@ public final class SharedStoragePersistenceRegression {
             }
         }, "shared-storage-save-check");
         writer.start();
-        SharedStorageManager.saveNow();
+        saveLegacyFixture(world, current);
         writer.join(10000);
         check(!writer.isAlive() && failure.get() == null, "worker completes without holding the save lock");
         check(current.isDirty() && current.getItemAmount(iron) == 2, "concurrent mutations remain dirty after save");
         SharedStorage first = SharedStorageFile.load(world);
         check(first.getItemAmount(iron) == 1 && first.getFluidAmount(water) == 0 && !first.hasItemLimit(iron),
             "first file contains exactly the captured snapshot");
-        SharedStorageManager.saveNow();
+        saveLegacyFixture(world, current);
         SharedStorage second = SharedStorageFile.load(world);
         check(second.getItemAmount(iron) == 2 && second.getFluidAmount(water) == 100 && second.getItemLimit(iron) == 37,
             "next save persists all concurrent items, fluids and settings");

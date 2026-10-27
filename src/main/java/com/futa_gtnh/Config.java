@@ -702,7 +702,7 @@ public class Config {
             autosaveIntervalSeconds,
             10,
             86400,
-            "自动保存间隔（秒）。内容没有改动时不会写盘。");
+            "辅助档案的自动保存间隔（秒）。公共 ME 库存由原生元件承载，随 Minecraft 世界保存。");
 
         shiftClickWithdrawAmount = configuration.getInt(
             "shiftClickWithdrawAmount",

@@ -208,12 +208,13 @@ public final class SharedStorageReadApiRegression {
         worldDirectory.setAccessible(true);
         worldDirectory.set(null, tempWorld);
         try {
-            check(SharedStorageManager.reloadFromDisk() == 0, "reload empty temporary world");
+            check(SharedStorageManager.reloadFromDisk() == -1, "reload refuses a synthetic path without a real native world owner");
             check(
-                !started.equals(
+                started.equals(
                     SharedStorageReadApi.getStatus()
                         .getGeneration()),
-                "reload changes generation");
+                "refused reload leaves generation unchanged");
+            check(!SharedStorageFile.fileFor(tempWorld).exists(), "refused reload creates no legacy inventory file");
         } finally {
             worldDirectory.set(null, null);
             // AE adoption establishes durable empty data and its migration marker on first load.

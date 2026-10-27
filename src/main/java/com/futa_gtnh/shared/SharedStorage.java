@@ -16,32 +16,11 @@ import com.futa_gtnh.api.SharedStorageSnapshot;
 import com.futa_gtnh.storagebus.StorageBusRegistry;
 
 /**
- * 全服共享的无限存储池。物品和流体各一张表，<b>数量用 long 记</b>，
- * 单条目上限 {@link #MAX_AMOUNT}（约 9.22e18），实际使用中等于无限。
- *
- * <p>
- * 为什么用 long 而不是 int 存数量：{@code ItemStack.stackSize} 是 int，
- * 但「无限堆叠」要求在<b>存储层</b>摆脱 int 的限制。只有在取出到玩家背包时
- * 才需要落回 {@code ItemStack} 的 int 世界（那时按 64 一组发就行）。
- * 另外原版 {@code ItemStack.writeToNBT} 把 Count 写成 byte，超过 127 会被截断 ——
- * 所以数量绝对不能塞进 ItemStack 的 NBT 里持久化。
- *
- * <p>
- * 用 {@link LinkedHashMap} 而不是 HashMap：保留插入顺序，让 GUI 在
- * 「按名称排序」之外的默认视图下位置稳定，不会每帧跳来跳去。
- *
- * <p>
- * <b>线程模型</b>：MC 服务端的方块/实体/网络逻辑都在主线程上跑，
- * 所以正常路径没有竞争。但 GT 的某些机器、管道或第三方模组有可能从工作线程
- * 调进来，因此池子本身的修改仍然全部在 {@code synchronized} 的 {@code *Pool}
- * 方法里完成；需要遍历时请用 {@link #snapshotItems()} / {@link #snapshotFluids()}，
- * 它们返回独立副本，调用方在锁外遍历不会踩到 {@code ConcurrentModificationException}。
- *
- * <p>
- * <b>存储总线</b>的读写要在世界里的容器上做，只能在服务端主线程执行；
- * 工作线程调 {@link #insertItem}/{@link #extractItem} 时会自动退回「只用池子」
- * （见 {@code StorageBusRegistry.canTouchWorld()}）。聚合库存的读取是锁保护的
- * 缓存表，工作线程读也不会碰世界。
+ * Compatibility facade and service settings for the public ME network. Live stock is held exclusively
+ * in native AE/AE2FC cells; item/fluid maps become views of those cells after migration.
+ * Standalone maps are retained only for decoding legacy files and offline compatibility fixtures.
+ * Limits, unknown legacy rows and uncertain transfer escrow are service metadata, never a second
+ * spendable inventory. Public gameplay operations route through the actual ME network.
  */
 public class SharedStorage {
 
@@ -107,8 +86,46 @@ public class SharedStorage {
         return networkAccess != null;
     }
 
-    private final LinkedHashMap<ItemKey, Long> items = new LinkedHashMap<>();
-    private final LinkedHashMap<FluidKey, Long> fluids = new LinkedHashMap<>();
+    // Legacy maps exist only while decoding an old file. Live stock is an AE CellInventory-backed view.
+    private Map<ItemKey, Long> items = new LinkedHashMap<>();
+    private Map<FluidKey, Long> fluids = new LinkedHashMap<>();
+    private com.futa_gtnh.me.NativeMeCellArray nativeCells;
+    private Runnable serviceDirty = () -> {};
+
+    public synchronized com.futa_gtnh.me.NativeMeCellArray nativeCells() {
+        return nativeCells;
+    }
+
+    /** Move a legacy decoder's stock into native AE media, then discard its independent quantity maps. */
+    synchronized void attachNativeCells(com.futa_gtnh.me.NativeMeCellArray cells, Runnable changed) {
+        if (nativeCells != null) throw new IllegalStateException("Native cells already attached");
+        for (Map.Entry<ItemKey, Long> row : items.entrySet()) cells.itemView()
+            .put(
+                row.getKey(),
+                Math.addExact(
+                    cells.itemView()
+                        .getOrDefault(row.getKey(), 0L),
+                    row.getValue()));
+        for (Map.Entry<FluidKey, Long> row : fluids.entrySet()) cells.fluidView()
+            .put(
+                row.getKey(),
+                Math.addExact(
+                    cells.fluidView()
+                        .getOrDefault(row.getKey(), 0L),
+                    row.getValue()));
+        items.clear();
+        fluids.clear();
+        items = cells.itemView();
+        fluids = cells.fluidView();
+        nativeCells = cells;
+        serviceDirty = changed;
+        cells.attach(this, changed);
+    }
+
+    /** Settings, uncertain transfers and quarantined legacy rows only; spendable stock lives in native cell NBT. */
+    synchronized NBTTagCompound writeServiceMetadata() {
+        return writeToNbt(false);
+    }
 
     // Removed from spendable stock, but with rollback capacity retained. An uncertain AE callback
     // leaves this escrow durable and blocks automatic delivery of that key until an OP resolves it.
@@ -187,13 +204,15 @@ public class SharedStorage {
     private long itemAmountForLimit(ItemKey key) {
         Long amount = key == null ? null : items.get(key);
         long internal = amount == null ? 0L : amount;
-        return networkAccess != null ? internal : saturatingAdd(internal, StorageBusRegistry.getAllItemAmount(key));
+        return networkAccess != null || nativeCells != null ? internal
+            : saturatingAdd(internal, StorageBusRegistry.getAllItemAmount(key));
     }
 
     private long fluidAmountForLimit(FluidKey key) {
         Long amount = key == null ? null : fluids.get(key);
         long internal = amount == null ? 0L : amount;
-        return networkAccess != null ? internal : saturatingAdd(internal, StorageBusRegistry.getAllFluidAmount(key));
+        return networkAccess != null || nativeCells != null ? internal
+            : saturatingAdd(internal, StorageBusRegistry.getAllFluidAmount(key));
     }
 
     /**
@@ -347,7 +366,8 @@ public class SharedStorage {
         long accepted = Math.min(amount, space);
         Long existing = items.get(key);
         long internal = existing == null ? 0L : existing.longValue();
-        items.put(key, saturatingAdd(internal, accepted));
+        if (nativeCells == null) items.put(key, saturatingAdd(internal, accepted));
+        else accepted = nativeCells.insertItem(key, accepted);
         // 用饱和加法：合计值本身溢出变负的话，/futashared info 会打印出负数，
         // 之后每一次取出还会让这个负数继续漂移
         itemTotal = saturatingAdd(itemTotal, accepted);
@@ -523,7 +543,8 @@ public class SharedStorage {
         long accepted = Math.min(amount, space);
         Long existing = fluids.get(key);
         long internal = existing == null ? 0L : existing.longValue();
-        fluids.put(key, saturatingAdd(internal, accepted));
+        if (nativeCells == null) fluids.put(key, saturatingAdd(internal, accepted));
+        else accepted = nativeCells.insertFluid(key, accepted);
         fluidTotal = saturatingAdd(fluidTotal, accepted);
         fluidRevision++;
         markChanged();
@@ -820,12 +841,14 @@ public class SharedStorage {
     public synchronized void markDirty() {
         persistenceRevision++;
         dirty = true;
+        serviceDirty.run();
     }
 
     private void markChanged() {
         revision++;
         persistenceRevision++;
         dirty = true;
+        serviceDirty.run();
     }
 
     // ==================================================================
@@ -1190,6 +1213,12 @@ public class SharedStorage {
     // ==================================================================
 
     public synchronized NBTTagCompound writeToNbt() {
+        if (nativeCells != null)
+            throw new IllegalStateException("Live AE inventory cannot be saved as a legacy shared pool");
+        return writeToNbt(true);
+    }
+
+    private NBTTagCompound writeToNbt(boolean legacyStock) {
         NBTTagCompound root = new NBTTagCompound();
         // Normal saves remain v2-compatible; only unresolved transfers need the escrow-aware v3 reader.
         boolean escrow = !craftingItems.isEmpty() || !craftingFluids.isEmpty()
@@ -1198,7 +1227,8 @@ public class SharedStorage {
         root.setInteger("version", escrow ? FORMAT_VERSION : 2);
 
         NBTTagList itemList = new NBTTagList();
-        for (Map.Entry<ItemKey, Long> entry : items.entrySet()) {
+        for (Map.Entry<ItemKey, Long> entry : (legacyStock ? items : Collections.<ItemKey, Long>emptyMap())
+            .entrySet()) {
             NBTTagCompound tag = entry.getKey()
                 .writeToNbt();
             tag.setLong("amount", entry.getValue());
@@ -1211,7 +1241,8 @@ public class SharedStorage {
         root.setTag("items", itemList);
 
         NBTTagList fluidList = new NBTTagList();
-        for (Map.Entry<FluidKey, Long> entry : fluids.entrySet()) {
+        for (Map.Entry<FluidKey, Long> entry : (legacyStock ? fluids : Collections.<FluidKey, Long>emptyMap())
+            .entrySet()) {
             NBTTagCompound tag = entry.getKey()
                 .writeToNbt();
             tag.setLong("amount", entry.getValue());
@@ -1285,6 +1316,8 @@ public class SharedStorage {
      * @return 本次成功读入的条目数
      */
     public synchronized int readFromNbt(NBTTagCompound root) {
+        if (nativeCells != null)
+            throw new IllegalStateException("Legacy decoder cannot overwrite live native AE cells");
         itemRevision++;
         fluidRevision++;
         items.clear();

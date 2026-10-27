@@ -11,7 +11,6 @@ import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.WorldServer;
 
-import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.api.SharedStorageReadStatus;
 import com.futa_gtnh.api.SharedStorageSnapshot;
@@ -44,7 +43,8 @@ public final class SharedStorageManager {
     private static String readApiGeneration = UUID.randomUUID()
         .toString();
 
-    private static int autosaveTicker;
+    private static NativeMeStorageData nativeData;
+    private static WorldServer nativeWorld;
     private static int transferCounter;
 
     /**
@@ -73,6 +73,10 @@ public final class SharedStorageManager {
 
     public static boolean isLoaded() {
         return loaded;
+    }
+
+    public static boolean hasUnsavedChanges() {
+        return nativeData == null ? storage.isDirty() : nativeData.hasUnsavedChanges();
     }
 
     public static boolean isSavingBlocked() {
@@ -136,6 +140,8 @@ public final class SharedStorageManager {
             .toString();
         loaded = false;
         savingBlocked = false;
+        nativeData = null;
+        nativeWorld = null;
 
         File dir = resolveWorldDirectory(server);
         if (dir == null) {
@@ -146,6 +152,8 @@ public final class SharedStorageManager {
             mem.adoptListenersFrom(storage);
             storage = mem;
             worldDirectory = null;
+            nativeData = null;
+            nativeWorld = null;
             loaded = true;
             invalidateSnapshot();
             return;
@@ -153,21 +161,25 @@ public final class SharedStorageManager {
 
         // A failed load must never leave the previous pool writable at the new world's path.
         worldDirectory = null;
-        SharedStorage fresh = SharedStorageFile.loadForAe(dir);
+        WorldServer owner = server.worldServerForDimension(0);
+        NativeMeStorageData data = NativeMeMigration.load(dir);
+        owner.setItemData(NativeMeStorageData.NAME, data);
+        nativeData = data;
+        nativeWorld = owner;
+        SharedStorage fresh = data.access();
         worldDirectory = dir;
         boolean networkAttached = storage.usesNetwork();
         fresh.adoptListenersFrom(storage);
         storage = fresh;
         if (networkAttached) com.futa_gtnh.ae2.PublicStorageAccess.begin();
         loaded = true;
-        autosaveTicker = 0;
         invalidateSnapshot();
 
         FutaGtnhMod.LOG.info(
-            "共享存储已就绪：{} 种物品 / {} 种流体，数据文件 {}",
+            "公共 ME 原生存储已就绪：{} 种物品 / {} 种流体，元件存档 {}",
             storage.itemTypeCount(),
             storage.fluidTypeCount(),
-            SharedStorageFile.fileFor(dir)
+            NativeMeMigration.dataFile(dir)
                 .getPath());
     }
 
@@ -178,6 +190,8 @@ public final class SharedStorageManager {
         } finally {
             // 清掉总线对 World / TileEntity 的引用：服务端停掉后它们不应该继续被静态表持有
             StorageBusRegistry.clear();
+            nativeWorld = null;
+            nativeData = null;
             loaded = false;
             readApiGeneration = UUID.randomUUID()
                 .toString();
@@ -185,36 +199,21 @@ public final class SharedStorageManager {
         }
     }
 
-    /**
-     * 服务端 tick。按 {@link Config#autosaveIntervalSeconds} 定期落盘。
-     *
-     * <p>
-     * 只在「有改动」时才真正写文件，所以空闲服务器不会反复 IO。
-     */
-    public static void onServerTick() {
-        if (!loaded || worldDirectory == null) return;
-        if (++autosaveTicker < Config.autosaveIntervalSeconds * 20) return;
-        autosaveTicker = 0;
-        if (storage.isDirty()) {
-            saveNow();
-        }
+    /** Inventory saves follow Minecraft's WorldSavedData lifecycle; no legacy pool autosave remains. */
+    public static void onServerTick() {}
+
+    public static UUID storageId() {
+        if (nativeData == null) throw new IllegalStateException("Native ME storage is not loaded");
+        return nativeData.storageId();
     }
 
-    /** 立即落盘（若内容有改动）。 */
+    /** Explicit save/normal shutdown flushes the same native cell world data used by normal world saves. */
     public static synchronized void saveNow() {
-        SharedStorage current = storage;
-        File directory = worldDirectory;
-        if (savingBlocked || directory == null || !current.isDirty()) return;
-        long savedRevision = current.getPersistenceRevision();
-        long start = System.currentTimeMillis();
-        if (SharedStorageFile.save(directory, current)) {
-            current.markCleanIfUnchanged(savedRevision);
-            FutaGtnhMod.LOG.info(
-                "共享存储已保存（{} 种物品 / {} 种流体，耗时 {} ms）",
-                current.itemTypeCount(),
-                current.fluidTypeCount(),
-                System.currentTimeMillis() - start);
-        }
+        if (savingBlocked || nativeData == null || nativeWorld == null) return;
+        nativeWorld.mapStorage.saveAllData();
+        // Hodgepodge writes MapStorage asynchronously; explicit save/shutdown must finish that queue.
+        nativeWorld.getSaveHandler()
+            .flush();
     }
 
     /**
@@ -424,18 +423,24 @@ public final class SharedStorageManager {
      * @return 读到的条目数；尚未载入或读取失败时返回 -1
      */
     public static int reloadFromDisk() {
-        if (!loaded || worldDirectory == null) return -1;
+        if (!loaded || worldDirectory == null || nativeWorld == null) return -1;
 
         SharedStorage fresh;
         try {
-            fresh = SharedStorageFile.loadForAe(worldDirectory);
-            if (com.futa_gtnh.me.PublicMeNetwork.isRunning() && !com.futa_gtnh.me.PublicMeNetwork
-                .matchesStorageId(UUID.fromString(SharedStorageFile.getAeStorageId(worldDirectory)))) {
+            nativeWorld.getSaveHandler()
+                .flush();
+            NativeMeStorageData replacement = NativeMeMigration.load(worldDirectory);
+            if (com.futa_gtnh.me.PublicMeNetwork.isRunning()
+                && !com.futa_gtnh.me.PublicMeNetwork.matchesStorageId(replacement.storageId())) {
                 throw new IllegalStateException("Reload cannot replace the public ME warehouse identity");
             }
+            fresh = replacement.access();
+            nativeData = replacement;
+            nativeWorld.setItemData(NativeMeStorageData.NAME, replacement);
         } catch (IllegalStateException error) {
             savingBlocked = true;
-            FutaGtnhMod.LOG.error("共享存储：重新读取失败，保留当前内存库存并暂停保存；修复原文件后重新 reload 可恢复保存", error);
+            if (nativeData != null) nativeData.blockSaving(true);
+            FutaGtnhMod.LOG.error("公共 ME 原生存储：重新读取失败，保留当前内存库存并暂停保存；修复原文件后重新 reload 可恢复保存", error);
             return -1;
         }
         savingBlocked = false;

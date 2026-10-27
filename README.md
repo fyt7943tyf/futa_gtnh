@@ -17,7 +17,7 @@
 
 | 功能 | 入口 | 说明 | 详细文档 |
 |---|---|---|---|
-| **全服共享背包** | 按键 **B** / 「共享终端」方块 | 全服所有人共用的无限物品与流体存储，支持搜索（含拼音）、排序、分页，与个人背包双向交换，可对接 GT 管道自动化 | [README-共享背包.md](README-共享背包.md) |
+| **全服共享背包** | 按键 **B** / 「共享终端」方块 | 随身访问全服公共 ME，原生 AE/AE2FC 元件自动扩容，支持搜索（含拼音）、排序、分页，与个人背包双向交换，可对接 GT 管道自动化 | [README-共享背包.md](README-共享背包.md) |
 | **共享存储总线** | AE 风格面板方块 | 贴在箱子 / GT 机器 / 储罐旁边，把该容器接进共享背包：共享终端里可见可取，写入与抽取按优先级，支持筛选、只读/只写；一个格子最多六条、每面独立（模型与摆放参考 AE 存储总线） | [README-存储总线.md](README-存储总线.md) |
 | **俯瞰建筑** | 按键 **G** | 像 RTS 游戏一样从头顶俯瞰操作世界：远程互动、批量形状建造（直线/墙面/圆盘/球体等）与区域破坏、撤销重做，服务端全程校验 | [README-俯瞰建筑.md](README-俯瞰建筑.md) |
 | **迅步** | 饰品（可装备到 Baubles 槽） | 移动/飞行加速、自带火把照明、作物与动物生长光环、生命/饱食恢复、掉落物吸附 | — |
@@ -26,8 +26,8 @@
 | **自选抽奖机** | 方块 | 自选奖池的抽奖机（Enhanced LootBags 联动） | — |
 | **太阳能除钙剂** | 物品 | 右键蒸汽太阳能锅炉即可重置钙化进度，可无限使用 | — |
 | **低压拆解机** | LV GT 单方块机器 | 固定 32 EU/t、1A、2 秒，采用 GTNL 微光转换规则，单步返还 GT 机器工作台、组装机、装配线及太空组装机材料，分页物品输出和多个真实流体罐 | [README-拆解机.md](README-拆解机.md) |
-| **AE 无线控制覆盖板** | 发信端方块 + 接收端覆盖板 | 发信端放进 ME 网络（每网络限一个、可命名、按队伍隔离），接收端贴在 GT 机器上，按网络里物品/流体存量阈值远程启停机器，支持 NEI 拖拽监听、可配频率与极性（装 AE2 时生效） | [README-AE联动.md](README-AE联动.md) |
-| **ME 超级对接站** | LV GT 单方块机器 | 把 GT 超级/量子储罐或超级/量子箱作为物品放入，内容直接接入 ME 网络存储，免存储总线、可配优先级（装 AE2 时生效） | [README-AE联动.md](README-AE联动.md) |
+| **AE 无线控制覆盖板** | 发信端方块 + 接收端覆盖板 | 发信端放进 ME 网络（每网络限一个、可命名、按队伍隔离），接收端贴在 GT 机器上，按网络里物品/流体存量阈值远程启停机器，支持 NEI 拖拽监听、可配频率与极性 | [README-AE联动.md](README-AE联动.md) |
+| **ME 超级对接站** | LV GT 单方块机器 | 把 GT 超级/量子储罐或超级/量子箱作为物品放入，内容直接接入 ME 网络存储，免存储总线、可配优先级 | [README-AE联动.md](README-AE联动.md) |
 | **合成向导（手机网页）** | 按键 **P** / `/futaweb` | 客户端内嵌一个只读网页服务：手机浏览器打开就能搜任意物品、看它在 NEI 里的全部做法、自选配方、填数量，拿到一份扣掉共享背包与个人背包库存后的分步合成指导 | [README-合成向导.md](README-合成向导.md) |
 
 > 抽奖机、小游戏助手等功能需要安装对应的联动模组才会生效（见下方可选依赖）。
@@ -37,8 +37,10 @@
 
 1. 前往 [Releases](https://github.com/fyt7943tyf/futa_gtnh/releases) 下载最新的 `futa_gtnh-<版本>.jar`；
 2. 放进 GTNH 整合包的 `mods/` 文件夹，**客户端与服务端都要装**；
-3. 硬性前置：**GregTech（GT5-Unofficial）**、**lwjgl3ify**、**ModularUI2 2.3.89-1.7.10+** —— 对应 GTNH 整合包自带；
-4. 可选联动（装了自动增强，不装不影响运行）：NEI、NotEnoughCharacters（拼音搜索）、MouseTweaks、Tinkers' Construct、Baubles-Expanded、LootGames 2.2.14+、Enhanced LootBags、Vending Machine、Applied Energistics 2（共享背包存储元件，见[共享背包文档](README-共享背包.md)）。
+3. 硬性前置：**GregTech（GT5-Unofficial）**、**lwjgl3ify**、**ModularUI2 2.3.89-1.7.10+**、**Applied Energistics 2**、**AE2 Fluid Crafting** —— 对应 GTNH 整合包自带；
+4. 可选联动（装了自动增强，不装不影响运行）：NEI、NotEnoughCharacters（拼音搜索）、MouseTweaks、Tinkers' Construct、Baubles-Expanded、LootGames 2.2.14+、Enhanced LootBags、Vending Machine。
+
+共享背包从 1.34.0 起由原生 AE/AE2FC 元件承载库存，旧服自动迁移，保留随身、全服共享、跨维度和自动扩容。升级与备份文件见 [原生 ME 迁移说明](docs/public-me-migration.md)。
 
 ## 从源码构建
 

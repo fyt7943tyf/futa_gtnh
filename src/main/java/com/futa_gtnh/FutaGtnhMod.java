@@ -60,7 +60,7 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
     // after:IC2 是软依赖排序：反应堆布局工具要读 IC2 反应堆的方块实体，
     // 排在它之后更稳妥；没装 IC2 时这条排序没有副作用（功能按缺席处理）。
     // 大小写照抄 IC2 的 modid（GT5U 的 @Mod 里同样是 required-after:IC2）。
-    dependencies = "required-after:gregtech;required-after:modularui2;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure;after:IC2;required-after:appliedenergistics2")
+    dependencies = "required-after:gregtech;required-after:modularui2;required-after:lwjgl3ify;after:miscutils;after:NotEnoughItems;after:lootgames;after:enhancedlootbags;after:vendingmachine;after:dreamcraft;after:gtnhintergalactic;after:sciencenotleisure;after:IC2;required-after:appliedenergistics2;required-after:ae2fc")
 public class FutaGtnhMod {
 
     public static final String MODID = "futa_gtnh";
@@ -166,8 +166,7 @@ public class FutaGtnhMod {
         com.futa_gtnh.me.PublicMeNetwork.start(
             net.minecraft.server.MinecraftServer.getServer(),
             CommonProxy.blockPublicMeCore,
-            java.util.UUID.fromString(
-                com.futa_gtnh.shared.SharedStorageFile.getAeStorageId(SharedStorageManager.worldDirectory())),
+            SharedStorageManager.storageId(),
             Config.publicMeCoreX,
             Config.publicMeCoreY,
             Config.publicMeCoreZ);

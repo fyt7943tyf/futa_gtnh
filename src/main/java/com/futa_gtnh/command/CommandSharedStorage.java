@@ -10,7 +10,6 @@ import net.minecraft.util.EnumChatFormatting;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.shared.SharedStorage;
-import com.futa_gtnh.shared.SharedStorageFile;
 import com.futa_gtnh.shared.SharedStorageManager;
 
 /**
@@ -114,7 +113,7 @@ public class CommandSharedStorage extends CommandBase {
                     return;
                 }
                 SharedStorageManager.saveNow();
-                reply(sender, EnumChatFormatting.GREEN + "共享存储已保存。");
+                reply(sender, EnumChatFormatting.GREEN + "公共 ME 原生存储元件已保存。");
                 break;
 
             case "reload":
@@ -127,7 +126,7 @@ public class CommandSharedStorage extends CommandBase {
                 if (args.length < 2 || !"confirm".equalsIgnoreCase(args[1])) {
                     reply(
                         sender,
-                        EnumChatFormatting.RED + "这会清空全服共享存储池里所有东西（存储总线接进来的容器不受影响），且不可撤销。"
+                        EnumChatFormatting.RED + "这会清空公共 ME 自动扩容元件中的库存（外接 ME 盘和容器不受影响），且不可撤销。"
                             + "确认请执行：/futashared clear confirm");
                     return;
                 }
@@ -136,7 +135,7 @@ public class CommandSharedStorage extends CommandBase {
                 SharedStorageManager.invalidateSnapshot();
                 SharedStorageManager.saveNow();
                 SharedStorageManager.resyncAll();
-                reply(sender, EnumChatFormatting.RED + "共享存储池已清空（存储总线里的容器内容未动）。");
+                reply(sender, EnumChatFormatting.RED + "公共 ME 自动扩容元件已清空（外接 ME 盘和容器内容未动）。");
                 break;
 
             default:
@@ -166,7 +165,9 @@ public class CommandSharedStorage extends CommandBase {
                 + " L");
         reply(
             sender,
-            EnumChatFormatting.YELLOW + "待写盘改动：" + EnumChatFormatting.WHITE + (storage.isDirty() ? "有" : "无"));
+            EnumChatFormatting.YELLOW + "待写盘改动："
+                + EnumChatFormatting.WHITE
+                + (SharedStorageManager.hasUnsavedChanges() ? "有" : "无"));
         if (SharedStorageManager.isSavingBlocked()) {
             reply(sender, EnumChatFormatting.RED + "读取失败后已暂停保存；修复数据文件后请重新 reload。");
         }
@@ -191,12 +192,8 @@ public class CommandSharedStorage extends CommandBase {
             reply(sender, EnumChatFormatting.RED + "重载会用磁盘上的内容覆盖当前内存数据。");
             reply(
                 sender,
-                EnumChatFormatting.RED + "最近 "
-                    + com.futa_gtnh.Config.autosaveIntervalSeconds
-                    + " 秒内尚未自动保存的改动会丢失"
-                    + (SharedStorageManager.getStorage()
-                        .isDirty() ? "（当前确实有未保存的改动）" : "（当前没有未保存的改动）")
-                    + "。");
+                EnumChatFormatting.RED + "尚未随世界保存的内存改动会丢失；已排队的写入会先完成。"
+                    + (SharedStorageManager.hasUnsavedChanges() ? "（当前有待保存改动）" : "（当前没有待保存改动）"));
             reply(sender, EnumChatFormatting.RED + "如果只是想刷新界面，用不着这个指令 —— 界面本来就是实时同步的。");
             reply(sender, EnumChatFormatting.RED + "确认请执行：/futashared reload confirm");
             return;
@@ -208,7 +205,7 @@ public class CommandSharedStorage extends CommandBase {
         } else {
             reply(sender, EnumChatFormatting.GREEN + "已从磁盘重载，" + count + " 个条目。");
         }
-        reply(sender, EnumChatFormatting.GRAY + "数据文件：" + SharedStorageFile.FILE_NAME);
+        reply(sender, EnumChatFormatting.GRAY + "原生元件存档：" + com.futa_gtnh.shared.NativeMeStorageData.NAME + ".dat");
     }
 
     private boolean requireOp(ICommandSender sender) {
