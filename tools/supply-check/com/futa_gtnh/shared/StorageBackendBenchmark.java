@@ -30,6 +30,7 @@ import net.minecraftforge.fluids.FluidStack;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.me.FrozenNativeMeCellArray1341;
+import com.futa_gtnh.me.FrozenNativeMeCellArray1342;
 import com.futa_gtnh.me.NativeMeCellArray;
 import com.glodblock.github.common.item.ItemFluidExtremeStorageCell;
 import com.google.gson.GsonBuilder;
@@ -100,6 +101,10 @@ public final class StorageBackendBenchmark {
                     if (FluidRegistry.getFluid("futa_storage_bench_" + i) == null)
                         FluidRegistry.registerFluid(new Fluid("futa_storage_bench_" + i));
         }
+        if (Boolean.getBoolean("futa.storageLoadOnly")) {
+            loadingBenchmark();
+            return;
+        }
         if (Boolean.getBoolean("futa.storageVerifySaved")) {
             verifySavedArtifacts();
             return;
@@ -111,7 +116,7 @@ public final class StorageBackendBenchmark {
                 .toString());
         report.put("baselineTag", "v1.33.10");
         report.put("baselineCommit", "e0f2358e6e8f5804a389a7ffbe67592706a0a010");
-        report.put("publicVersion", "1.34.2-candidate");
+        report.put("publicVersion", "1.34.3-candidate");
         report.put("nativeBaseline", "v1.34.1 / d191ba5d1cd1b0df2181778e35351570bd4b9a37");
         report.put(
             "storageHelper",
@@ -156,6 +161,155 @@ public final class StorageBackendBenchmark {
             .toJson(report);
         Files.write(output.toPath(), json.getBytes(StandardCharsets.UTF_8));
         System.out.println("STORAGE_BACKEND_BENCHMARK_SUCCESS " + output.getAbsolutePath() + " checks=" + checks);
+    }
+
+    /** Same bytes and fully decoded media in all arms; only public arms build the resource-to-media index. */
+    private static void loadingBenchmark() throws Exception {
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put(
+            "startedAtUtc",
+            java.time.Instant.now()
+                .toString());
+        report.put("baseline", "v1.34.2 / ad361c30006b2ea14cbee92cd5f5928d98a3d459");
+        report.put("candidate", "1.34.3");
+        report.put("profile", PROFILE);
+        report.put("java", System.getProperty("java.runtime.version"));
+        report.put("aeVersion", "rv3-beta-1082-GTNH");
+        report.put("ae2fcVersion", "1.5.108-gtnh");
+        report.put(
+            "storageHelper",
+            appeng.api.AEApi.instance()
+                .storage()
+                .getClass()
+                .getName());
+        require(
+            appeng.api.AEApi.instance()
+                .storage() instanceof appeng.core.api.ApiStorage,
+            "real native storage helper");
+        report.put(
+            "notes",
+            "Identical native-cell NBT/bytes per arm, fully materialized native contents before return. Frozen v1.34.2 source differs only by class name. Public arms include full counter validation, missing-mod quarantine and resource index; plain AE mounts the same actual CellInventory without public checks/index. gunzip case includes decompression; decoded case starts with already decoded immutable input NBT. No lazy loading shortcut, no disk/world tick/TPS measurement. All quantities and tags verified outside timed regions; arm order rotates. Service metadata and source backup validation are measured separately by the full backend benchmark.");
+        int warmup = Integer.getInteger("futa.storageLoadWarmup", 20);
+        int samples = Integer.getInteger("futa.storageLoadSamples", 60);
+        report.put("warmupSamples", warmup);
+        report.put("samples", samples);
+        List<Map<String, Object>> scales = new ArrayList<>();
+        report.put("scales", scales);
+        for (String raw : System.getProperty("futa.storageScales", "1,63,1024,4096")
+            .split(",")) {
+            int size = Integer.parseInt(raw);
+            ItemKey[] items = new ItemKey[size];
+            FluidKey[] fluids = new FluidKey[size];
+            for (int i = 0; i < size; i++) {
+                NBTTagCompound tag = new NBTTagCompound();
+                tag.setInteger("storageBenchType", i);
+                ItemStack item = PROFILE.equals("plain") ? new ItemStack(metaItem, 1, i)
+                    : new ItemStack(Items.iron_ingot);
+                if (!PROFILE.equals("plain")) item.setTagCompound(tag);
+                items[i] = ItemKey.of(item);
+                fluids[i] = FluidKey.of(
+                    PROFILE.equals("plain") ? new FluidStack(FluidRegistry.getFluid("futa_storage_bench_" + i), 1)
+                        : new FluidStack(FluidRegistry.WATER, 1, (NBTTagCompound) tag.copy()));
+            }
+            NBTTagCompound root = seedCells(items, fluids);
+            NBTTagCompound unchanged = (NBTTagCompound) root.copy();
+            byte[] compressed = compress(root);
+            String[] names = { "public_1342", "public_1343", "plain_native_ae" };
+            IntToLongFunction[] decoded = { i -> loadedCount(root, 0), i -> loadedCount(root, 1),
+                i -> loadedCount(root, 2) };
+            IntToLongFunction[] gzip = { i -> loadedCount(decompress(compressed), 0),
+                i -> loadedCount(decompress(compressed), 1), i -> loadedCount(decompress(compressed), 2) };
+            Map<String, Object> scale = new LinkedHashMap<>();
+            scales.add(scale);
+            scale.put("typesPerChannel", size);
+            scale.put("totalResources", size * 2);
+            scale.put("compressedBytes", compressed.length);
+            scale.put("decoded_mount", compare("decoded_mount", names, decoded, 1, warmup, samples));
+            scale.put("gunzip_decode_mount", compare("gunzip_decode_mount", names, gzip, 1, warmup, samples));
+            FrozenNativeMeCellArray1342 before = loadBefore(root);
+            NativeMeCellArray after = array();
+            after.readFromNBT(root);
+            Map<ItemKey, Long> plainItems = new LinkedHashMap<>();
+            Map<FluidKey, Long> plainFluids = new LinkedHashMap<>();
+            for (IMEInventoryHandler handler : loadCells(root, false))
+                for (Object value : handler.getAvailableItems(AEItemStackType.ITEM_STACK_TYPE.createList(), 0)) {
+                    IAEItemStack stack = (IAEItemStack) value;
+                    plainItems.merge(ItemKey.of(stack.getItemStack()), stack.getStackSize(), Math::addExact);
+                }
+            for (IMEInventoryHandler handler : loadCells(root, true))
+                for (Object value : handler.getAvailableItems(AEFluidStackType.FLUID_STACK_TYPE.createList(), 0)) {
+                    IAEFluidStack stack = (IAEFluidStack) value;
+                    plainFluids.merge(FluidKey.of(stack.getFluidStack()), stack.getStackSize(), Math::addExact);
+                }
+            for (int i = 0; i < size; i++) {
+                require(
+                    before.itemView()
+                        .get(items[i]) == QUANTITY
+                        && before.fluidView()
+                            .get(fluids[i]) == QUANTITY,
+                    "frozen loaded quantities/tags");
+                require(
+                    after.itemView()
+                        .get(items[i]) == QUANTITY
+                        && after.fluidView()
+                            .get(fluids[i]) == QUANTITY,
+                    "optimized loaded quantities/tags");
+                require(
+                    plainItems.get(items[i]) == QUANTITY && plainFluids.get(fluids[i]) == QUANTITY,
+                    "native loaded quantities/tags");
+            }
+            require(root.equals(unchanged), "all loaders retain original input NBT");
+            require(
+                after.itemView()
+                    .size() == size
+                    && after.fluidView()
+                        .size() == size
+                    && plainItems.size() == size
+                    && plainFluids.size() == size,
+                "no merged/lost/extra resources");
+        }
+        report.put("checks", checks);
+        File output = new File("build/reports/storage-loading-benchmark.json");
+        output.getParentFile()
+            .mkdirs();
+        Files.write(
+            output.toPath(),
+            new GsonBuilder().setPrettyPrinting()
+                .create()
+                .toJson(report)
+                .getBytes(StandardCharsets.UTF_8));
+        System.out.println("STORAGE_LOADING_BENCHMARK_SUCCESS " + output.getAbsolutePath() + " checks=" + checks);
+    }
+
+    private static FrozenNativeMeCellArray1342 loadBefore(NBTTagCompound root) {
+        FrozenNativeMeCellArray1342 cells = new FrozenNativeMeCellArray1342(
+            fluid -> new ItemStack(fluid ? fluidCell : itemCell));
+        cells.readFromNBT(root);
+        return cells;
+    }
+
+    @SuppressWarnings("rawtypes")
+    private static long loadedCount(NBTTagCompound root, int arm) {
+        if (arm == 0) {
+            FrozenNativeMeCellArray1342 cells = loadBefore(root);
+            return cells.itemView()
+                .size()
+                + cells.fluidView()
+                    .size();
+        }
+        if (arm == 1) {
+            NativeMeCellArray cells = array();
+            cells.readFromNBT(root);
+            return cells.itemView()
+                .size()
+                + cells.fluidView()
+                    .size();
+        }
+        long count = 0;
+        for (boolean fluids : new boolean[] { false, true }) for (IMEInventoryHandler handler : loadCells(root, fluids))
+            count += ((ICellInventoryHandler) handler).getCellInv()
+                .getStoredItemTypes();
+        return count;
     }
 
     private static Map<String, Object> scale(int size) throws Exception {

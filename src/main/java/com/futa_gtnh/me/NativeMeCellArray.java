@@ -13,9 +13,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
+import net.minecraftforge.fluids.FluidRegistry;
 
 import com.futa_gtnh.ae2.PublicStorageAccess;
 import com.futa_gtnh.shared.FluidKey;
@@ -50,11 +52,11 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
     private final Channel<IAEItemStack, ItemKey> items = new Channel<>(
         AEItemStackType.ITEM_STACK_TYPE,
         key -> AEItemStack.create(key.prototype()),
-        value -> ItemKey.of(value.getItemStack()));
+        ItemKey::fromNative);
     private final Channel<IAEFluidStack, FluidKey> fluids = new Channel<>(
         AEFluidStackType.FLUID_STACK_TYPE,
         key -> AEFluidStack.create(key.prototype()),
-        value -> FluidKey.of(value.getFluidStack()));
+        FluidKey::fromNative);
     private final Function<Boolean, ItemStack> definitions;
     private Runnable dirty = () -> {};
     private Runnable topology = () -> {};
@@ -465,7 +467,10 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         }
 
         Resource register(Slot slot, T value) {
-            Resource resource = locate(value);
+            // A miss is about to become a resource. Do not first manufacture a second private negative-cache key.
+            Resource resource = probeStructure == structure && probeIdentity != null && probeIdentity.equals(value)
+                ? probe
+                : identities.get(value);
             if (resource == null) {
                 K decoded = key.apply(value);
                 if (decoded == null) throw new IllegalStateException("Unregistered native resource identity");
@@ -479,6 +484,9 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 structure++;
             }
             if (slot.keys.add(resource)) resource.slots.add(slot);
+            probe = resource;
+            probeIdentity = resource.identity;
+            probeStructure = structure;
             return resource;
         }
 
@@ -639,8 +647,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 ItemStack cell = ItemStack.loadItemStackFromNBT(raw);
                 if (cell == null || cell.stackSize != 1) throw new IllegalStateException(
                     "Missing or invalid native storage cell item; refusing an empty replacement");
-                validateContents(cell);
-                if (hasMissingContents(cell)) {
+                if (validateContents(cell)) {
                     frozen.add((NBTTagCompound) raw.copy());
                     continue;
                 }
@@ -651,9 +658,10 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             }
         }
 
-        void validateContents(ItemStack cell) {
+        /** Check every counter before native decoding can discard missing rows; true quarantines the entire medium. */
+        boolean validateContents(ItemStack cell) {
             NBTTagCompound tag = cell.getTagCompound();
-            if (tag == null) return;
+            if (tag == null) return false;
             boolean item = type == AEItemStackType.ITEM_STACK_TYPE;
             int types = tag.getShort(item ? "it" : "ft");
             long count = tag.getLong(item ? "ic" : "fc");
@@ -668,17 +676,15 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 actual = Math.addExact(actual, amount);
             }
             if (actual != count) throw new IllegalStateException("Native cell counters do not match stack quantities");
-        }
-
-        boolean hasMissingContents(ItemStack cell) {
-            NBTTagCompound tag = cell.getTagCompound();
-            if (tag == null) return false;
+            // These are exactly the missing-registry tests in ItemStack/FluidStack.loadFromNBT, which AE delegates to.
+            // Native CellInventory still decodes full stacks/NBT below; this pass needs no temporary stack/AE identity.
+            // Include extra # tags as before: a missing entry must retain the complete original cell NBT.
             for (Object raw : tag.func_150296_c()) {
                 String name = (String) raw;
                 if (!name.startsWith("#")) continue;
                 NBTTagCompound value = tag.getCompoundTag(name);
-                if (type == AEItemStackType.ITEM_STACK_TYPE ? AEItemStack.loadItemStackFromNBT(value) == null
-                    : AEFluidStack.loadFluidStackFromNBT(value) == null) return true;
+                if (item ? Item.getItemById(value.getShort("id")) == null
+                    : FluidRegistry.getFluid(value.getString("FluidName")) == null) return true;
             }
             return false;
         }

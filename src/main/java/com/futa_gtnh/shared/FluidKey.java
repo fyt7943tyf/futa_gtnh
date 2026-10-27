@@ -5,6 +5,8 @@ import net.minecraftforge.fluids.Fluid;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 
+import appeng.api.storage.data.IAEFluidStack;
+
 /**
  * 共享存储中「一种流体」的规范化标识。和 {@link ItemKey} 同样的思路：
  * 把数量从身份里剥离出去，只保留 <b>流体种类 + NBT</b>。
@@ -41,6 +43,15 @@ public final class FluidKey {
         if (fluid == null) return null;
         if (fluidNameOf(fluid) == null) return null;
         return new FluidKey(fluid, normalize(nbt));
+    }
+
+    /** Native AE already owns its tag; take one independent copy without an intermediate Forge stack. */
+    public static FluidKey fromNative(IAEFluidStack stack) {
+        if (stack == null || stack.getFluid() == null || fluidNameOf(stack.getFluid()) == null) return null;
+        NBTTagCompound owned = stack.getTagCompound() == null ? null
+            : stack.getTagCompound()
+                .getNBTTagCompoundCopy();
+        return new FluidKey(stack.getFluid(), owned == null || owned.hasNoTags() ? null : owned);
     }
 
     /**

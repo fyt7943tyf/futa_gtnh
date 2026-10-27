@@ -4,6 +4,8 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 
+import appeng.api.storage.data.IAEItemStack;
+
 /**
  * 共享存储中「一种物品」的规范化标识，用作 {@link SharedStorage} 的键。
  *
@@ -57,6 +59,15 @@ public final class ItemKey {
     public static ItemKey of(Item item, int meta, NBTTagCompound nbt) {
         if (item == null) return null;
         return new ItemKey(item, meta, normalize(nbt));
+    }
+
+    /** Native AE already owns its tag; take one independent copy without an intermediate vanilla stack. */
+    public static ItemKey fromNative(IAEItemStack stack) {
+        if (stack == null || stack.getItem() == null) return null;
+        NBTTagCompound owned = stack.getTagCompound() == null ? null
+            : stack.getTagCompound()
+                .getNBTTagCompoundCopy();
+        return new ItemKey(stack.getItem(), stack.getItemDamage(), owned == null || owned.hasNoTags() ? null : owned);
     }
 
     private static NBTTagCompound normalize(NBTTagCompound tag) {

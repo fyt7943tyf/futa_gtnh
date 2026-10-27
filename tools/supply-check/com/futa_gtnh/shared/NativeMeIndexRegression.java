@@ -13,9 +13,11 @@ import net.minecraft.init.Items;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 
+import com.futa_gtnh.me.FrozenNativeMeCellArray1342;
 import com.futa_gtnh.me.NativeMeCellArray;
 
 import appeng.api.config.Actionable;
@@ -79,9 +81,183 @@ public final class NativeMeIndexRegression {
         multiCellAndReload();
         bulk();
         nativeBypassAndMutableRequests();
+        nativeKeySnapshots();
+        loadingIntegrity();
         System.out.println(
             "Native ME incremental index: " + checks
                 + " checks passed (native amounts, per-key membership, no transfer scans, batching, simulation, overflow, limits and remount)");
+    }
+
+    private static void nativeKeySnapshots() {
+        for (int i = 0; i < 64; i++) {
+            ItemStack raw = item(i).prototype();
+            NBTTagCompound tag = raw.getTagCompound();
+            tag.setByteArray("bytes", new byte[] { (byte) i, 7, -9 });
+            tag.setIntArray("ints", new int[] { i, Integer.MIN_VALUE, Integer.MAX_VALUE });
+            NBTTagCompound nested = new NBTTagCompound();
+            nested.setString("name", "载入检查" + i);
+            NBTTagList list = new NBTTagList();
+            list.appendTag(nested);
+            tag.setTag("nested", list);
+            ItemKey item = ItemKey.of(raw);
+            FluidKey fluid = FluidKey.of(FluidRegistry.WATER, tag);
+            IAEItemStack itemStack = request(item, 1);
+            IAEFluidStack fluidStack = request(fluid, 1);
+            ItemKey itemSnapshot = ItemKey.fromNative(itemStack);
+            FluidKey fluidSnapshot = FluidKey.fromNative(fluidStack);
+            check(
+                itemSnapshot.equals(ItemKey.of(itemStack.getItemStack())) && itemSnapshot.hashCode() == item.hashCode(),
+                "native item key preserves canonical identity/hash");
+            check(
+                fluidSnapshot.equals(FluidKey.of(fluidStack.getFluidStack()))
+                    && fluidSnapshot.hashCode() == fluid.hashCode(),
+                "native fluid key preserves canonical identity/hash");
+            itemStack.setTagCompound(item(1000 + i).copyNbt());
+            fluidStack.setTagCompound(fluid(1000 + i).copyNbt());
+            itemSnapshot.copyNbt()
+                .setInteger("indexVariant", -1);
+            fluidSnapshot.copyNbt()
+                .setInteger("indexVariant", -1);
+            check(
+                itemSnapshot.equals(item) && fluidSnapshot.equals(fluid),
+                "native key copies are independent of mutable requests and returned tags");
+        }
+        check(ItemKey.fromNative(null) == null && FluidKey.fromNative(null) == null, "null native keys are rejected");
+        check(
+            ItemKey.fromNative(AEItemStack.create(new ItemStack(Items.iron_ingot)))
+                .equals(ItemKey.of(new ItemStack(Items.iron_ingot))),
+            "untagged native item identity");
+        check(
+            FluidKey.fromNative(AEFluidStack.create(new FluidStack(FluidRegistry.WATER, 1)))
+                .equals(FluidKey.of(new FluidStack(FluidRegistry.WATER, 1))),
+            "untagged native fluid identity");
+    }
+
+    /** Paired frozen/new loaders must retain stock, tags and whole-media quarantine, or reject the same corruption. */
+    private static void loadingIntegrity() {
+        NativeMeCellArray source = array();
+        source.itemView()
+            .put(item(0), 71L);
+        source.itemView()
+            .put(item(1), 91L);
+        source.fluidView()
+            .put(fluid(0), 3000000000L);
+        source.fluidView()
+            .put(fluid(1), 5000000000L);
+        NBTTagCompound seed = new NBTTagCompound();
+        source.writeToNBT(seed);
+        for (int variant = 0; variant < 12; variant++) {
+            NBTTagCompound input = (NBTTagCompound) seed.copy();
+            NBTTagCompound item = input.getTagList("itemCells", 10)
+                .getCompoundTagAt(0)
+                .getCompoundTag("tag");
+            NBTTagCompound fluid = input.getTagList("fluidCells", 10)
+                .getCompoundTagAt(0)
+                .getCompoundTag("tag");
+            switch (variant) {
+                case 1:
+                    item.getCompoundTag("#0")
+                        .setShort("id", (short) 32767);
+                    break;
+                case 2:
+                    fluid.getCompoundTag("#0")
+                        .setString("FluidName", "futa_missing_load_check");
+                    break;
+                case 3:
+                    item.setLong("ic", 1);
+                    break;
+                case 4:
+                    fluid.setLong("fc", 1);
+                    break;
+                case 5:
+                    item.setLong("@0", -1);
+                    item.getCompoundTag("#0")
+                        .setLong("Cnt", -1);
+                    break;
+                case 6:
+                    fluid.removeTag("#0");
+                    break;
+                case 7:
+                    item.setShort("it", (short) 64);
+                    break;
+                case 8:
+                    item.setLong("@0", Long.MAX_VALUE);
+                    item.setLong("@1", Long.MAX_VALUE);
+                    break;
+                case 9:
+                    item.setLong("ic", -1);
+                    break;
+                case 10:
+                    NBTTagCompound row = fluid.getCompoundTag("#0");
+                    row.setTag(
+                        "tag",
+                        row.getCompoundTag("Tag")
+                            .copy());
+                    row.removeTag("Tag");
+                    break;
+                case 11:
+                    NBTTagCompound extra = new NBTTagCompound();
+                    extra.setString("FluidName", "futa_missing_extra_check");
+                    fluid.setTag("#999", extra);
+                    break;
+                default:
+                    break;
+            }
+            NBTTagCompound original = (NBTTagCompound) input.copy();
+            FrozenNativeMeCellArray1342 before = new FrozenNativeMeCellArray1342(
+                f -> new ItemStack(f ? fluidMedia : itemMedia));
+            NativeMeCellArray after = array();
+            boolean oldFailed = false, newFailed = false;
+            try {
+                before.readFromNBT(input);
+            } catch (RuntimeException e) {
+                oldFailed = true;
+            }
+            try {
+                after.readFromNBT(input);
+            } catch (RuntimeException e) {
+                newFailed = true;
+            }
+            check(input.equals(original), "loader never changes source NBT variant " + variant);
+            check(oldFailed == newFailed, "integrity rejection matches frozen loader variant " + variant);
+            if (variant >= 3 && variant <= 9)
+                check(newFailed, "corrupt counters/rows/overflow refuse publication variant " + variant);
+            if (newFailed) continue;
+            check(
+                before.itemView()
+                    .equals(after.itemView())
+                    && before.fluidView()
+                        .equals(after.fluidView()),
+                "all loaded quantities and complete identities match variant " + variant);
+            check(
+                before.frozenCellCount() == after.frozenCellCount(),
+                "missing-mod whole-medium quarantine matches variant " + variant);
+            NBTTagCompound oldSaved = new NBTTagCompound(), newSaved = new NBTTagCompound();
+            before.writeToNBT(oldSaved);
+            after.writeToNBT(newSaved);
+            check(oldSaved.equals(newSaved), "complete saved NBT retained variant " + variant);
+            if (variant == 1 || variant == 2 || variant == 11) {
+                String channel = variant == 1 ? "itemCells" : "fluidCells";
+                check(
+                    after.frozenCellCount() == 1 && input.getTag(channel)
+                        .equals(newSaved.getTag(channel)),
+                    "unknown entries preserve every original field in whole medium");
+            }
+            NativeMeCellArray reloaded = array();
+            reloaded.readFromNBT(newSaved);
+            check(
+                reloaded.itemView()
+                    .equals(after.itemView())
+                    && reloaded.fluidView()
+                        .equals(after.fluidView()),
+                "second remount does not duplicate or lose stock");
+            if (variant == 0) check(
+                after.itemView()
+                    .equals(source.itemView())
+                    && after.fluidView()
+                        .equals(source.fluidView()),
+                "all initial tagged and long quantities survive");
+        }
     }
 
     private static NativeMeCellArray array() {

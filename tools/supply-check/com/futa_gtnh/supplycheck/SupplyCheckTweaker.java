@@ -15,6 +15,7 @@ public final class SupplyCheckTweaker implements ITweaker {
     }
     @Override public void acceptOptions(List<String> args, File game, File assets, String profile) {}
     @Override public void injectIntoClassLoader(LaunchClassLoader loader) {
+        loader.registerTransformer("com.futa_gtnh.supplycheck.SupplyCheckAccessTransformer");
         MixinEnvironment.getDefaultEnvironment().setSide(MixinEnvironment.Side.SERVER);
         Mixins.addConfiguration("mixins.futa_supply_check.json");
     }
