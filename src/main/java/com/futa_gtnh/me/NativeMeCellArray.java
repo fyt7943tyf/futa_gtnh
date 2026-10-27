@@ -3,6 +3,9 @@ package com.futa_gtnh.me;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,6 +24,7 @@ import com.futa_gtnh.shared.SharedStorage;
 import com.glodblock.github.loader.ItemAndBlockHolder;
 
 import appeng.api.AEApi;
+import appeng.api.config.AccessRestriction;
 import appeng.api.config.Actionable;
 import appeng.api.networking.security.BaseActionSource;
 import appeng.api.storage.ICellInventoryHandler;
@@ -56,6 +60,8 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
     private Runnable topology = () -> {};
     private SharedStorage settings;
     private int directWrites;
+    private int nativeMutationDepth;
+    private final Map<IMEInventory, Runnable> nativeChanges = new IdentityHashMap<>();
     private boolean published;
 
     public void setPublished(boolean value) {
@@ -112,6 +118,17 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         return items.frozen.size() + fluids.frozen.size();
     }
 
+    /** Legacy stock remains owned by its decoder until both native channels have accepted every row. */
+    public void importStock(Map<ItemKey, Long> itemStock, Map<FluidKey, Long> fluidStock) {
+        directWrites++;
+        try {
+            items.importRows(itemStock);
+            fluids.importRows(fluidStock);
+        } finally {
+            directWrites--;
+        }
+    }
+
     public long insertItem(ItemKey key, long amount) {
         directWrites++;
         try {
@@ -155,6 +172,12 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
     @Override
     public void saveChanges(IMEInventory inventory) {
         dirty.run();
+        // Native integrations can deliberately unwrap a handler. Repair that cell only; ordinary controlled
+        // transfers already know the affected key and never take this fallback.
+        if (nativeMutationDepth == 0) {
+            Runnable repair = nativeChanges.get(inventory);
+            if (repair != null) repair.run();
+        }
     }
 
     @Override
@@ -178,17 +201,36 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         final List<Slot> slots = new ArrayList<>();
         final List<NBTTagCompound> frozen = new ArrayList<>();
         // Locations only. Quantities always come from AE's own CellInventory.
-        final Map<K, List<Slot>> locations = new LinkedHashMap<>();
+        final Map<K, Resource> locations = new LinkedHashMap<>();
+        // Private native identity keys never change; their count is only a key marker, never inventory.
+        final Map<T, Resource> identities = new HashMap<>();
+        final Set<Slot> openSlots = new LinkedHashSet<>();
+        final Set<Slot> batchChanged = new LinkedHashSet<>();
+        boolean importing;
+        long structure;
+        long probeStructure = -1;
+        T probeIdentity;
+        Resource probe;
         final Map<K, Long> view = new AbstractMap<K, Long>() {
 
             @Override
             public Long get(Object raw) {
-                List<Slot> found = locations.get(raw);
+                Resource found = locations.get(raw);
                 if (found == null) return null;
                 @SuppressWarnings("unchecked")
                 K requested = (K) raw;
                 long amount = amount(requested);
                 return amount == 0 ? null : amount;
+            }
+
+            @Override
+            public int size() {
+                return locations.size();
+            }
+
+            @Override
+            public boolean isEmpty() {
+                return locations.isEmpty();
             }
 
             @Override
@@ -225,9 +267,17 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
 
             @Override
             public void clear() {
-                for (Slot slot : slots) slot.active = false;
+                for (Slot slot : slots) {
+                    slot.active = false;
+                    nativeChanges.remove(((ICellInventoryHandler<?>) slot.nativeInventory).getCellInv());
+                }
                 slots.clear();
                 locations.clear();
+                identities.clear();
+                structure++;
+                probe = null;
+                probeIdentity = null;
+                openSlots.clear();
                 frozen.clear();
                 dirty.run();
                 topology.run();
@@ -250,7 +300,7 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
 
                 @Override
                 public T injectItems(T input, Actionable mode, BaseActionSource source) {
-                    return published ? insert(input, mode, source) : input;
+                    return published ? insert(input, mode, source, true) : input;
                 }
 
                 @Override
@@ -284,11 +334,13 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         }
 
         long amount(K requested) {
-            List<Slot> found = locations.get(requested);
-            if (found == null) return 0;
-            T request = stack.apply(requested);
+            Resource found = locations.get(requested);
+            return found == null ? 0 : amount(found, found.identity);
+        }
+
+        long amount(Resource found, T request) {
             long amount = 0;
-            for (Slot slot : found) {
+            for (Slot slot : found.slots) {
                 T stored = slot.nativeInventory.getAvailableItem(request, 0);
                 long n = stored == null ? 0 : stored.getStackSize();
                 if (n > Long.MAX_VALUE - amount) throw new IllegalStateException("Native AE quantity overflow");
@@ -298,40 +350,80 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         }
 
         long room(T request) {
-            if (settings == null || directWrites > 0) return Long.MAX_VALUE - amount(key.apply(request));
-            K requested = key.apply(request);
-            return requested instanceof ItemKey item ? settings.poolItemSpace(item, PublicStorageAccess.manual())
-                : settings.poolFluidSpace((FluidKey) requested, PublicStorageAccess.manual());
+            Resource resource = locate(request);
+            K requested = resource == null ? key.apply(request) : resource.key;
+            if (requested == null) return 0;
+            long ceiling = Long.MAX_VALUE;
+            boolean fluid = type == AEFluidStackType.FLUID_STACK_TYPE;
+            if (settings != null && directWrites == 0 && settings.hasNativeConstraints(fluid)) {
+                ceiling = fluid ? settings.nativeFluidCeiling((FluidKey) requested, PublicStorageAccess.manual())
+                    : settings.nativeItemCeiling((ItemKey) requested, PublicStorageAccess.manual());
+            }
+            long stored = resource == null ? 0 : amount(resource, request);
+            return Math.max(0, ceiling - stored);
         }
 
         T insert(T input, Actionable mode, BaseActionSource source) {
+            return insert(input, mode, source, false);
+        }
+
+        T insert(T input, Actionable mode, BaseActionSource source, boolean allocationOnly) {
             if (input == null || input.getStackSize() <= 0) return input;
-            long accepted = Math.min(input.getStackSize(), room(input));
+            long available = room(input);
+            if (allocationOnly && mode == Actionable.SIMULATE) {
+                // Native handlers precede this lowest-priority allocator. Count only capacity they cannot supply;
+                // otherwise a partially capped simulated insertion would advertise the same room twice.
+                for (Slot slot : slots) {
+                    if (available <= 0) break;
+                    T remainder = slot.nativeInventory.injectItems(
+                        input.copy()
+                            .setStackSize(available),
+                        mode,
+                        source);
+                    available = remainder == null ? 0 : remainder.getStackSize();
+                }
+            }
+            long accepted = Math.min(input.getStackSize(), available);
             if (accepted <= 0) return input;
             T remaining = input.copy()
                 .setStackSize(accepted);
-            for (Slot slot : new ArrayList<>(slots)) {
-                remaining = slot.nativeInventory.injectItems(remaining, mode, source);
+            Resource present = locate(input);
+            List<Slot> known = present == null ? Collections.emptyList() : new ArrayList<>(present.slots);
+            if (!allocationOnly) for (Slot slot : known) {
+                remaining = inject(slot, remaining, mode, source);
                 if (remaining == null || remaining.getStackSize() == 0) break;
             }
+            if (!allocationOnly && remaining != null && remaining.getStackSize() > 0)
+                for (Slot slot : new ArrayList<>(openSlots)) {
+                    if (known.contains(slot)) continue;
+                    remaining = inject(slot, remaining, mode, source);
+                    if (remaining == null || remaining.getStackSize() == 0) break;
+                }
             while (remaining != null && remaining.getStackSize() > 0) {
                 ItemStack cell = definitions.apply(type == AEFluidStackType.FLUID_STACK_TYPE);
                 if (cell == null || cell.getItem() == null)
                     throw new IllegalStateException("Native Universe storage cell is disabled");
                 Slot fresh = new Slot(cell);
                 long before = remaining.getStackSize();
-                T next = fresh.nativeInventory.injectItems(remaining.copy(), mode, source);
+                T next;
+                nativeMutationDepth++;
+                try {
+                    next = fresh.nativeInventory.injectItems(remaining.copy(), mode, source);
+                } finally {
+                    nativeMutationDepth--;
+                }
                 long after = next == null ? 0 : next.getStackSize();
                 if (after >= before) break; // Native blacklists remain native; never allocate endlessly or void.
                 if (mode == Actionable.MODULATE) {
                     slots.add(fresh);
-                    reindex(fresh);
+                    watch(fresh);
+                    inserted(fresh, remaining);
+                    capacity(fresh);
                     dirty.run();
                     topology.run();
                 }
                 remaining = next;
             }
-            if (mode == Actionable.MODULATE) for (Slot slot : slots) reindex(slot);
             long rest = input.getStackSize() - accepted + (remaining == null ? 0 : remaining.getStackSize());
             return rest == 0 ? null
                 : input.copy()
@@ -341,16 +433,16 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         T extract(T request, Actionable mode, BaseActionSource source) {
             if (request == null || request.getStackSize() <= 0) return null;
             long taken = 0;
-            List<Slot> found = locations.get(key.apply(request));
+            Resource found = locate(request);
             if (found == null) return null;
-            for (Slot slot : new ArrayList<>(found)) {
-                T result = slot.nativeInventory.extractItems(
+            for (Slot slot : new ArrayList<>(found.slots)) {
+                T result = extract(
+                    slot,
                     request.copy()
                         .setStackSize(request.getStackSize() - taken),
                     mode,
                     source);
                 if (result != null) taken += result.getStackSize();
-                if (mode == Actionable.MODULATE) reindex(slot);
                 if (taken == request.getStackSize()) break;
             }
             return taken == 0 ? null
@@ -358,21 +450,159 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                     .setStackSize(taken);
         }
 
-        void reindex(Slot slot) {
-            for (K old : slot.keys) {
-                List<Slot> found = locations.get(old);
-                if (found != null) {
-                    found.remove(slot);
-                    if (found.isEmpty()) locations.remove(old);
+        /** Load, bulk-import completion, unwrapped native writes and exception repair can enumerate a cell. */
+        void index(Slot slot) {
+            IItemList<T> content = slot.nativeInventory.getAvailableItems(type.createList(), 0);
+            if (slot.keys.isEmpty()) {
+                for (T value : content) if (value.getStackSize() > 0) register(slot, value);
+                capacity(slot);
+                return;
+            }
+            Set<Resource> retained = new HashSet<>();
+            for (T value : content) if (value.getStackSize() > 0) retained.add(register(slot, value));
+            for (Resource old : new ArrayList<>(slot.keys)) if (!retained.contains(old)) unlink(slot, old);
+            capacity(slot);
+        }
+
+        Resource register(Slot slot, T value) {
+            Resource resource = locate(value);
+            if (resource == null) {
+                K decoded = key.apply(value);
+                if (decoded == null) throw new IllegalStateException("Unregistered native resource identity");
+                // AEItemStack.copy shares its mutable AEItemDef. Recreate a private identity from our immutable key.
+                resource = new Resource(
+                    decoded,
+                    stack.apply(decoded)
+                        .setStackSize(1));
+                locations.put(resource.key, resource);
+                identities.put(resource.identity, resource);
+                structure++;
+            }
+            if (slot.keys.add(resource)) resource.slots.add(slot);
+            return resource;
+        }
+
+        void unlink(Slot slot, Resource resource) {
+            slot.keys.remove(resource);
+            resource.slots.remove(slot);
+            if (resource.slots.isEmpty()) {
+                locations.remove(resource.key);
+                identities.remove(resource.identity);
+                structure++;
+            }
+        }
+
+        /** Compare a private identity, never a caller-owned mutable stack. Only one lookup is retained per channel. */
+        Resource locate(T request) {
+            if (probeStructure == structure && probeIdentity != null && probeIdentity.equals(request)) return probe;
+            probe = identities.get(request);
+            if (probe == null) {
+                K decoded = key.apply(request);
+                probeIdentity = decoded == null ? null
+                    : stack.apply(decoded)
+                        .setStackSize(1);
+            } else probeIdentity = probe.identity;
+            probeStructure = structure;
+            return probe;
+        }
+
+        void capacity(Slot slot) {
+            boolean available = ((ICellInventoryHandler<?>) slot.nativeInventory).getCellInv()
+                .canHoldNewItem();
+            if (available == slot.open) return;
+            slot.open = available;
+            if (available) openSlots.add(slot);
+            else openSlots.remove(slot);
+        }
+
+        void inserted(Slot slot, T value) {
+            if (importing) batchChanged.add(slot);
+            else register(slot, value);
+        }
+
+        T inject(Slot slot, T input, Actionable mode, BaseActionSource source) {
+            long before = input.getStackSize();
+            if (importing && mode == Actionable.MODULATE) batchChanged.add(slot);
+            T rest;
+            nativeMutationDepth++;
+            try {
+                rest = slot.nativeInventory.injectItems(input, mode, source);
+            } catch (RuntimeException failure) {
+                index(slot);
+                throw failure;
+            } finally {
+                nativeMutationDepth--;
+            }
+            if (mode == Actionable.MODULATE && (rest == null || rest.getStackSize() < before)) {
+                inserted(slot, input);
+                capacity(slot);
+            }
+            return rest;
+        }
+
+        T extract(Slot slot, T input, Actionable mode, BaseActionSource source) {
+            T result;
+            nativeMutationDepth++;
+            try {
+                result = slot.nativeInventory.extractItems(input, mode, source);
+            } catch (RuntimeException failure) {
+                index(slot);
+                throw failure;
+            } finally {
+                nativeMutationDepth--;
+            }
+            if (mode == Actionable.MODULATE && result != null && result.getStackSize() > 0) {
+                T remaining = slot.nativeInventory.getAvailableItem(input, 0);
+                if (remaining == null || remaining.getStackSize() == 0) {
+                    Resource resource = locate(input);
+                    if (resource != null) unlink(slot, resource);
+                }
+                capacity(slot);
+            }
+            return result;
+        }
+
+        void watch(Slot slot) {
+            nativeChanges.put(((ICellInventoryHandler<?>) slot.nativeInventory).getCellInv(), () -> index(slot));
+        }
+
+        void importRows(Map<K, Long> stock) {
+            if (stock.isEmpty()) return;
+            if (published || importing)
+                throw new IllegalStateException("Bulk import requires unpublished native cells");
+            importing = true;
+            try {
+                for (Map.Entry<K, Long> row : stock.entrySet()) {
+                    if (row.getValue() == null || row.getValue() <= 0)
+                        throw new IllegalArgumentException("Invalid legacy quantity");
+                    Math.addExact(amount(row.getKey()), row.getValue());
+                    T rest = insert(
+                        stack.apply(row.getKey())
+                            .setStackSize(row.getValue()),
+                        Actionable.MODULATE,
+                        null);
+                    if (rest != null && rest.getStackSize() > 0) throw new IllegalStateException(
+                        "Native AE rejected legacy stock; source retained: " + row.getKey());
+                }
+            } finally {
+                importing = false;
+                try {
+                    for (Slot slot : batchChanged) index(slot);
+                } finally {
+                    batchChanged.clear();
                 }
             }
-            slot.keys.clear();
-            IItemList<T> content = slot.nativeInventory.getAvailableItems(type.createList(), 0);
-            for (T value : content) if (value.getStackSize() > 0) {
-                K requested = key.apply(value);
-                slot.keys.add(requested);
-                locations.computeIfAbsent(requested, ignored -> new ArrayList<>())
-                    .add(slot);
+        }
+
+        final class Resource {
+
+            final K key;
+            final T identity;
+            final List<Slot> slots = new ArrayList<>();
+
+            Resource(K key, T identity) {
+                this.key = key;
+                this.identity = identity;
             }
         }
 
@@ -392,8 +622,17 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
         }
 
         void read(NBTTagList list) {
+            for (Slot slot : slots) {
+                slot.active = false;
+                nativeChanges.remove(((ICellInventoryHandler<?>) slot.nativeInventory).getCellInv());
+            }
             slots.clear();
             locations.clear();
+            identities.clear();
+            structure++;
+            probe = null;
+            probeIdentity = null;
+            openSlots.clear();
             frozen.clear();
             for (int i = 0; i < list.tagCount(); i++) {
                 NBTTagCompound raw = list.getCompoundTagAt(i);
@@ -407,7 +646,8 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 }
                 Slot slot = new Slot(cell);
                 slots.add(slot);
-                reindex(slot);
+                watch(slot);
+                index(slot);
             }
         }
 
@@ -448,8 +688,9 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
             final ItemStack cell;
             final IMEInventoryHandler<T> nativeInventory;
             final IMEInventoryHandler<T> limited;
-            final List<K> keys = new ArrayList<>();
+            final Set<Resource> keys = new HashSet<>();
             boolean active = true;
+            boolean open;
 
             @SuppressWarnings("unchecked")
             Slot(ItemStack cell) {
@@ -469,17 +710,35 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                 limited = new MEInventoryHandler<T>(nativeInventory, type) {
 
                     @Override
+                    public AccessRestriction getAccess() {
+                        return nativeInventory.getAccess();
+                    }
+
+                    @Override
+                    public boolean isPrioritized(T input) {
+                        return nativeInventory.isPrioritized(input);
+                    }
+
+                    @Override
+                    public boolean canAccept(T input) {
+                        return active && published && nativeInventory.canAccept(input);
+                    }
+
+                    @Override
+                    public boolean validForPass(int pass) {
+                        return active && published && nativeInventory.validForPass(pass);
+                    }
+
+                    @Override
                     public T injectItems(T input, Actionable mode, BaseActionSource source) {
                         if (!active || !published || input == null || input.getStackSize() <= 0) return input;
                         long allowed = Math.min(input.getStackSize(), room(input));
                         if (allowed <= 0) return input;
-                        T rest = super.injectItems(
-                            input.copy()
-                                .setStackSize(allowed),
-                            mode,
-                            source);
+                        T request = allowed == input.getStackSize() ? input
+                            : input.copy()
+                                .setStackSize(allowed);
+                        T rest = inject(Slot.this, request, mode, source);
                         long remaining = input.getStackSize() - allowed + (rest == null ? 0 : rest.getStackSize());
-                        if (mode == Actionable.MODULATE) reindex(Slot.this);
                         return remaining == 0 ? null
                             : input.copy()
                                 .setStackSize(remaining);
@@ -488,19 +747,20 @@ public final class NativeMeCellArray implements ICellProvider, ISaveProvider {
                     @Override
                     public T extractItems(T input, Actionable mode, BaseActionSource source) {
                         if (!active || !published) return null;
-                        T result = super.extractItems(input, mode, source);
-                        if (mode == Actionable.MODULATE) reindex(Slot.this);
-                        return result;
+                        if (input == null || input.getStackSize() <= 0) return null;
+                        Resource present = locate(input);
+                        if (present == null || !present.slots.contains(Slot.this)) return null;
+                        return extract(Slot.this, input, mode, source);
                     }
 
                     @Override
                     public T getAvailableItem(T request, int iteration) {
-                        return active && published ? super.getAvailableItem(request, iteration) : null;
+                        return active && published ? nativeInventory.getAvailableItem(request, iteration) : null;
                     }
 
                     @Override
                     public IItemList<T> getAvailableItems(IItemList<T> out, int iteration) {
-                        return active && published ? super.getAvailableItems(out, iteration) : out;
+                        return active && published ? nativeInventory.getAvailableItems(out, iteration) : out;
                     }
                 };
             }

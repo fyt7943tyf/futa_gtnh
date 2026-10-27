@@ -180,6 +180,24 @@ tasks.register<JavaExec>("benchmarkProductionQueries") {
 
 tasks.named("check") { dependsOn("verifySupplyTracking") }
 
+tasks.register<JavaExec>("benchmarkStorageBackends") {
+    group = "verification"
+    description = "Compares v1.33.10 shared pool, public native cells and ordinary AE/AE2FC cells; opt-in"
+    dependsOn(compileSupplyChecks, compileProspectorChecks, "extractTerminalClickLwjgl")
+    mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+    args("--tweakClass", "com.futa_gtnh.supplycheck.SupplyCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+    systemProperty("futa.storageBackendBenchmark", "true")
+    systemProperty("futa.storageVerifySaved", providers.gradleProperty("storageVerifySaved").orElse("false").get())
+    systemProperty("futa.storageProfile", providers.gradleProperty("storageProfile").orElse("nbt").get())
+    systemProperty("futa.storageScales", providers.gradleProperty("storageScales").orElse("1,63,1024,4096").get())
+    systemProperty("futa.storageWarmup", providers.gradleProperty("storageWarmup").orElse("300").get())
+    systemProperty("futa.storageSamples", providers.gradleProperty("storageSamples").orElse("600").get())
+    maxHeapSize = "2g"
+    classpath = files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) + files(compileSupplyChecks.flatMap { it.destinationDirectory }) +
+        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/supply-check") +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
 // Test-only keyboard/clock fixtures exercise real GUI press/release code without a display or native input.
 val compileTerminalClickChecks = tasks.register<JavaCompile>("compileTerminalClickChecks") {
     dependsOn(tasks.named("classes"))

@@ -40,6 +40,22 @@ public class SharedStorage {
         return Math.max(0, Math.max(0, ceiling - getFluidAmountPool(key)) - craftingFluids.getOrDefault(key, 0L));
     }
 
+    /**
+     * Native cells read quantities themselves; these methods expose service constraints without a second stock read.
+     */
+    public synchronized boolean hasNativeConstraints(boolean fluid) {
+        return fluid ? !fluidLimits.isEmpty() || !craftingFluids.isEmpty()
+            : !itemLimits.isEmpty() || !craftingItems.isEmpty();
+    }
+
+    public synchronized long nativeItemCeiling(ItemKey key, boolean manual) {
+        return Math.max(0, (manual ? MAX_AMOUNT : getItemLimit(key)) - craftingItems.getOrDefault(key, 0L));
+    }
+
+    public synchronized long nativeFluidCeiling(FluidKey key, boolean manual) {
+        return Math.max(0, (manual ? MAX_AMOUNT : getFluidLimit(key)) - craftingFluids.getOrDefault(key, 0L));
+    }
+
     public synchronized long poolInsertItem(ItemKey key, long amount, boolean manual) {
         return insertItemPool(key, Math.min(amount, poolItemSpace(key, manual)), !manual);
     }
@@ -99,20 +115,7 @@ public class SharedStorage {
     /** Move a legacy decoder's stock into native AE media, then discard its independent quantity maps. */
     synchronized void attachNativeCells(com.futa_gtnh.me.NativeMeCellArray cells, Runnable changed) {
         if (nativeCells != null) throw new IllegalStateException("Native cells already attached");
-        for (Map.Entry<ItemKey, Long> row : items.entrySet()) cells.itemView()
-            .put(
-                row.getKey(),
-                Math.addExact(
-                    cells.itemView()
-                        .getOrDefault(row.getKey(), 0L),
-                    row.getValue()));
-        for (Map.Entry<FluidKey, Long> row : fluids.entrySet()) cells.fluidView()
-            .put(
-                row.getKey(),
-                Math.addExact(
-                    cells.fluidView()
-                        .getOrDefault(row.getKey(), 0L),
-                    row.getValue()));
+        cells.importStock(items, fluids);
         items.clear();
         fluids.clear();
         items = cells.itemView();

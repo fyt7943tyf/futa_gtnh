@@ -144,6 +144,21 @@ GT ME 设备使用基座坐标作为整机身份；此次未在完整 GT 产线�
 
 真实客户端与集成服务端通过 `PUBLIC_ME_SMOKE_SUCCESS`、`PRODUCTION_TERMINAL_SMOKE_SUCCESS`、`PUBLIC_ME_SUBNET_FLOW_SMOKE_SUCCESS`、`NATIVE_ME_MIGRATION_SMOKE_SUCCESS` 和 `UI_SMOKE_SUCCESS 26 screens`。实际普通盘与自动扩容媒体取料、双总线自动归属、库存归零后原料明细和产线汇总继续一致；旧数据升级、数量/NBT 及保存重挂载检查通过。界面截图部分仍为明确的展示夹具。
 
+## 原生存储增量索引（2026-10-27，1.34.2）
+
+新增 32231 项真实引擎断言通过：随机模型、正常/模拟/失败/耗空补回、完整 NBT、跨盘近 `Long.MAX_VALUE`、限额/托管、批量结束每盘一次索引、失败转换保留完整旧解码器、内部原生写入回调、私有请求身份、旧句柄与清空/重挂载。拦截器证明受控存取不调用整盘 `getAvailableItems`。原有统计和迁移回归、完整构建与格式检查继续通过。
+
+使用 `benchmarkStorageBackends` 在同一 JVM 对比冻结旧共享池、冻结 1.34.1 公共阵列、新阵列、普通 AE；两种负载各三个 JVM。正式数据使用真实 `ApiStorage`，先验证每个缓存命中。保存文件的两套独立重挂载分别通过 31120 项断言。结果与方法见 [性能报告](1.34.2-原生存储索引优化性能对比.md)。
+
+```sh
+./gradlew runClient17 -PuiSmoke -PrunClientWorkingDirectory=run/incremental-native-index-client --offline --console=plain
+./gradlew runClient17 -PuiSmoke -PrunClientWorkingDirectory=run/query-optimization-client --offline --console=plain
+```
+
+第一套通过 `NATIVE_ME_MIGRATION_SMOKE_SUCCESS`，从上一代共享文件实际升级；第二套通过 `NATIVE_ME_RESTART_SMOKE_SUCCESS`，直接加载之前由 1.34.1 创建并消耗过的原生存档。物品 4294967311 件、流体 27000000013 mB 中的 3 件和 5 mB 托管继续保留，已消耗的 101 件/203 mB 不复活，原 UUID、完整 NBT 和旧源文件字节不变；正常世界保存、重新挂载、坏版本保护与修复通过。
+
+两套均通过公共 ME、跨维度与普通盘、产线终端、真实双总线 56 件/12000 mB 消耗及零库存明细检查，并各通过 26 个 GL 页面。只操作隔离开发存档，未读取或修改生产服。
+
 ## 尚未替代的验收
 
 这不是对生产服全量旧存档、长时间运行、所有第三方机器和实际复杂合成产线的验收。原生合成计划器与 CPU 提交接口已接入，但截图中的合成计划是展示夹具，不代表一次真实复杂合成任务的完成证明。升级生产服前使用完整世界副本核对库存、机器区块、既有 CPU 任务和产线；迁移与恢复边界见 [迁移说明](public-me-migration.md)。

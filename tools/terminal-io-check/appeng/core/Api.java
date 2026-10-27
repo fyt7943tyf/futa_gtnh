@@ -20,42 +20,58 @@ import appeng.api.storage.IStorageHelper;
  */
 public final class Api {
 
+    private static final boolean NATIVE_BENCHMARK = Boolean.getBoolean("futa.storageBackendBenchmark");
+    private static final java.util.Map<Class<?>, Object> BENCHMARK_REGISTRIES = new java.util.HashMap<>();
     public static final IAppEngApi INSTANCE = emptyRegistry(IAppEngApi.class);
 
     private Api() {}
 
     private static <T> T emptyRegistry(Class<T> type) {
-        return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] { type }, (proxy, method, args) -> {
-            switch (method.getName()) {
-                case "definitions":
-                    return emptyRegistry(IDefinitions.class);
-                case "storage":
-                    return emptyRegistry(IStorageHelper.class);
-                case "createItemList":
-                    return new appeng.util.item.ItemList();
-                case "createSortedItemList":
-                    return new appeng.util.item.ItemList(true);
-                case "createPrimitiveItemList":
-                    return new appeng.util.item.HashBasedItemList();
-                case "createFluidList":
-                    return new appeng.util.item.FluidList();
-                case "createAEStackList":
-                    return new appeng.util.item.IAEStackList();
-                case "items":
-                    return emptyRegistry(IItems.class);
-                case "encodedPattern":
-                    return emptyRegistry(IItemDefinition.class);
-                case "maybeStack":
-                    return Optional.absent();
-                case "registries":
-                    return emptyRegistry(IRegistryContainer.class);
-                case "specialComparison":
-                    return emptyRegistry(ISpecialComparisonRegistry.class);
-                case "getSpecialComparison":
-                    return null;
-                default:
-                    throw new AssertionError("Unexpected AE2 registry use in ore checks: " + method);
-            }
-        }));
+        if (NATIVE_BENCHMARK) {
+            if (type == IStorageHelper.class) return type.cast(NativeStorage.INSTANCE);
+            return type.cast(BENCHMARK_REGISTRIES.computeIfAbsent(type, Api::createRegistry));
+        }
+        return createRegistry(type);
+    }
+
+    private static final class NativeStorage {
+
+        private static final IStorageHelper INSTANCE = new appeng.core.api.ApiStorage();
+    }
+
+    private static <T> T createRegistry(Class<T> type) {
+        return type
+            .cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] { type }, (proxy, method, args) -> {
+                switch (method.getName()) {
+                    case "definitions":
+                        return emptyRegistry(IDefinitions.class);
+                    case "storage":
+                        return emptyRegistry(IStorageHelper.class);
+                    case "createItemList":
+                        return new appeng.util.item.ItemList();
+                    case "createSortedItemList":
+                        return new appeng.util.item.ItemList(true);
+                    case "createPrimitiveItemList":
+                        return new appeng.util.item.HashBasedItemList();
+                    case "createFluidList":
+                        return new appeng.util.item.FluidList();
+                    case "createAEStackList":
+                        return new appeng.util.item.IAEStackList();
+                    case "items":
+                        return emptyRegistry(IItems.class);
+                    case "encodedPattern":
+                        return emptyRegistry(IItemDefinition.class);
+                    case "maybeStack":
+                        return Optional.absent();
+                    case "registries":
+                        return emptyRegistry(IRegistryContainer.class);
+                    case "specialComparison":
+                        return emptyRegistry(ISpecialComparisonRegistry.class);
+                    case "getSpecialComparison":
+                        return null;
+                    default:
+                        throw new AssertionError("Unexpected AE2 registry use in ore checks: " + method);
+                }
+            }));
     }
 }
