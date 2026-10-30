@@ -9,6 +9,8 @@ import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
 import net.minecraftforge.fluids.FluidStack;
 
+import com.mojang.authlib.GameProfile;
+
 import appeng.api.networking.GridFlags;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.IGridNode;
@@ -17,7 +19,9 @@ import appeng.api.networking.storage.IStorageGrid;
 import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEFluidStack;
 import appeng.api.storage.data.IAEItemStack;
+import appeng.core.worlddata.WorldData;
 import appeng.me.GridAccessException;
+import appeng.me.helpers.AENetworkProxy;
 import appeng.tile.TileEvent;
 import appeng.tile.events.TileEventType;
 import appeng.tile.grid.AENetworkTile;
@@ -57,6 +61,27 @@ public class TileAeSignalTransmitter extends AENetworkTile {
     public TileAeSignalTransmitter() {
         getProxy().setFlags(GridFlags.REQUIRE_CHANNEL);
         getProxy().setIdlePowerUsage(IDLE_POWER);
+    }
+
+    @Override
+    protected AENetworkProxy createProxy() {
+        return new AENetworkProxy(this, "proxy", getItemFromTile(this), true) {
+
+            @Override
+            public void readFromNBT(NBTTagCompound data) {
+                super.readFromNBT(data);
+                // getNode calls this before updateState joins neighboring grids. Repair legacy
+                // unowned nodes here, even when the saved owner is offline; keep valid AE IDs.
+                IGridNode node = super.getNode();
+                if (node != null && node.getPlayerID() < 0 && owner != null) {
+                    // AE requires a complete profile but indexes it by UUID only; no online lookup.
+                    node.setPlayerID(
+                        WorldData.instance()
+                            .playerData()
+                            .getPlayerID(new GameProfile(owner, owner.toString())));
+                }
+            }
+        };
     }
 
     // ==================================================================

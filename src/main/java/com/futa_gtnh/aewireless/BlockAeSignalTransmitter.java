@@ -61,7 +61,11 @@ public class BlockAeSignalTransmitter extends BlockContainer {
             TileEntity tile = world.getTileEntity(x, y, z);
             if (tile instanceof TileAeSignalTransmitter transmitter) {
                 UUID owner = placer.getUniqueID();
-                if (owner != null) transmitter.setOwner(owner);
+                if (owner != null) {
+                    transmitter.setOwner(owner);
+                    transmitter.getProxy()
+                        .setOwner(player);
+                }
             }
         }
     }
