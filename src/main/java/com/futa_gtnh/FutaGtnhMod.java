@@ -100,6 +100,18 @@ public class FutaGtnhMod {
     /** 太阳能除钙剂。 */
     public static com.futa_gtnh.item.ItemSolarDescaler solarDescaler;
 
+    /**
+     * 纸箱方块。配置关闭时为 null。右键打包带方块实体的方块，潜行右键拆回原样
+     * （见 com.futa_gtnh.cardboard 包）。
+     */
+    public static com.futa_gtnh.cardboard.BlockCardboardBox blockCardboardBox;
+
+    /** ME 封装胶带。没装 AE2 或配置关闭时为 null。物品类不引用任何 AE 类型。 */
+    public static com.futa_gtnh.item.ItemMePackingTape mePackingTape;
+
+    /** ME 封装产物物品（胶带封好的设备）。同上。 */
+    public static com.futa_gtnh.item.ItemMePackage mePackageItem;
+
     /** IC2 反应堆布局工具。没装 IC2 或配置关闭时为 null。 */
     public static com.futa_gtnh.item.ItemReactorLayoutTool reactorLayoutTool;
 
