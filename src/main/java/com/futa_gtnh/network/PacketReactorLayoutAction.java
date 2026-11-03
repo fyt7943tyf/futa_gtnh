@@ -39,6 +39,8 @@ public class PacketReactorLayoutAction implements IMessage {
     public static final byte BUILD_SHELL = 6;
     /** 界面关闭：取消 viewer 登记（不再收列表重推）。 */
     public static final byte SYNC_LEAVE = 7;
+    /** 缺失下单：对选中布局的全部缺失行按差额下 AE 合成订单（不碰反应堆本体）。 */
+    public static final byte ORDER_MISSING = 8;
 
     /** 改名允许的最大长度（字符）。名字会随列表广播，防灌包。 */
     private static final int MAX_NAME_CHARS = 40;
@@ -74,6 +76,13 @@ public class PacketReactorLayoutAction implements IMessage {
     public static PacketReactorLayoutAction delete(long layoutId) {
         PacketReactorLayoutAction packet = new PacketReactorLayoutAction(DELETE);
         packet.layoutId = layoutId;
+        return packet;
+    }
+
+    public static PacketReactorLayoutAction orderMissing(long layoutId, boolean looseNbt) {
+        PacketReactorLayoutAction packet = new PacketReactorLayoutAction(ORDER_MISSING);
+        packet.layoutId = layoutId;
+        packet.looseNbt = looseNbt;
         return packet;
     }
 
@@ -176,6 +185,10 @@ public class PacketReactorLayoutAction implements IMessage {
                     }
                     break;
                 }
+                case ORDER_MISSING:
+                    // 不需要 resolveNearby：下单只碰 ME 网络，不碰反应堆本体
+                    com.futa_gtnh.reactor.ReactorAeOrders.order(player, message.layoutId, message.looseNbt);
+                    break;
                 default:
                     break;
             }

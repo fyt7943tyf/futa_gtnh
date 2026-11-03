@@ -267,8 +267,9 @@ public final class ReactorLayoutManager {
      * 把一条布局的「网格内容 + 需求清单」发给玩家。
      *
      * <p>
-     * 需求清单按 (物品, 耐久) 分组聚合，可用量拆成「玩家背包 / 共享背包」两部分、
-     * 并标注是否存在 NBT 完全一致的来源 —— 客户端只管画，别的不掺和。
+     * 需求清单按 (物品, 耐久) 分组聚合，可用量拆成「玩家背包 / 共享背包 / ME
+     * 终端网络」三部分、并标注是否存在 NBT 完全一致的来源 —— 客户端只管画，
+     * 别的不掺和。
      */
     public static void sendPreviewTo(EntityPlayerMP player, ReactorLayout layout, boolean looseNbt) {
         NBTTagCompound tag = new NBTTagCompound();
@@ -276,6 +277,10 @@ public final class ReactorLayoutManager {
         tag.setString("name", layout.name);
         tag.setBoolean("fluid", layout.fluidCooled);
         tag.setInteger("columns", layout.columns);
+        // 终端在线状态：清单行里的 haveAe=0 既可能是「网络里没有」也可能是「没带
+        // 终端」，头部状态行靠这个布尔区分。buildManifest 内部已经找过一次终端，
+        // 这里只是把结论带给客户端（再找一次的成本是一次背包扫描，可接受）
+        tag.setBoolean("aeOnline", ReactorAeTerminal.find(player) != null);
 
         NBTTagList slotList = new NBTTagList();
         for (int i = 0; i < layout.slots.length; i++) {
@@ -302,6 +307,9 @@ public final class ReactorLayoutManager {
             entry.setInteger("needed", row.needed);
             entry.setInteger("havePlayer", row.availablePlayer);
             entry.setInteger("haveStorage", row.availableStorage);
+            entry.setInteger("haveAe", row.availableAe);
+            entry.setBoolean("orderable", row.orderable);
+            entry.setInteger("pending", row.pendingOrder);
             entry.setBoolean("exact", row.exactAvailable);
             entry.setString("displayName", row.display.getDisplayName());
             rows.appendTag(entry);
