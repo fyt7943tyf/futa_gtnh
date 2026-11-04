@@ -215,6 +215,9 @@ public final class MeTapeOps {
 
         if (!player.capabilities.isCreativeMode && tapeStack != null) {
             tapeStack.damageItem(1, player);
+            // vanilla damageItem 断裂时只把 stackSize-- 到 0：size=0 的栈留在槽位
+            // 会被客户端渲染成“还有胶带”且后续守卫全过（同纸箱的幽灵堆叠问题）
+            com.futa_gtnh.shared.InventoryOps.removeIfEmpty(player, tapeStack);
         }
         givePackage(player, world, x, y, z, packageStack);
         world.playSoundEffect(x + 0.5D, y + 0.5D, z + 0.5D, "random.orb", 0.5F, 1.4F);
@@ -380,8 +383,9 @@ public final class MeTapeOps {
         }
 
         if (!player.capabilities.isCreativeMode && packageStack != null) {
-            --packageStack.stackSize;
-            player.inventory.markDirty();
+            // 统一消耗姿势（shared/InventoryOps）：size=0 幽灵堆叠会被客户端
+            // 渲染成“还在手里”且守卫全过，表现为无限放置
+            com.futa_gtnh.shared.InventoryOps.consumeOne(player, packageStack);
         }
         world.playSoundEffect(x + 0.5D, y + 0.5D, z + 0.5D, "random.orb", 0.5F, 1.1F);
         return true;

@@ -200,8 +200,8 @@ public class ItemStorageBus extends ItemBlock {
     }
 
     private static void consume(EntityPlayer player, ItemStack stack) {
-        if (player.capabilities.isCreativeMode || stack == null) return;
-        --stack.stackSize;
-        player.inventory.markDirty();
+        // 统一消耗姿势（shared/InventoryOps）：直接 --stackSize 会在用掉最后一个时
+        // 留下 size=0 的幽灵堆叠——客户端渲染成“手里还有总线”且守卫全过，无限放置
+        com.futa_gtnh.shared.InventoryOps.consumeOne(player, stack);
     }
 }
