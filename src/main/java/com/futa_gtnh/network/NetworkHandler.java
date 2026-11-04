@@ -122,5 +122,10 @@ public final class NetworkHandler {
             PacketProductionTerminalUse.class,
             49,
             Side.SERVER);
+        // 纸箱装箱（C2S）：onItemUseFirst 返回 true 吞掉原生 C08 后的唯一服务端入口
+        INSTANCE.registerMessage(PacketCardboardBoxUse.Handler.class, PacketCardboardBoxUse.class, 50, Side.SERVER);
+        // ME 封装胶带：封装（C2S）与放回（C2S），同一条 onItemUseFirst 管线
+        INSTANCE.registerMessage(PacketMeTapeUse.Handler.class, PacketMeTapeUse.class, 51, Side.SERVER);
+        INSTANCE.registerMessage(PacketMePackageUse.Handler.class, PacketMePackageUse.class, 52, Side.SERVER);
     }
 }

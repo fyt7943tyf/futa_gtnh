@@ -356,6 +356,40 @@ public class Config {
     public static boolean enableSolarDescaler = true;
 
     // ------------------------------------------------------------------
+    // 纸箱
+    // ------------------------------------------------------------------
+
+    /**
+     * 是否注册纸箱（空箱右键打包任意带方块实体的方块，方块实体数据完整保留；
+     * 潜行右键已装箱拆回原方块并弹出空箱）。原型是 GT-Not-Leisure 的纸箱。
+     */
+    public static boolean enableCardboardBox = true;
+
+    /**
+     * 纸箱不可打包的方块（追加在默认黑名单之后）。格式 {@code modid:注册名}，
+     * 逗号分隔。默认黑名单：木/铁门、纸箱自身、神龙反应堆核心/混沌水晶、
+     * IC2 核反应堆（后两类是尽力解析，mod 没装或名字对不上时自动落空）。
+     */
+    public static String[] cardboardBoxBlacklist = new String[0];
+
+    // ------------------------------------------------------------------
+    // ME 封装胶带
+    // ------------------------------------------------------------------
+
+    /**
+     * 是否注册 ME 封装胶带（右键白名单 AE 存储设备打包成保留全部数据的物品，
+     * 再右键放回；胶带 64 点耐久）。需要装 Applied Energistics 2。
+     * 默认白名单：ME 驱动器、ME 接口方块、ME 接口部件、ME 箱子、IO 传输总线。
+     */
+    public static boolean enableMePackingTape = true;
+
+    /**
+     * ME 胶带的额外可封装设备（追加在内建白名单之后）。
+     * 格式 {@code block:modid:注册名} 或 {@code part:modid:物品名:子id}，逗号分隔。
+     */
+    public static String[] meTapeWhitelist = new String[0];
+
+    // ------------------------------------------------------------------
     // IC2 反应堆布局工具
     // ------------------------------------------------------------------
 
@@ -948,6 +982,32 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             enableSolarDescaler,
             "是否注册太阳能除钙剂（右键蒸汽太阳能锅炉，重置其钙化进度；永久工具不消耗）。");
+
+        enableCardboardBox = configuration.getBoolean(
+            "enableCardboardBox",
+            Configuration.CATEGORY_GENERAL,
+            enableCardboardBox,
+            "是否注册纸箱（空箱右键打包任意带方块实体的方块，机器数据完整保留；潜行右键已装箱拆回原方块并弹出空箱。配方：纸×8 + 粘液球）。");
+        cardboardBoxBlacklist = configuration
+            .get(
+                Configuration.CATEGORY_GENERAL,
+                "cardboardBoxBlacklist",
+                cardboardBoxBlacklist,
+                "纸箱不可打包的方块（追加在默认黑名单之后），格式 modid:注册名。默认黑名单：门类、纸箱自身、神龙反应堆、IC2 核反应堆（尽力解析，解析不到的条目自动跳过）。")
+            .getStringList();
+
+        enableMePackingTape = configuration.getBoolean(
+            "enableMePackingTape",
+            Configuration.CATEGORY_GENERAL,
+            enableMePackingTape,
+            "是否注册 ME 封装胶带（右键白名单里的 AE 存储设备打包成保留全部数据的物品，再右键放回；胶带 64 点耐久）。需装 Applied Energistics 2，没装时此项无效。默认白名单：ME 驱动器、ME 接口方块、ME 接口部件、ME 箱子、IO 传输总线。");
+        meTapeWhitelist = configuration
+            .get(
+                Configuration.CATEGORY_GENERAL,
+                "meTapeWhitelist",
+                meTapeWhitelist,
+                "ME 胶带的额外可封装设备（追加在内建白名单之后），格式 block:modid:注册名 或 part:modid:物品名:子id。")
+            .getStringList();
 
         enableReactorTool = configuration.getBoolean(
             "enableReactorTool",

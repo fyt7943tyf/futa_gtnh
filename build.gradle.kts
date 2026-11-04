@@ -319,9 +319,13 @@ tasks.register<JavaExec>("verifyStockControls") {
 }
 
 // Retain the modified LGPL library sources with every executable distribution.
+// com/futa_gtnh/cardboard/** 是 GT-Not-Leisure（GPL-3.0）纸箱的移植，随包分发源码以满足署名要求。
 tasks.named<Jar>("jar") {
     from("src/main/java") {
-        include("com/futa_gtnh/disassembler/**", "com/futa_gtnh/mixins/MixinShimmerGT*Recipe.java")
+        include(
+            "com/futa_gtnh/disassembler/**",
+            "com/futa_gtnh/mixins/MixinShimmerGT*Recipe.java",
+            "com/futa_gtnh/cardboard/**")
         into("META-INF/licenses/gtnl/source")
     }
 }

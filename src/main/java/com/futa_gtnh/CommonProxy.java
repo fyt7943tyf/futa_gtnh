@@ -91,6 +91,15 @@ public class CommonProxy {
     /** 太阳能除钙剂。 */
     public static ItemSolarDescaler solarDescaler;
 
+    /** 纸箱方块。配置关闭时为 null。 */
+    public static com.futa_gtnh.cardboard.BlockCardboardBox blockCardboardBox;
+
+    /** ME 封装胶带。没装 AE2 或配置关闭时为 null。 */
+    public static com.futa_gtnh.item.ItemMePackingTape mePackingTape;
+
+    /** ME 封装产物物品（胶带封好的设备）。同上。 */
+    public static com.futa_gtnh.item.ItemMePackage mePackageItem;
+
     /** IC2 反应堆布局工具。没装 IC2 或配置关闭时为 null。 */
     public static com.futa_gtnh.item.ItemReactorLayoutTool reactorLayoutTool;
 
@@ -136,6 +145,8 @@ public class CommonProxy {
         registerLootMachine();
         registerSolarDescaler();
         registerReactorTool();
+        registerCardboardBox();
+        registerMePackingTape();
         productionTerminal = new com.futa_gtnh.item.ItemProductionTerminal();
         GameRegistry.registerItem(productionTerminal, com.futa_gtnh.item.ItemProductionTerminal.NAME);
         registerAe2Cells();
@@ -396,6 +407,61 @@ public class CommonProxy {
     }
 
     /**
+     * 注册纸箱（GT-Not-Leisure 纸箱的移植，见 com.futa_gtnh.cardboard 包）。
+     *
+     * <p>
+     * 只依赖 GT 和原版（打包任意方块实体走的是通用 NBT 捕获），无额外守卫。
+     * 掉落抑制器挂 Forge 总线：装箱替换方块期间取消多余的物品实体生成。
+     */
+    private void registerCardboardBox() {
+        if (!Config.enableCardboardBox) return;
+
+        blockCardboardBox = new com.futa_gtnh.cardboard.BlockCardboardBox();
+        GameRegistry.registerBlock(
+            blockCardboardBox,
+            com.futa_gtnh.cardboard.ItemBlockCardboardBox.class,
+            com.futa_gtnh.cardboard.BlockCardboardBox.NAME);
+        GameRegistry.registerTileEntity(
+            com.futa_gtnh.cardboard.TileEntityCardboardBox.class,
+            FutaGtnhMod.MODID + ":" + com.futa_gtnh.cardboard.BlockCardboardBox.NAME);
+        FutaGtnhMod.blockCardboardBox = blockCardboardBox;
+        MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.cardboard.CardboardBoxDropGuard());
+        FutaGtnhMod.LOG.info("已注册纸箱");
+    }
+
+    /**
+     * 注册 ME 封装胶带（ExtendedAE me_packing_tape 的 1.7.10 移植，
+     * 见 com.futa_gtnh.aetape 包）。
+     *
+     * <p>
+     * AE2 现在是硬依赖，但守卫照旧（和共享元件同一套）：两个物品类都不引用
+     * AE 类型，真正的 AE 逻辑在 {@code MeTapeOps}，只在需要时加载。
+     * 封装产物物品（me_package）没有配方不进创造栏，只由胶带封装产生。
+     */
+    private void registerMePackingTape() {
+        if (!Config.enableMePackingTape) return;
+
+        if (!com.futa_gtnh.ae2.Ae2Compat.isAvailable()) {
+            FutaGtnhMod.LOG.info("没有检测到 Applied Energistics 2，跳过 ME 封装胶带的注册");
+            return;
+        }
+
+        mePackingTape = new com.futa_gtnh.item.ItemMePackingTape();
+        GameRegistry.registerItem(mePackingTape, com.futa_gtnh.item.ItemMePackingTape.NAME);
+        FutaGtnhMod.mePackingTape = mePackingTape;
+
+        mePackageItem = new com.futa_gtnh.item.ItemMePackage();
+        GameRegistry.registerItem(mePackageItem, com.futa_gtnh.item.ItemMePackage.NAME);
+        FutaGtnhMod.mePackageItem = mePackageItem;
+
+        // 封装替换设备的瞬间抑制掉落：AE2 的 breakBlock 会把驱动器元件等库存
+        // 原样掉出来，而数据已经进了封装物品 NBT，不抑制就是复制
+        MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.aetape.MeTapeDropGuard());
+
+        FutaGtnhMod.LOG.info("已注册 ME 封装胶带");
+    }
+
+    /**
      * 注册 IC2 反应堆布局工具。
      *
      * <p>
@@ -551,6 +617,26 @@ public class CommonProxy {
                 new ShapedOreRecipe(
                     new ItemStack(solarDescaler, 1),
                     new Object[] { " B ", "BIB", " B ", 'B', new ItemStack(Items.dye, 1, 15), 'I', "ingotIron" }));
+        }
+
+        // 纸箱：纸×8 + 粘液球（GT-Not-Leisure 同款配方，中空箱体）。
+        // 纸用原版物品（minigameHelper 同款写法），粘液球走矿物词典（原版保证注册）。
+        if (blockCardboardBox != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(blockCardboardBox, 1, 0),
+                    new Object[] { "ABA", "A A", "AAA", 'A', Items.paper, 'B', "slimeball" }));
+        }
+
+        // ME 封装胶带：福鲁伊克斯粉×2 + 粘液球×2 + 纸×3 + 铁锭（ExtendedAE 配方移植，
+        // 对角线「胶带卷」造型）。crystalFluix 是 AE2 自己注册并使用的一致矿辞名，
+        // 存在性有保证（共享元件配方同款用法）。
+        if (mePackingTape != null) {
+            GameRegistry.addRecipe(
+                new ShapedOreRecipe(
+                    new ItemStack(mePackingTape, 1),
+                    new Object[] { "FG ", "PIP", " GF", 'F', "crystalFluix", 'G', "slimeball", 'P', Items.paper, 'I',
+                        "ingotIron" }));
         }
 
         // IC2 反应堆布局工具：钢板×4 + 纸×2 + 钻石。

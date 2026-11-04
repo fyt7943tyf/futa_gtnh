@@ -763,3 +763,33 @@ futa_gtnh.productionTerminal.invalid=请潜行右键共享 IO、ME 接口或输�
 
 futa_gtnh.productionTerminal.hintAuto=自动跟随接口；选择其他产线可手动覆盖
 futa_gtnh.production.autoBinding=自动跟随接口 (%s, %s, %s)；解绑请操作接口
+
+# 纸箱（GT-Not-Leisure 移植）
+tile.futa_gtnh.cardboard_box.empty.name=纸箱
+tile.futa_gtnh.cardboard_box.filled.name=纸箱（已装箱）
+futa_gtnh.cardboard_box.tip.empty=空箱：右键打包带方块实体的方块（潜行右键 = 普通放置）
+futa_gtnh.cardboard_box.tip.block=内含：%s
+futa_gtnh.cardboard_box.tip.gt=GT 机器 ID：%s
+futa_gtnh.cardboard_box.tip.data_inline=数据：完整保留
+futa_gtnh.cardboard_box.tip.data_file=数据：完整保留（超大数据存于存档文件）
+futa_gtnh.cardboard_box.msg.no_tile=这个方块没有方块实体，不用纸箱搬
+futa_gtnh.cardboard_box.msg.blacklisted=这个方块在纸箱黑名单里，不能打包
+futa_gtnh.cardboard_box.msg.unbreakable=不可破坏的方块不能打包
+futa_gtnh.cardboard_box.msg.protected=这里受保护，不能打包
+futa_gtnh.cardboard_box.msg.too_large=方块数据太大且落盘失败，已取消打包
+futa_gtnh.cardboard_box.msg.failed=打包失败，方块未受影响
+futa_gtnh.cardboard_box.msg.unknown_block=找不到原方块（对应模组被移除了？），无法拆箱
+futa_gtnh.cardboard_box.msg.data_lost=箱内数据丢失，无法拆箱
+futa_gtnh.cardboard_box.msg.cannot_restore=这个位置放不回原方块，换个位置再拆
+
+# ME 封装胶带（ExtendedAE me_packing_tape 移植）
+item.futa_gtnh.me_packing_tape.name=ME 封装胶带
+item.futa_gtnh.me_package.name=ME 封装物品
+futa_gtnh.me_package.tip.empty=空的封装物品（应由胶带封装产生）
+futa_gtnh.me_package.tip.device=设备：%s
+futa_gtnh.me_package.tip.hint=右键放回：方块设备放在点击面外侧；部件设备贴到线缆总线
+futa_gtnh.me_tape.msg.not_whitelisted=这个设备不在 ME 胶带的白名单里
+futa_gtnh.me_tape.msg.not_packable=这不是可封装的部件（点到线缆本体/面板了）
+futa_gtnh.me_tape.msg.protected=这里受保护，不能封装
+futa_gtnh.me_tape.msg.packed=已封装：%s
+futa_gtnh.me_package.msg.failed=放回失败：换个位置或朝向试试
