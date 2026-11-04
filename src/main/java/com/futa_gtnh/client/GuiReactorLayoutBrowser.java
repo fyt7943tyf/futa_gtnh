@@ -41,7 +41,7 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
 
     // ---- 布局 ----
     private static final int GUI_WIDTH = 346;
-    private static final int GUI_HEIGHT = 236;
+    private static final int GUI_HEIGHT = 254;
     private static final int PAD = 6;
 
     private static final int TITLE_Y = 6;
@@ -63,6 +63,8 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
 
     private static final int RIGHT_ROW1_Y = RENAME_Y;
     private static final int RIGHT_ROW2_Y = LEFT_BUTTON_Y;
+    /** 第三行按钮：缺失下单（独占一整行）。 */
+    private static final int RIGHT_ROW3_Y = RIGHT_ROW2_Y + 18;
     private static final int RIGHT_BUTTON_WIDTH = (RIGHT_WIDTH - 4) / 2;
 
     // ---- 按钮编号 ----
@@ -72,6 +74,7 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
     private static final int BTN_NBT_TOGGLE = 3;
     private static final int BTN_RENAME = 4;
     private static final int BTN_DELETE = 5;
+    private static final int BTN_ORDER = 6;
 
     private static final int COLOR_PANEL = 0xC0101010;
     private static final int COLOR_BORDER = 0xFF808080;
@@ -81,6 +84,8 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
     private static final int COLOR_FLUID = 0xFF40A0FF;
     private static final int COLOR_SOLID = 0xFF50C050;
     private static final int COLOR_OK = 0xFF55FF55;
+    /** 清单里「缺料但可下单」行的提示色（青）。 */
+    private static final EnumChatFormatting COLOR_ORDERABLE = EnumChatFormatting.AQUA;
 
     /** 打开方式：带部署目标的坐标；{@code hasTarget=false} 时忽略坐标。 */
     private final boolean hasTarget;
@@ -96,6 +101,7 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
     private GuiButton saveCurrentButton;
     private GuiButton renameButton;
     private GuiButton deleteButton;
+    private GuiButton orderButton;
 
     /** NBT 宽松匹配开关（部署取料是否接受不同损耗/NBT 的同类元件顶替）。 */
     private boolean looseNbt = true;
@@ -104,6 +110,8 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
     private int scrollRow;
     /** 删除按钮的两段式确认：第一次点变成「确认删除？」，换选中/关界面复位。 */
     private boolean deleteArmed;
+    /** 缺失下单的两段式确认（同删除）；换选中/关界面复位。 */
+    private boolean orderArmed;
     /** 上次重绘列表时的缓存版本。 */
     private int lastRevision = -1;
     private boolean viewDirty = true;
@@ -172,6 +180,8 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
             tr("futa_gtnh.gui.reactor.rename"));
         deleteButton = addButton(BTN_DELETE, guiLeft + PAD + half + 4, guiTop + LEFT_BUTTON_Y, half, deleteLabel());
 
+        orderButton = addButton(BTN_ORDER, guiLeft + RIGHT_X, guiTop + RIGHT_ROW3_Y, RIGHT_WIDTH, orderLabel());
+
         // 打开界面 = 向服务端要一份列表（同时登记为 viewer，之后的改动会推过来）
         NetworkHandler.INSTANCE.sendToServer(new PacketReactorLayoutAction(PacketReactorLayoutAction.SYNC));
         viewDirty = true;
@@ -221,6 +231,10 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
                 .isEmpty();
         deleteButton.enabled = hasSelection;
         deleteButton.displayString = deleteLabel();
+        // 缺失下单：有选中 + 预览已到 + 终端在线 + 存在「扣掉在途订单仍缺失且有样板」的行
+        boolean previewReady = hasSelection && ClientReactorLayoutCache.previewId == selectedId;
+        orderButton.enabled = previewReady && ClientReactorLayoutCache.previewAeOnline && anyMissingOrderable();
+        orderButton.displayString = orderLabel();
 
         // 按钮标签里的开关状态可能被自己改过
         String nbtLabel = nbtLabel();
@@ -238,6 +252,15 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
         visible.addAll(summaries);
         int maxScroll = Math.max(0, visible.size() - LIST_ROWS);
         scrollRow = Math.min(scrollRow, maxScroll);
+    }
+
+    /** @return 是否存在「扣掉在途订单后仍缺失、且网络里有样板」的行（服务端同口径） */
+    private boolean anyMissingOrderable() {
+        for (ClientReactorLayoutCache.ManifestLine line : ClientReactorLayoutCache.previewManifest) {
+            int shortfall = line.needed - line.havePlayer - line.haveStorage - line.haveAe - line.pending;
+            if (shortfall > 0 && line.orderable) return true;
+        }
+        return false;
     }
 
     // ==================================================================
@@ -278,6 +301,17 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
             text = EnumChatFormatting.GRAY + tr("futa_gtnh.gui.reactor.no_target");
         }
         fontRendererObj.drawStringWithShadow(text, guiLeft + PAD + 3, guiTop + TARGET_Y, 0xFFFFFF);
+
+        // 右上角：随身 ME 终端状态（清单 AE 列是否有意义的开关）
+        String aeStatus = tr(
+            ClientReactorLayoutCache.previewAeOnline ? "futa_gtnh.gui.reactor.ae.online"
+                : "futa_gtnh.gui.reactor.ae.offline");
+        fontRendererObj.drawStringWithShadow(
+            (ClientReactorLayoutCache.previewAeOnline ? EnumChatFormatting.DARK_AQUA : EnumChatFormatting.GRAY)
+                + aeStatus,
+            guiLeft + GUI_WIDTH - PAD - 3 - fontRendererObj.getStringWidth(aeStatus),
+            guiTop + TARGET_Y,
+            0xFFFFFF);
     }
 
     private void drawList(int mouseX, int mouseY) {
@@ -417,10 +451,12 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
         List<ClientReactorLayoutCache.ManifestLine> lines = ClientReactorLayoutCache.previewManifest;
         for (int i = 0; i < lines.size() && i < maxLines; i++) {
             ClientReactorLayoutCache.ManifestLine line = lines.get(i);
-            int available = line.havePlayer + line.haveStorage;
+            int available = line.havePlayer + line.haveStorage + line.haveAe;
+            // 齐了 = 绿/黄（看是否要靠 NBT 顶替）；缺料但有样板 = 青（可下单）；
+            // 缺料且没样板 = 红（只能自己想办法）
             EnumChatFormatting color = available >= line.needed
                 ? (line.exact ? EnumChatFormatting.GREEN : EnumChatFormatting.YELLOW)
-                : EnumChatFormatting.RED;
+                : (line.orderable ? COLOR_ORDERABLE : EnumChatFormatting.RED);
             String text = color + line.displayName
                 + EnumChatFormatting.WHITE
                 + " ×"
@@ -437,7 +473,17 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
                 + " "
                 + (available >= line.needed && line.haveStorage > 0 ? EnumChatFormatting.WHITE
                     : EnumChatFormatting.GRAY)
-                + line.haveStorage;
+                + line.haveStorage
+                + EnumChatFormatting.GRAY
+                + " "
+                + tr("futa_gtnh.gui.reactor.manifest.ae")
+                + " "
+                + (available >= line.needed && line.haveAe > 0 ? EnumChatFormatting.WHITE : EnumChatFormatting.GRAY)
+                + line.haveAe;
+            if (line.pending > 0) {
+                text += EnumChatFormatting.AQUA + "  "
+                    + StatCollector.translateToLocalFormatted("futa_gtnh.gui.reactor.manifest.pending", line.pending);
+            }
             fontRendererObj
                 .drawStringWithShadow(fontRendererObj.trimStringToWidth(text, RIGHT_WIDTH), x, y + i * 12, 0xFFFFFF);
         }
@@ -477,7 +523,7 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
         if (manifest != null) {
             if (!lines.isEmpty()) lines.add("");
             lines.add(EnumChatFormatting.GOLD + manifest.displayName);
-            int available = manifest.havePlayer + manifest.haveStorage;
+            int available = manifest.havePlayer + manifest.haveStorage + manifest.haveAe;
             lines.add(
                 EnumChatFormatting.GRAY + tr("futa_gtnh.gui.reactor.manifest.need")
                     + " "
@@ -493,9 +539,18 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
                 .add(EnumChatFormatting.GRAY + tr("futa_gtnh.gui.reactor.manifest.player") + " " + manifest.havePlayer);
             lines.add(
                 EnumChatFormatting.GRAY + tr("futa_gtnh.gui.reactor.manifest.storage") + " " + manifest.haveStorage);
+            lines.add(EnumChatFormatting.DARK_AQUA + tr("futa_gtnh.gui.reactor.manifest.ae") + " " + manifest.haveAe);
+            if (manifest.pending > 0) {
+                lines.add(
+                    EnumChatFormatting.AQUA + StatCollector
+                        .translateToLocalFormatted("futa_gtnh.gui.reactor.manifest.pending", manifest.pending));
+            }
             lines.add(
                 manifest.exact ? EnumChatFormatting.GREEN + tr("futa_gtnh.gui.reactor.manifest.exact")
                     : EnumChatFormatting.YELLOW + tr("futa_gtnh.gui.reactor.manifest.substituted"));
+            if (manifest.orderable) {
+                lines.add(EnumChatFormatting.GRAY + tr("futa_gtnh.gui.reactor.manifest.orderable"));
+            }
         }
 
         if (mouseX >= guiLeft + PAD && mouseX < guiLeft + PAD + LIST_WIDTH
@@ -555,6 +610,7 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
         if (selectedId == id) return;
         selectedId = id;
         deleteArmed = false;
+        orderArmed = false;
         ClientReactorLayoutCache.clearPreview();
         if (id >= 0) {
             NetworkHandler.INSTANCE.sendToServer(PacketReactorLayoutAction.preview(id, looseNbt));
@@ -665,6 +721,14 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
                     }
                 }
                 break;
+            case BTN_ORDER:
+                if (selectedId >= 0 && orderArmed) {
+                    NetworkHandler.INSTANCE.sendToServer(PacketReactorLayoutAction.orderMissing(selectedId, looseNbt));
+                    orderArmed = false;
+                } else if (selectedId >= 0) {
+                    orderArmed = true;
+                }
+                break;
             default:
                 break;
         }
@@ -695,6 +759,10 @@ public class GuiReactorLayoutBrowser extends FutaGuiScreen {
 
     private String deleteLabel() {
         return tr(deleteArmed ? "futa_gtnh.gui.reactor.delete_confirm" : "futa_gtnh.gui.reactor.delete");
+    }
+
+    private String orderLabel() {
+        return tr(orderArmed ? "futa_gtnh.gui.reactor.order_confirm" : "futa_gtnh.gui.reactor.order");
     }
 
     private void drawBorder(int x, int y, int width, int height) {

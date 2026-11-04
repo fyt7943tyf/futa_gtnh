@@ -410,6 +410,19 @@ public class Config {
      */
     public static int reactorToolMaxLayouts = 100;
 
+    /**
+     * 是否启用反应堆布局工具的「缺失下单」：预览面板一键把缺失材料的差额
+     * 按行下成 AE 合成订单（走玩家随身 ME 终端连着的网络，产物回网络存储）。
+     * 需要装 Applied Energistics 2；清单 AE 列与部署的终端取料不受此项限制。
+     */
+    public static boolean reactorOrderEnable = true;
+
+    /** 单个玩家同时可挂的缺失订单行数上限（防一键产生巨量任务占满合成 CPU）。 */
+    public static int reactorOrderMaxPending = 32;
+
+    /** 每批「缺失下单」从随身 ME 终端电池扣除的 AE 电量（无线操作能耗）。 */
+    public static double reactorOrderAeCost = 5.0D;
+
     public static boolean enableDisassembler = true;
     public static int disassemblerMetaTileId = 32700;
 
@@ -1022,6 +1035,26 @@ public class Config {
             1,
             10000,
             "反应堆布局档案最多保存多少条。满了之后保存新布局会被拒绝，需要先删旧的。");
+
+        reactorOrderEnable = configuration.getBoolean(
+            "reactorOrderEnable",
+            Configuration.CATEGORY_GENERAL,
+            reactorOrderEnable,
+            "反应堆布局工具的「缺失下单」：预览面板一键把缺失材料按差额下 AE 合成订单（走玩家随身 ME 终端连着的网络，产物回网络存储）。需装 Applied Energistics 2；清单 AE 列与部署/建壳的终端取料不受此项限制。");
+        reactorOrderMaxPending = configuration.getInt(
+            "reactorOrderMaxPending",
+            Configuration.CATEGORY_GENERAL,
+            reactorOrderMaxPending,
+            1,
+            256,
+            "单个玩家同时可挂的缺失订单行数上限（防一键产生巨量任务占满合成 CPU）。");
+        reactorOrderAeCost = configuration
+            .get(
+                Configuration.CATEGORY_GENERAL,
+                "reactorOrderAeCost",
+                reactorOrderAeCost,
+                "每批「缺失下单」从随身 ME 终端电池扣除的 AE 电量。")
+            .getDouble();
 
         enableDisassembler = configuration.getBoolean(
             "enableDisassembler",

@@ -120,6 +120,17 @@ public final class ShellBuilder {
                     SharedStorageManager.broadcastItemChange(vesselKey);
                 }
             }
+            // 第三级：随身 ME 终端连着的网络（与部署同一套来源顺序）。容器方块
+            // 是全新件，走精确键；没带终端/超范围时安静跳过
+            if (needed - poolCount(pool) > 0) {
+                ReactorAeTerminal.TerminalHandle ae = ReactorAeTerminal.find(player);
+                if (ae != null) {
+                    int got = ReactorAeTerminal.extractExact(ae, player, vesselKey, needed - poolCount(pool));
+                    if (got > 0) {
+                        pool.merge(vesselKey, got, Integer::sum);
+                    }
+                }
+            }
             shortage = needed - poolCount(pool);
         }
 

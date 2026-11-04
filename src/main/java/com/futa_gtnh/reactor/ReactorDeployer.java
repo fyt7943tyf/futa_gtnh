@@ -84,6 +84,12 @@ public final class ReactorDeployer {
         public int needed;
         public int availablePlayer;
         public int availableStorage;
+        /** 随身 ME 终端连着的网络里的宽松可用量；没带终端/离线为 0。 */
+        public int availableAe;
+        /** 终端网络里有没有能合成这一行（全新变体）的在线样板。 */
+        public boolean orderable;
+        /** 全服在途的合成订单量（宽松口径，「缺失下单」的防重复依据）。 */
+        public int pendingOrder;
         /** 是否存在 NBT 完全一致的来源（false 时全部靠宽松匹配顶替）。 */
         public boolean exactAvailable;
     }
@@ -98,6 +104,10 @@ public final class ReactorDeployer {
      */
     public static List<ManifestRow> buildManifest(EntityPlayerMP player, ReactorLayout layout, boolean looseNbt) {
         Map<String, Requirement> groups = collectRequirements(layout);
+
+        // 随身 ME 终端只找一次：AE 列是只读统计（不耗电），没有终端/离线时
+        // availableAe 为 0、orderable 为 false，清单照常出 —— 行为回退到旧版
+        ReactorAeTerminal.TerminalHandle ae = ReactorAeTerminal.find(player);
 
         List<ManifestRow> rows = new ArrayList<>();
         for (Requirement req : groups.values()) {
@@ -124,6 +134,13 @@ public final class ReactorDeployer {
                 - (req.exactKey != null ? (int) SharedStorageManager.getStorage()
                     .getItemAmount(req.exactKey) : 0);
             if (row.availableStorage < 0) row.availableStorage = 0;
+
+            if (ae != null) {
+                row.availableAe = (int) Math
+                    .min(ReactorAeTerminal.itemCountLoose(ae, req.item, req.meta), Integer.MAX_VALUE);
+                row.orderable = ReactorAeTerminal.hasPattern(ae, req.item, req.meta);
+            }
+            row.pendingOrder = ReactorAeOrders.pendingAmount(req.item, req.meta);
 
             rows.add(row);
         }
@@ -188,6 +205,9 @@ public final class ReactorDeployer {
         }
 
         // ---- 第二步：按布局逐格取料（档案里的栈只是模板，实际装入的是取到的实物）----
+        // 随身 ME 终端找一次：缺失下单的产物落在终端网络里，部署从这里拿闭环的最后一截；
+        // 没带终端/超范围时是 null，取料安静退回旧版三级
+        ReactorAeTerminal.TerminalHandle ae = ReactorAeTerminal.find(player);
         Map<String, Requirement> groups = collectRequirements(layout);
         Map<ItemKey, Integer> pool = new LinkedHashMap<>();
         Map<ItemKey, Boolean> poolSubstituted = new LinkedHashMap<>();
@@ -195,7 +215,7 @@ public final class ReactorDeployer {
         List<String> shortageNames = new ArrayList<>();
 
         for (Requirement req : groups.values()) {
-            int taken = take(player, storage, pool, poolSubstituted, req, looseNbt);
+            int taken = take(player, storage, ae, pool, poolSubstituted, req, looseNbt);
             if (taken < req.needed) {
                 shortageTotal += req.needed - taken;
                 shortageNames.add(req.displayName() + " ×" + (req.needed - taken));
@@ -295,8 +315,8 @@ public final class ReactorDeployer {
      *
      * @return 实际凑到的数量
      */
-    private static int take(EntityPlayerMP player, SharedStorage storage, Map<ItemKey, Integer> pool,
-        Map<ItemKey, Boolean> poolSubstituted, Requirement req, boolean looseNbt) {
+    private static int take(EntityPlayerMP player, SharedStorage storage, ReactorAeTerminal.TerminalHandle ae,
+        Map<ItemKey, Integer> pool, Map<ItemKey, Boolean> poolSubstituted, Requirement req, boolean looseNbt) {
         int remaining = req.needed;
 
         // 1) 精确：玩家背包 → 共享背包
@@ -313,6 +333,10 @@ public final class ReactorDeployer {
         // 3) 宽松：共享背包，按「最接近全新」排序逐键抽
         if (remaining > 0) {
             remaining -= takeFromStorageLoose(storage, pool, poolSubstituted, req, remaining);
+        }
+        // 4) 宽松：随身 ME 终端连着的网络（缺失下单的产物落袋处），口径与共享背包一致
+        if (remaining > 0 && ae != null) {
+            remaining -= takeFromAeLoose(player, ae, pool, poolSubstituted, req, remaining);
         }
         return req.needed - Math.max(0, remaining);
     }
@@ -427,11 +451,25 @@ public final class ReactorDeployer {
         return taken;
     }
 
+    /** 宽松取第四级：随身 ME 终端网络。取到的变体照常登记进池（顶替口径同共享背包）。 */
+    private static int takeFromAeLoose(EntityPlayerMP player, ReactorAeTerminal.TerminalHandle ae,
+        Map<ItemKey, Integer> pool, Map<ItemKey, Boolean> poolSubstituted, Requirement req, int amount) {
+        Map<ItemKey, Integer> taken = ReactorAeTerminal.extractLoose(ae, player, req.item, req.meta, amount);
+        int total = 0;
+        for (Map.Entry<ItemKey, Integer> entry : taken.entrySet()) {
+            boolean substituted = req.exactKey == null || !entry.getKey()
+                .equals(req.exactKey);
+            addToPool(pool, poolSubstituted, entry.getKey(), entry.getValue(), substituted);
+            total += entry.getValue();
+        }
+        return total;
+    }
+
     /**
      * 「新鲜度」排序值：越小越新。无 NBT = 0（全新）；带 {@code advDmg}（IC2
      * {@code ItemGradualInt} 的损耗计数）按损耗排；其它 NBT 按最难看的兜底值排。
      */
-    private static int freshnessRank(ItemKey key) {
+    static int freshnessRank(ItemKey key) {
         NBTTagCompound nbt = key.copyNbt();
         if (nbt == null) return 0;
         if (nbt.hasKey("advDmg")) return Math.max(1, nbt.getInteger("advDmg"));

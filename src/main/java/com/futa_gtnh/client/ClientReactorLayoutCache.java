@@ -58,6 +58,12 @@ public final class ClientReactorLayoutCache {
         public int needed;
         public int havePlayer;
         public int haveStorage;
+        /** 随身 ME 终端网络里的宽松可用量（没带终端/离线为 0）。 */
+        public int haveAe;
+        /** 终端网络里有没有能合成这一行的在线样板（「缺失下单」的行级判定）。 */
+        public boolean orderable;
+        /** 全服在途的合成订单量。 */
+        public int pending;
         public boolean exact;
     }
 
@@ -75,6 +81,8 @@ public final class ClientReactorLayoutCache {
     public static int previewColumns;
     public static ItemStack[] previewStacks = new ItemStack[0];
     public static List<ManifestLine> previewManifest = new ArrayList<>();
+    /** 发这份预览时玩家身上是否有可用的 ME 终端（头部状态行 + 下单按钮判定）。 */
+    public static boolean previewAeOnline;
 
     // ==================================================================
     // 接收：布局列表
@@ -154,6 +162,7 @@ public final class ClientReactorLayoutCache {
             previewName = tag.getString("name");
             previewFluid = tag.getBoolean("fluid");
             previewColumns = tag.getInteger("columns");
+            previewAeOnline = tag.getBoolean("aeOnline");
 
             NBTTagList slots = tag.getTagList("slots", 10);
             int columns = Math.max(ReactorLayout.MIN_COLUMNS, Math.min(ReactorLayout.MAX_COLUMNS, previewColumns));
@@ -187,6 +196,9 @@ public final class ClientReactorLayoutCache {
                 line.needed = entry.getInteger("needed");
                 line.havePlayer = entry.getInteger("havePlayer");
                 line.haveStorage = entry.getInteger("haveStorage");
+                line.haveAe = entry.getInteger("haveAe");
+                line.orderable = entry.getBoolean("orderable");
+                line.pending = entry.getInteger("pending");
                 line.exact = entry.getBoolean("exact");
                 previewManifest.add(line);
             }
@@ -203,6 +215,7 @@ public final class ClientReactorLayoutCache {
         previewColumns = ReactorLayout.MIN_COLUMNS;
         previewStacks = new ItemStack[0];
         previewManifest = new ArrayList<>();
+        previewAeOnline = false;
     }
 
     // ==================================================================
