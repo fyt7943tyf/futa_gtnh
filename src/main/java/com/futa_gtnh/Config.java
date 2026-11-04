@@ -379,7 +379,7 @@ public class Config {
     /**
      * 是否注册 ME 封装胶带（右键白名单 AE 存储设备打包成保留全部数据的物品，
      * 再右键放回；胶带 64 点耐久）。需要装 Applied Energistics 2。
-     * 默认白名单：ME 驱动器、ME 接口方块、ME 接口部件、ME 箱子、IO 传输总线。
+     * 默认白名单：ME 驱动器、ME 接口方块、ME 接口部件、ME 箱子、IO 传输总线、ME 二合一接口（方块+部件）、P2P 二合一（ae2fc）、ME 二合一接口（方块+部件）、P2P 二合一（ae2fc）。
      */
     public static boolean enableMePackingTape = true;
 
@@ -1013,7 +1013,7 @@ public class Config {
             "enableMePackingTape",
             Configuration.CATEGORY_GENERAL,
             enableMePackingTape,
-            "是否注册 ME 封装胶带（右键白名单里的 AE 存储设备打包成保留全部数据的物品，再右键放回；胶带 64 点耐久）。需装 Applied Energistics 2，没装时此项无效。默认白名单：ME 驱动器、ME 接口方块、ME 接口部件、ME 箱子、IO 传输总线。");
+            "是否注册 ME 封装胶带（右键白名单里的 AE 存储设备打包成保留全部数据的物品，再右键放回；胶带 64 点耐久）。需装 Applied Energistics 2，没装时此项无效。默认白名单：ME 驱动器、ME 接口方块、ME 接口部件、ME 箱子、IO 传输总线、ME 二合一接口（方块+部件）、P2P 二合一（ae2fc）、ME 二合一接口（方块+部件）、P2P 二合一（ae2fc）。");
         meTapeWhitelist = configuration
             .get(
                 Configuration.CATEGORY_GENERAL,

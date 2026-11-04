@@ -132,8 +132,46 @@ public final class MeTapeOps {
             .maybeStack(1);
         if (ifacePart.isPresent()) whitelistedParts.add(partKey(ifacePart.get()));
 
+        // AE2FC（本模组硬依赖，整包必带）：ME 二合一接口（方块 + 线缆部件）与
+        // P2P 二合一部件。AE2FC 的设备不在 AE2 的 definitions 里，走注册名解析。
+        // 注册名对照 AE2FC-Rework 1.5.x 的类常量：tile.fluid_interface.name =
+        // 「ME二合一接口」，部件物品注册名 ae2fc:part_fluid_interface /
+        // ae2fc:part_fluid_p2p_interface（均为 IPartItem，走线缆部件通道）
+        if (Loader.isModLoaded("ae2fc")) {
+            addBlockByName("ae2fc", "fluid_interface", "ME 二合一接口方块");
+            addPartByItemName("ae2fc", "part_fluid_interface", "ME 二合一接口部件");
+            addPartByItemName("ae2fc", "part_fluid_p2p_interface", "P2P 二合一部件");
+        }
+
         for (String entry : Config.meTapeWhitelist) {
             parseExtraEntry(entry);
+        }
+    }
+
+    /** 按注册名把 {@code modId:name} 方块加入白名单；解析不到记警告（不炸）。 */
+    private static void addBlockByName(String modId, String name, String label) {
+        Block block = GameRegistry.findBlock(modId, name);
+        if (block != null) {
+            whitelistedBlocks.add(Block.getIdFromBlock(block));
+        } else {
+            FutaGtnhMod.LOG.warn("ME 胶带：白名单里的 {}（{}:{}）没解析到方块，跳过", label, modId, name);
+        }
+    }
+
+    /**
+     * 把一个部件物品的<b>全部已注册子 id</b>（def 物品栈）加入部件白名单。
+     * AE2 系部件共用一个物品、按子 id 区分，逐变体入表才不会漏。
+     */
+    private static void addPartByItemName(String modId, String itemName, String label) {
+        net.minecraft.item.Item item = GameRegistry.findItem(modId, itemName);
+        if (item == null) {
+            FutaGtnhMod.LOG.warn("ME 胶带：白名单里的 {}（{}:{}）没解析到物品，跳过", label, modId, itemName);
+            return;
+        }
+        java.util.List<ItemStack> variants = new java.util.ArrayList<>();
+        item.getSubItems(item, null, variants);
+        for (ItemStack variant : variants) {
+            whitelistedParts.add(partKey(variant));
         }
     }
 

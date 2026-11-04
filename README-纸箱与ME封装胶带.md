@@ -21,7 +21,7 @@
 
 - **合成**：福鲁伊克斯粉×2 + 粘液球×2 + 纸×3 + 铁锭（对角线胶带卷造型）。胶带 64 点耐久，每封一台设备耗 1 点。
 - **封装**：右键白名单里的 AE 设备，设备变「封装物品」（优先入背包，装不下才落地），完整数据保留：驱动器里的元件、接口的样板/配置/升级、朝向、优先级、颜色。
-- **默认白名单（存储设备组）**：ME 驱动器、ME 接口方块、ME 接口部件、ME 箱子、IO 传输总线。内建条目走 AE2 的 definitions API 解析；配置 `meTapeWhitelist` 可追加，格式 `block:modid:注册名` 或 `part:modid:物品名:子id`（AE2 所有部件共用一个物品，必须带子id精确匹配）。
+- **默认白名单（存储设备组）**：ME 驱动器、ME 接口方块、ME 接口部件、ME 箱子、IO 传输总线、ME 二合一接口（方块+部件）、P2P 二合一。内建条目走 AE2 的 definitions API 解析（ae2fc 的二合一走注册名解析）；配置 `meTapeWhitelist` 可追加，格式 `block:modid:注册名` 或 `part:modid:物品名:子id`（AE2 所有部件共用一个物品，必须带子id精确匹配）。
 - **放回**：右键放回 —— 方块设备放在点击面外侧；部件设备对齐 AE2 原版放部件的三段式（点到总线本体 / 点击面外侧已是总线 / 在外侧位置新建线缆总线再贴部件），所以「右键箱子侧面贴回接口」和原版手感一致。
 
 实现见 `com.futa_gtnh.aetape` 包（本包内所有 AE2 触碰集中在 `MeTapeOps`）+ 无 AE 依赖的物品类 `item/ItemMePackingTape`、`item/ItemMePackage`（封装产物，无配方不进创造栏）。方块设备走完整方块实体 NBT（`AEBaseTile.writeToNBT` 是 final 的，元件/朝向/状态一网打尽）；部件设备走 AE2 的 def/extra 惯例（与 `CableBusContainer` 的 NBT 格式一致），拆卸/放回流程对齐 `PartPlacement.wrenchLogic` / `placeItemPart`，含 BreakEvent/PlaceEvent 保护模组兼容。网络包 `PacketMeTapeUse`（51）、`PacketMePackageUse`（52）。
