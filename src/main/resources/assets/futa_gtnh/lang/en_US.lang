@@ -593,6 +593,7 @@ futa_gtnh.reactor.msg.order_no_terminal=No usable ME terminal (carry a wireless 
 futa_gtnh.reactor.msg.order_no_permission=No crafting permission on that ME network
 futa_gtnh.reactor.msg.order_no_power=Terminal out of power (%s AE per batch)
 futa_gtnh.reactor.msg.order_row_rejected=%s: no pattern in the network, skipped
+futa_gtnh.reactor.msg.order_row_overflow=%s: batch order limit reached, skipped
 futa_gtnh.reactor.msg.order_row_submitted=%s ×%s: submitted to a crafting CPU
 futa_gtnh.reactor.msg.order_row_missing=%s: plan missing materials - %s
 futa_gtnh.reactor.msg.order_row_error=%s: ordering failed - %s

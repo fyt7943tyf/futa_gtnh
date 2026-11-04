@@ -590,6 +590,7 @@ futa_gtnh.reactor.msg.order_no_terminal=没有可用的 ME 终端（携带已绑
 futa_gtnh.reactor.msg.order_no_permission=没有该 ME 网络的合成权限
 futa_gtnh.reactor.msg.order_no_power=终端电量不足（每批下单需要 %s AE）
 futa_gtnh.reactor.msg.order_row_rejected=%s：网络里没有对应样板，已跳过
+futa_gtnh.reactor.msg.order_row_overflow=%s：本批订单数已达上限，已跳过
 futa_gtnh.reactor.msg.order_row_submitted=%s ×%s：已提交到合成 CPU
 futa_gtnh.reactor.msg.order_row_missing=%s：计划缺材料——%s
 futa_gtnh.reactor.msg.order_row_error=%s：下单失败——%s

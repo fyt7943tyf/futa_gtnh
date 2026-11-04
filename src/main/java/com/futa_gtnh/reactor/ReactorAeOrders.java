@@ -137,8 +137,14 @@ public final class ReactorAeOrders {
         }
 
         // 差额 = 需求 - 玩家 - 共享背包 - AE网络 - 在途订单（宽松口径，防重复下单）
+        ICraftingGrid crafting = handle.crafting();
+        if (crafting == null) {
+            chat(player, "futa_gtnh.reactor.msg.order_no_terminal");
+            return;
+        }
         List<Row> accepted = new ArrayList<>();
         List<String> noPattern = new ArrayList<>();
+        List<String> overflow = new ArrayList<>();
         for (ManifestRow row : ReactorDeployer.buildManifest(player, layout, looseNbt)) {
             int shortfall = row.needed - row.availablePlayer
                 - row.availableStorage
@@ -147,7 +153,7 @@ public final class ReactorAeOrders {
             if (shortfall <= 0) continue;
             String label = row.display.getDisplayName();
             if (accepted.size() >= Config.reactorOrderMaxPending) {
-                noPattern.add(label);
+                overflow.add(label);
                 continue;
             }
             if (!ReactorAeTerminal.hasPattern(handle, row.display.getItem(), row.display.getItemDamage())) {
@@ -156,13 +162,12 @@ public final class ReactorAeOrders {
             }
             Row order = new Row(label, row.display.getItem(), row.display.getItemDamage(), shortfall);
             try {
-                order.future = handle.crafting()
-                    .beginCraftingJob(
-                        player.worldObj,
-                        handle.grid,
-                        new PlayerSource(player, null),
-                        outputStack(order.item, order.meta, shortfall),
-                        null);
+                order.future = crafting.beginCraftingJob(
+                    player.worldObj,
+                    handle.grid,
+                    new PlayerSource(player, null),
+                    outputStack(order.item, order.meta, shortfall),
+                    null);
             } catch (RuntimeException failure) {
                 FutaGtnhMod.LOG.warn("反应堆缺失下单：{} 的合成计划创建失败", label, failure);
                 noPattern.add(label);
@@ -195,6 +200,9 @@ public final class ReactorAeOrders {
         chat(player, "futa_gtnh.reactor.msg.order_head", accepted.size());
         for (String label : noPattern) {
             chat(player, "futa_gtnh.reactor.msg.order_row_rejected", label);
+        }
+        for (String label : overflow) {
+            chat(player, "futa_gtnh.reactor.msg.order_row_overflow", label);
         }
     }
 
@@ -354,7 +362,7 @@ public final class ReactorAeOrders {
     /** 行级汇报：玩家在线才发，顺带记日志（排查「为什么没下单」全靠这几行）。 */
     private static void report(Batch batch, String key, Object... args) {
         chat(batch.player, key, args);
-        FutaGtnhMod.LOG.info("反应堆缺失下单：" + key, args);
+        FutaGtnhMod.LOG.info("反应堆缺失下单：{} {}", key, java.util.Arrays.toString(args));
     }
 
     private static String message(Throwable error) {
