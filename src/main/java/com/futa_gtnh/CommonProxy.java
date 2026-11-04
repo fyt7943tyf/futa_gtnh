@@ -454,6 +454,10 @@ public class CommonProxy {
         GameRegistry.registerItem(mePackageItem, com.futa_gtnh.item.ItemMePackage.NAME);
         FutaGtnhMod.mePackageItem = mePackageItem;
 
+        // 封装替换设备的瞬间抑制掉落：AE2 的 breakBlock 会把驱动器元件等库存
+        // 原样掉出来，而数据已经进了封装物品 NBT，不抑制就是复制
+        MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.aetape.MeTapeDropGuard());
+
         FutaGtnhMod.LOG.info("已注册 ME 封装胶带");
     }
 

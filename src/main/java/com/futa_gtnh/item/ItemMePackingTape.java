@@ -4,7 +4,6 @@ import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.tileentity.TileEntity;
 import net.minecraft.world.World;
 
 import com.futa_gtnh.FutaGtnhMod;
@@ -45,10 +44,9 @@ public class ItemMePackingTape extends Item {
         if (player == null || world == null) return false;
 
         if (world.isRemote) {
-            // 粗判：目标是方块实体（AE 设备都是）。没有就放行普通流程。
-            // 白名单判定在服务端做 —— 客户端懒得复制一份 AE 的定义表。
-            TileEntity tile = world.getTileEntity(x, y, z);
-            if (tile == null) return false;
+            // 粗判：只对「看着像可封装目标」的方块发包并吞掉这次右键；
+            // 其它方块放行原版流程（开机器 GUI 等）。精判在服务端重做。
+            if (!com.futa_gtnh.aetape.MeTapeOps.isRoughTarget(world.getBlock(x, y, z))) return false;
             NetworkHandler.INSTANCE.sendToServer(new PacketMeTapeUse(x, y, z, side, hitX, hitY, hitZ));
             return true;
         }

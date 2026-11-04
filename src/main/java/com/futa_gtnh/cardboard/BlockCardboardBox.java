@@ -66,6 +66,15 @@ public class BlockCardboardBox extends BlockContainer {
         return new TileEntityCardboardBox();
     }
 
+    /**
+     * 禁丝绸之触：丝绸掉的方块物品不带数据（纸箱数据在方块实体里），已装箱的
+     * 箱子被丝绸挖会变空箱且落盘文件失去引用 —— 直接关掉，统一走 getDrops。
+     */
+    @Override
+    protected boolean canSilkHarvest() {
+        return false;
+    }
+
     // ==================================================================
     // 贴图
     // ==================================================================

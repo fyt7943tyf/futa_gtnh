@@ -84,6 +84,28 @@ public final class MeTapeOps {
         return available;
     }
 
+    /**
+     * 客户端粗判：这个方块看着像可封装目标吗（白名单方块 / AE 线缆总线）。
+     *
+     * <p>
+     * 只用于 {@code onItemUseFirst} 的客户端分支——不是目标就放行原版流程
+     * （机器该开 GUI 开 GUI），免得胶带把右键吞掉；真正的白名单校验在服务端
+     * {@link #pack} 重做。部件（线缆总线上的接口）在客户端就是「点是 AE 的
+     * multiPart 方块」，具体是哪个部件由服务端 {@code selectPart} 判。
+     */
+    public static boolean isRoughTarget(net.minecraft.block.Block block) {
+        if (!isAvailable() || block == null) return false;
+        ensureWhitelist();
+        if (isBlockWhitelisted(block)) return true;
+        // AE 线缆总线（部件贴在它上面/装在它里面）
+        com.google.common.base.Optional<ItemBlock> multiPart = AEApi.instance()
+            .definitions()
+            .blocks()
+            .multiPart()
+            .maybeItemBlock();
+        return multiPart.isPresent() && multiPart.get().field_150939_a == block;
+    }
+
     // ==================================================================
     // 白名单
     // ==================================================================
@@ -185,7 +207,7 @@ public final class MeTapeOps {
 
         ItemStack packageStack;
         if (tile instanceof IPartHost host) {
-            packageStack = packPart(player, world, x, y, z, hitX, hitY, hitZ, (IPartHost) tile);
+            packageStack = packPart(player, world, x, y, z, hitX, hitY, hitZ, host);
         } else {
             packageStack = packBlock(player, world, x, y, z, tile);
         }
@@ -208,7 +230,8 @@ public final class MeTapeOps {
         float hitZ, IPartHost host) {
         SelectedPart selected = host.selectPart(Vec3.createVectorHelper(hitX, hitY, hitZ));
         if (selected.part == null) {
-            // 点到线缆本体 / 空面：这里没有可封装的部件
+            // 点到线缆本体 / 面板（facade）/ 空面：没有可封装的部件
+            notify(player, "futa_gtnh.me_tape.msg.not_packable");
             return null;
         }
         ItemStack def = selected.part.getItemStack(PartItemStack.Wrench);
@@ -235,8 +258,15 @@ public final class MeTapeOps {
         NBTTagCompound extra = new NBTTagCompound();
         selected.part.writeToNBT(extra);
 
-        host.removePart(selected.side, false);
-        if (host.isEmpty()) host.cleanup();
+        // removePart/cleanup 会触发总线方块的 breakBlock（清空最后一条时）——
+        // AE2 的 breakBlock 会掉落剩余部件，抑制窗口防重复（数据已在 extra 里）
+        MeTapeDropGuard.begin(world);
+        try {
+            host.removePart(selected.side, false);
+            if (host.isEmpty()) host.cleanup();
+        } finally {
+            MeTapeDropGuard.end();
+        }
 
         ItemStack packageStack = newPackageStack(true);
         NBTTagCompound data = ItemMePackage.dataTag(packageStack);
@@ -276,7 +306,15 @@ public final class MeTapeOps {
         UniqueIdentifier blockId = GameRegistry.findUniqueIdentifierFor(block);
         if (blockId == null) return null;
 
-        world.setBlockToAir(x, y, z);
+        // setBlockToAir 会触发 AE2 的 AEBaseTileBlock.breakBlock —— 它把方块实体
+        // 库存（驱动器元件、接口样板）原样掉落，而数据已在本封装的 tileTag 里，
+        // 不抑制就是复制。窗口与纸箱装箱的 DropGuard 同一套机制
+        MeTapeDropGuard.begin(world);
+        try {
+            world.setBlockToAir(x, y, z);
+        } finally {
+            MeTapeDropGuard.end();
+        }
 
         ItemStack packageStack = newPackageStack(false);
         NBTTagCompound data = ItemMePackage.dataTag(packageStack);
@@ -354,6 +392,7 @@ public final class MeTapeOps {
         NBTTagCompound tileTag) {
         int separator = blockName.indexOf(':');
         if (separator <= 0) return false;
+        if (tileTag == null || tileTag.hasNoTags()) return false; // 数据损坏的封装物品不放
         Block block = GameRegistry.findBlock(blockName.substring(0, separator), blockName.substring(separator + 1));
         if (block == null) return false;
 

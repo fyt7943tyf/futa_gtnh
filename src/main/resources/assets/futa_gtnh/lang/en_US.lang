@@ -792,6 +792,7 @@ futa_gtnh.me_package.tip.empty=Empty package (should be produced by packing tape
 futa_gtnh.me_package.tip.device=Device: %s
 futa_gtnh.me_package.tip.hint=Right-click to place: blocks go beside the clicked face; parts attach to a cable bus
 futa_gtnh.me_tape.msg.not_whitelisted=That device is not on the packing tape whitelist
+futa_gtnh.me_tape.msg.not_packable=Not a packable part (hit the cable or a facade)
 futa_gtnh.me_tape.msg.protected=This spot is protected; cannot pack here
 futa_gtnh.me_tape.msg.packed=Packed: %s
 futa_gtnh.me_package.msg.failed=Placement failed; try another spot or face

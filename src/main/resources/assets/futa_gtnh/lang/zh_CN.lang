@@ -789,6 +789,7 @@ futa_gtnh.me_package.tip.empty=空的封装物品（应由胶带封装产生）
 futa_gtnh.me_package.tip.device=设备：%s
 futa_gtnh.me_package.tip.hint=右键放回：方块设备放在点击面外侧；部件设备贴到线缆总线
 futa_gtnh.me_tape.msg.not_whitelisted=这个设备不在 ME 胶带的白名单里
+futa_gtnh.me_tape.msg.not_packable=这不是可封装的部件（点到线缆本体/面板了）
 futa_gtnh.me_tape.msg.protected=这里受保护，不能封装
 futa_gtnh.me_tape.msg.packed=已封装：%s
 futa_gtnh.me_package.msg.failed=放回失败：换个位置或朝向试试

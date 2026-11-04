@@ -53,6 +53,21 @@ public final class CardboardBoxOps {
             notify(player, "futa_gtnh.cardboard_box.msg.protected");
             return false;
         }
+        // 装箱本质是「替换方块」，和 AE2 自己的拆卸一样过一遍 BreakEvent：
+        // 领地/保护类模组有机会否决
+        net.minecraftforge.event.world.BlockEvent.BreakEvent breakEvent = new net.minecraftforge.event.world.BlockEvent.BreakEvent(
+            x,
+            y,
+            z,
+            world,
+            target,
+            world.getBlockMetadata(x, y, z),
+            player);
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(breakEvent);
+        if (breakEvent.isCanceled()) {
+            notify(player, "futa_gtnh.cardboard_box.msg.protected");
+            return false;
+        }
 
         Block boxBlock = FutaGtnhMod.blockCardboardBox;
         if (boxBlock == null) return false;
