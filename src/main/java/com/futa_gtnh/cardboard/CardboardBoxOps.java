@@ -106,8 +106,9 @@ public final class CardboardBoxOps {
         }
 
         if (!player.capabilities.isCreativeMode && heldStack != null) {
-            --heldStack.stackSize;
-            player.inventory.markDirty();
+            // 统一消耗姿势（shared/InventoryOps）：直接 --stackSize 会留下 size=0 的
+            // 「幽灵堆叠」——客户端照样渲染成手里有箱子且守卫全过，表现为无限使用
+            com.futa_gtnh.shared.InventoryOps.consumeOne(player, heldStack);
         }
         world.playSoundEffect(x + 0.5D, y + 0.5D, z + 0.5D, "dig.wood", 0.7F, 1.0F);
         return true;
