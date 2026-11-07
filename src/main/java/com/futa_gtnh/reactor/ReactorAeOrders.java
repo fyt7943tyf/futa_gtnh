@@ -12,7 +12,6 @@ import java.util.concurrent.Future;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
 import net.minecraft.util.ChatComponentTranslation;
 
 import com.futa_gtnh.Config;
@@ -25,7 +24,6 @@ import appeng.api.networking.crafting.ICraftingJob;
 import appeng.api.networking.crafting.ICraftingLink;
 import appeng.api.networking.security.PlayerSource;
 import appeng.api.storage.data.IAEItemStack;
-import appeng.util.item.AEItemStack;
 
 /**
  * 「缺失下单」的批量订单状态机 —— 一键把一份布局清单里所有缺失材料的差额
@@ -156,18 +154,21 @@ public final class ReactorAeOrders {
                 overflow.add(label);
                 continue;
             }
-            if (!ReactorAeTerminal.hasPattern(handle, row.display.getItem(), row.display.getItemDamage())) {
+            // 样板匹配与部署同口径：只看物品+耐久类型、无视 NBT 损耗（IC2 渐变型
+            // 组件的样板产出自带初始 NBT，裸全新键精确匹配会漏配，实测 bug）。
+            // 下单目标直接用样板自己的产出堆叠，保证任务精确对上网络能造的东西。
+            IAEItemStack patternOutput = ReactorAeTerminal
+                .findPatternOutput(handle, row.display.getItem(), row.display.getItemDamage());
+            if (patternOutput == null) {
                 noPattern.add(label);
                 continue;
             }
             Row order = new Row(label, row.display.getItem(), row.display.getItemDamage(), shortfall);
             try {
-                order.future = crafting.beginCraftingJob(
-                    player.worldObj,
-                    handle.grid,
-                    new PlayerSource(player, null),
-                    outputStack(order.item, order.meta, shortfall),
-                    null);
+                IAEItemStack request = patternOutput.copy();
+                request.setStackSize(shortfall);
+                order.future = crafting
+                    .beginCraftingJob(player.worldObj, handle.grid, new PlayerSource(player, null), request, null);
             } catch (RuntimeException failure) {
                 FutaGtnhMod.LOG.warn("反应堆缺失下单：{} 的合成计划创建失败", label, failure);
                 noPattern.add(label);
@@ -338,11 +339,6 @@ public final class ReactorAeOrders {
     // ==================================================================
     // 内部
     // ==================================================================
-
-    /** 下单目标一律是「全新变体」（样板产出就是全新件，带损耗的 NBT 没有样板）。 */
-    private static IAEItemStack outputStack(Item item, int meta, int amount) {
-        return AEItemStack.create(new ItemStack(item, amount, meta));
-    }
 
     private static void refund(Row row) {
         long key = pendingKey(row.item, row.meta);
