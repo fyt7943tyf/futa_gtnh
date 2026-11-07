@@ -171,38 +171,39 @@ public final class ReactorAeTerminal {
     // ==================================================================
 
     /**
-     * @return 该 (物品, 耐久) 在终端网络里的宽松总量（所有 NBT 变体合计）
+     * @return 该物品在终端网络里的宽松总量（所有 damage/NBT 损耗变体合计）。
+     *         IC2 组件的损耗记在 damage 里，AE2 会按变体分开存，必须按物品聚合
      */
-    public static long itemCountLoose(TerminalHandle handle, Item item, int meta) {
+    public static long itemCountLoose(TerminalHandle handle, Item item) {
         IMEMonitor<IAEItemStack> inventory = itemInventory(handle);
         if (inventory == null) return 0L;
         long total = 0L;
         for (IAEItemStack stack : inventory.getStorageList()) {
-            if (stack.getItem() != item || stack.getItemDamage() != meta) continue;
+            if (stack.getItem() != item) continue;
             total += stack.getStackSize();
         }
         return total;
     }
 
     /**
-     * 在样板表里找能合成该 (物品, 耐久类型) 的在线样板，返回<b>样板实际产出的堆叠</b>。
+     * 在样板表里找能合成该物品的在线样板，返回<b>样板实际产出的堆叠</b>。
      *
      * <p>
-     * 匹配口径与部署取料一致：<b>只看物品 + 耐久类型（meta），无视 NBT</b>。
-     * 不能用「裸全新键 + containsKey」精确匹配——IC2 渐变型组件（燃料棒/散热器/
-     * 热交换器）的合成产出自带初始状态 NBT（advDmg 之类），裸键会漏配，导致
-     * 「网络里有样板却被判没有」（实测 bug）。返回样板自己的产出堆叠作为下单
-     * 目标，保证合成任务精确对上网络能造的东西。
+     * 匹配口径与部署取料一致：<b>只看物品，无视 damage/NBT 损耗</b>——IC2 组件
+     * 的损耗记在 damage 里，样板产出则是全新件，按「物品+耐久」精确匹配永远配不上
+     * （实测 bug）。也不能用「裸全新键 + containsKey」——部分样板产出自带初始
+     * 状态 NBT（IC2 渐变型的 advDmg 等）。返回样板自己的产出堆叠作为下单目标，
+     * 保证合成任务精确对上网络能造的东西。
      *
      * @return 样板产出堆叠（未设数量）；没有能合成的在线样板时为 null
      */
-    public static IAEItemStack findPatternOutput(TerminalHandle handle, Item item, int meta) {
+    public static IAEItemStack findPatternOutput(TerminalHandle handle, Item item) {
         ICraftingGrid crafting = handle.crafting();
         if (crafting == null) return null;
         for (IAEStack<?> key : crafting.getCraftingMultiPatterns()
             .keySet()) {
             if (!(key instanceof IAEItemStack stack)) continue;
-            if (stack.getItem() != item || stack.getItemDamage() != meta) continue;
+            if (stack.getItem() != item) continue;
             return stack.copy();
         }
         return null;
@@ -218,7 +219,7 @@ public final class ReactorAeTerminal {
      *
      * @return 实际取到的 变体键 → 数量；调用方负责登记进取料池
      */
-    public static Map<ItemKey, Integer> extractLoose(TerminalHandle handle, EntityPlayerMP player, Item item, int meta,
+    public static Map<ItemKey, Integer> extractLoose(TerminalHandle handle, EntityPlayerMP player, Item item,
         int amount) {
         Map<ItemKey, Integer> taken = new LinkedHashMap<>();
         IMEMonitor<IAEItemStack> inventory = itemInventory(handle);
@@ -226,7 +227,7 @@ public final class ReactorAeTerminal {
 
         List<IAEItemStack> candidates = new ArrayList<>();
         for (IAEItemStack stack : inventory.getStorageList()) {
-            if (stack.getItem() != item || stack.getItemDamage() != meta) continue;
+            if (stack.getItem() != item) continue;
             if (stack.getStackSize() <= 0) continue;
             candidates.add(stack);
         }
