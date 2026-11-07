@@ -17,6 +17,7 @@
 		"MixinGtswnQuantumTerminal",
 		"MixinGtswnControllerConnections",
 		"MixinGtswnQuantumNode",
+		"MixinGtswnQuantumIncorporation",
 		"MixinShimmerGTShapedRecipe",
 		"MixinShimmerGTShapelessRecipe",
 		"MixinBlockReed",

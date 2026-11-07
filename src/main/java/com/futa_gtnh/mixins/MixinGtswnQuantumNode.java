@@ -85,8 +85,15 @@ public abstract class MixinGtswnQuantumNode {
         return GtswnQuantumCompat.portNode(futa$publicPort);
     }
 
-    @Inject(method = "setAnchor", at = @At("HEAD"), require = 1, remap = false)
+    /** GTSWN 1.8.8 has only this overload; 2.x keeps it as a wrapper around the generation-aware one below. */
+    @Inject(method = "setAnchor(IIII)V", at = @At("HEAD"), require = 1, remap = false)
     private void futa$resetPort(int dim, int x, int y, int z, CallbackInfo ci) {
+        if (dim != anchorDim || x != anchorX || y != anchorY || z != anchorZ) futa$publicPort = -1;
+    }
+
+    /** GTSWN 2.x also re-anchors through here (explicit moves, controller migration, canonicalisation). */
+    @Inject(method = "replaceAnchor(IIIILjava/lang/String;)V", at = @At("HEAD"), require = 0, remap = false)
+    private void futa$resetPortOnReplace(int dim, int x, int y, int z, String generation, CallbackInfo ci) {
         if (dim != anchorDim || x != anchorX || y != anchorY || z != anchorZ) futa$publicPort = -1;
     }
 

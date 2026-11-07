@@ -625,6 +625,7 @@ futa_gtnh.quantum.unbound=This terminal is unbound from public ME. The public ne
 futa_gtnh.quantum.managed=The server manages public ME. Right-click to bind; sneak-right-click only unbinds this terminal from public ME.
 futa_gtnh.quantum.offline=This access point is not connected to a working public ME network. Try binding after the network recovers.
 futa_gtnh.quantum.controllerConflict=A separate ME controller is connected to this quantum branch. The branch is isolated to protect public ME.
+futa_gtnh.quantum.incorporationUnsupported=Quantum incorporation cannot attach machines directly to the public ME controller. Use a quantum node or a public ME access point instead.
 futa_gtnh.supply.items=Items
 futa_gtnh.supply.fluids=Fluids
 futa_gtnh.supply.watched=Watch

@@ -9,6 +9,7 @@ import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -16,18 +17,21 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import com.futa_gtnh.me.GtswnQuantumCompat;
 import com.futa_gtnh.me.PublicMeNetwork;
 
-import appeng.tile.networking.TileController;
-
-/** Use GTSWN 1.8.8's own permission, quantization, registry and terminal-binding implementation. */
+/**
+ * Use GTSWN's own permission, quantization, registry and terminal-binding implementation.
+ *
+ * <p>
+ * A click on a public access point / core port is replayed through GTSWN's own {@code onItemUseFirst} at the
+ * public controller's position, so whatever GTSWN checks before touching a controller (terminal sync, monitoring
+ * profile, per-network access rules in 2.x) still runs; only the click target is redirected.
+ */
 @Pseudo
 @Mixin(targets = "com.miaokatze.gtswn.common.items.ItemNetworkQuantumTerminal", remap = false)
 public abstract class MixinGtswnQuantumTerminal {
 
     @Shadow
-    private boolean handleControllerClick(ItemStack stack, EntityPlayer player, World world, TileController controller,
-        int x, int y, int z) {
-        throw new AssertionError();
-    }
+    public abstract boolean onItemUseFirst(ItemStack stack, EntityPlayer player, World world, int x, int y, int z,
+        int side, float hitX, float hitY, float hitZ);
 
     @Shadow
     private static void clearAnchor(ItemStack stack) {
@@ -39,9 +43,14 @@ public abstract class MixinGtswnQuantumTerminal {
         throw new AssertionError();
     }
 
+    /** True while the replayed click is inside GTSWN's own handling, so it is not redirected a second time. */
+    @Unique
+    private boolean futa$replaying;
+
     @Inject(method = "onItemUseFirst", at = @At("HEAD"), cancellable = true, require = 1, remap = false)
     private void futa$bindPublicNetwork(ItemStack stack, EntityPlayer player, World world, int x, int y, int z,
         int side, float hitX, float hitY, float hitZ, CallbackInfoReturnable<Boolean> cir) {
+        if (futa$replaying) return;
         TileEntity target = world.getTileEntity(x, y, z);
         if (!GtswnQuantumCompat.isPublicTarget(target)) return;
         // Client true would suppress C08. Let the original server-authoritative interaction packet through.
@@ -64,14 +73,23 @@ public abstract class MixinGtswnQuantumTerminal {
             cir.setReturnValue(true);
             return;
         }
-        cir.setReturnValue(
-            handleControllerClick(
-                stack,
-                player,
-                controller.getWorldObj(),
-                (TileController) controller,
-                controller.xCoord,
-                controller.yCoord,
-                controller.zCoord));
+        World controllerWorld = controller.getWorldObj();
+        futa$replaying = true;
+        try {
+            cir.setReturnValue(
+                onItemUseFirst(
+                    stack,
+                    player,
+                    controllerWorld,
+                    controller.xCoord,
+                    controller.yCoord,
+                    controller.zCoord,
+                    side,
+                    hitX,
+                    hitY,
+                    hitZ));
+        } finally {
+            futa$replaying = false;
+        }
     }
 }

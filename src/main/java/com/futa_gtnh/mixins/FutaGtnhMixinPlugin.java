@@ -2,15 +2,19 @@ package com.futa_gtnh.mixins;
 
 import java.io.InputStream;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import net.minecraft.launchwrapper.Launch;
 
 import org.spongepowered.asm.lib.ClassReader;
+import org.spongepowered.asm.lib.Type;
 import org.spongepowered.asm.lib.tree.ClassNode;
 import org.spongepowered.asm.lib.tree.FieldNode;
+import org.spongepowered.asm.lib.tree.MethodNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 
@@ -78,23 +82,101 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
 
     private static Boolean gtswnCompatible;
 
+    /**
+     * GTSWN versions whose quantum node / terminal / incorporation internals have been reviewed and run-tested
+     * against these hooks. Anything else is left alone: GTSWN's bridge and permission code changes between
+     * releases, and a silent mismatch here would let the public network bypass its checks.
+     */
+    private static final Set<String> GTSWN_TESTED_VERSIONS = new HashSet<>(Arrays.asList("1.8.8", "2.1.18"));
+
+    /** Class → members the GTSWN mixins shadow or inject into (name, argument count; -1 = field). */
+    private static final String[][] GTSWN_REQUIRED_MEMBERS = {
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "anchorDim", "-1" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "anchorX", "-1" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "anchorY", "-1" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "anchorZ", "-1" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "getProxy", "0" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "destroyBridgeConnection", "0" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "maintainConnection", "0" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "getOfflineReasonKey", "0" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "tryConnect", "0" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "setAnchor", "4" },
+        { "com/miaokatze/gtswn/common/tile/TileEntityNetworkQuantumNode", "checkNetworkOverload", "0" },
+        { "com/miaokatze/gtswn/common/items/ItemNetworkQuantumTerminal", "onItemUseFirst", "10" },
+        { "com/miaokatze/gtswn/common/items/ItemNetworkQuantumTerminal", "clearAnchor", "1" },
+        { "com/miaokatze/gtswn/common/items/ItemNetworkQuantumTerminal", "getAnchor", "1" },
+        { "com/miaokatze/gtswn/common/quantum/QuantumControllerEventHandler", "setValidSidesIfChanged", "2" },
+        // Quantum incorporation exists from GTSWN 2.x only; it is checked when that class is present.
+        { "com/miaokatze/gtswn/common/quantum/QuantumIncorporationRegistry", "add", "6", "optional" },
+        { "com/miaokatze/gtswn/common/quantum/QuantumIncorporationRegistry", "maintain", "2", "optional" } };
+
+    private static ClassNode readSkeleton(String internalName) throws Exception {
+        try (InputStream source = Launch.classLoader.getResourceAsStream(internalName + ".class")) {
+            if (source == null) return null;
+            ClassNode node = new ClassNode();
+            new ClassReader(source)
+                .accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            return node;
+        }
+    }
+
+    /** Returns the first required member that is missing from the installed GTSWN, or null when all are present. */
+    private static String missingGtswnMember() throws Exception {
+        Map<String, ClassNode> cache = new HashMap<>();
+        for (String[] required : GTSWN_REQUIRED_MEMBERS) {
+            ClassNode node = cache.get(required[0]);
+            if (node == null) {
+                node = readSkeleton(required[0]);
+                if (node == null) {
+                    if (required.length > 3) continue;
+                    return required[0];
+                }
+                cache.put(required[0], node);
+            }
+            int args = Integer.parseInt(required[2]);
+            boolean found = false;
+            if (args < 0) {
+                for (FieldNode field : node.fields) found |= required[1].equals(field.name);
+            } else {
+                for (MethodNode method : node.methods)
+                    found |= required[1].equals(method.name) && Type.getArgumentTypes(method.desc).length == args;
+            }
+            if (!found) return required[0] + "#" + required[1];
+        }
+        return null;
+    }
+
     /** Read the version constant without loading the optional mod or bypassing newer security implementations. */
     private static boolean gtswnCompatible() {
         if (gtswnCompatible != null) return gtswnCompatible;
         if (Launch.classLoader == null) return false;
-        try (InputStream source = Launch.classLoader.getResourceAsStream("com/miaokatze/gtswn/Tags.class")) {
-            if (source == null) return false;
-            ClassNode tags = new ClassNode();
-            new ClassReader(source)
-                .accept(tags, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        try {
+            ClassNode tags = readSkeleton("com/miaokatze/gtswn/Tags");
+            if (tags == null) return false;
             for (FieldNode field : tags.fields) {
                 if (!"VERSION".equals(field.name)) continue;
-                gtswnCompatible = "v1.8.8".equals(field.value) || "1.8.8".equals(field.value);
-                if (!gtswnCompatible) org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
-                    .warn(
-                        "Public ME quantum integration supports GTSWN 1.8.8; integration disabled for {}",
-                        field.value);
-                return gtswnCompatible;
+                String version = String.valueOf(field.value);
+                if (version.startsWith("v")) version = version.substring(1);
+                if (!GTSWN_TESTED_VERSIONS.contains(version)) {
+                    org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                        .warn(
+                            "Public ME quantum integration supports GTSWN {}; integration disabled for {}",
+                            GTSWN_TESTED_VERSIONS,
+                            field.value);
+                    return gtswnCompatible = false;
+                }
+                String missing = missingGtswnMember();
+                if (missing != null) {
+                    org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                        .warn(
+                            "GTSWN {} is a tested version but {} is missing; public ME quantum integration disabled",
+                            field.value,
+                            missing);
+                    return gtswnCompatible = false;
+                }
+                org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                    .info("Public ME quantum integration enabled for GTSWN {}", field.value);
+                return gtswnCompatible = true;
             }
         } catch (Exception error) {
             org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")

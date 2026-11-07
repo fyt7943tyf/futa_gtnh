@@ -622,6 +622,7 @@ futa_gtnh.quantum.unbound=已解除本终端的公共 ME 绑定；公共网络�
 futa_gtnh.quantum.managed=公共 ME 核心由服务器维护。普通右键绑定；潜行右键只解除本终端的公共 ME 绑定。
 futa_gtnh.quantum.offline=公共 ME 接入点尚未连上正常运行的公共网络，请待网络恢复后再绑定。
 futa_gtnh.quantum.controllerConflict=本地量子节点连接着独立 ME 控制器；已隔离，避免与公共控制器冲突。
+futa_gtnh.quantum.incorporationUnsupported=量子并入不能把机器直接并入公共 ME 控制器；请改用量子节点或公共 ME 接入器。
 futa_gtnh.supply.items=物品
 futa_gtnh.supply.fluids=流体
 futa_gtnh.supply.watched=关注
