@@ -436,6 +436,28 @@ public class Config {
     public static int dockMetaTileId = 32701;
 
     // ------------------------------------------------------------------
+    // 矿机一站式部署（采矿场/油气钻机）
+    // ------------------------------------------------------------------
+
+    /** 是否注册「矿机一站式部署器」物品与配套（需装 GT）。 */
+    public static boolean enableMinerDeployer = true;
+
+    /** 是否注册「免料自动维护仓」（随矿机部署器一起使用；独立开关）。 */
+    public static boolean enableMinerAutoMaintenance = true;
+
+    /** 免料自动维护仓的稳定 GT MTE ID。 */
+    public static int minerAutoMaintenanceMetaTileId = 32702;
+
+    /** AE 采矿枢纽覆盖板把钻井液补到的目标量（mB；一次采矿作业消耗 2000 mB）。 */
+    public static int minerIoFluidBuffer = 8000;
+
+    /** AE 采矿枢纽覆盖板把采矿管道在输入总线补到的目标量（个）。 */
+    public static int minerIoPipeBuffer = 64;
+
+    /** AE 采矿枢纽覆盖板的搬运间隔（tick）。 */
+    public static int minerIoCoverInterval = 20;
+
+    // ------------------------------------------------------------------
     // 界面（客户端行为）
     // ------------------------------------------------------------------
 
@@ -1088,6 +1110,50 @@ public class Config {
             1,
             32766,
             "ME 超级对接站的稳定 GT MTE ID；冲突时修改，已有世界不可随意更换。客户端和服务端需一致。");
+
+        enableMinerDeployer = configuration.getBoolean(
+            "enableMinerDeployer",
+            Configuration.CATEGORY_GENERAL,
+            enableMinerDeployer,
+            "注册矿机一站式部署器：右键采矿场/油气钻机控制器一键成型整个多方块（外壳+框架+输入输出仓+覆盖板+自动维护仓），材料按 背包→共享背包→随身ME终端 三级扣取。");
+
+        enableMinerAutoMaintenance = configuration.getBoolean(
+            "enableMinerAutoMaintenance",
+            Configuration.CATEGORY_GENERAL,
+            enableMinerAutoMaintenance,
+            "注册免料自动维护仓：放进多方块后自动修满全部维护状态，不再需要工具和耗材。");
+
+        minerAutoMaintenanceMetaTileId = configuration.getInt(
+            "minerAutoMaintenanceMetaTileId",
+            Configuration.CATEGORY_GENERAL,
+            minerAutoMaintenanceMetaTileId,
+            1,
+            32766,
+            "免料自动维护仓的稳定 GT MTE ID；冲突时修改，已有世界不可随意更换。客户端和服务端需一致。");
+
+        minerIoFluidBuffer = configuration.getInt(
+            "minerIoFluidBuffer",
+            Configuration.CATEGORY_GENERAL,
+            minerIoFluidBuffer,
+            0,
+            16000,
+            "AE 采矿枢纽覆盖板把钻井液补到的目标量（mB）。采矿场每次作业消耗 2000 mB。");
+
+        minerIoPipeBuffer = configuration.getInt(
+            "minerIoPipeBuffer",
+            Configuration.CATEGORY_GENERAL,
+            minerIoPipeBuffer,
+            0,
+            4096,
+            "AE 采矿枢纽覆盖板把采矿管道在输入总线补到的目标量（个）。");
+
+        minerIoCoverInterval = configuration.getInt(
+            "minerIoCoverInterval",
+            Configuration.CATEGORY_GENERAL,
+            minerIoCoverInterval,
+            5,
+            600,
+            "AE 采矿枢纽覆盖板的搬运间隔（tick）。");
 
         tinkersAutoFill = configuration.getBoolean(
             "tinkersAutoFill",

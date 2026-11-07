@@ -19,11 +19,11 @@ import com.gtnewhorizon.gtnhlib.teams.TeamManager;
  * <li>任一侧没有所有者（老方块 / OP 手放）时不互通，宁可严一点。
  * </ul>
  */
-final class AeSignalTeam {
+public final class AeSignalTeam {
 
     private AeSignalTeam() {}
 
-    static boolean sameTeam(UUID a, UUID b) {
+    public static boolean sameTeam(UUID a, UUID b) {
         if (a == null || b == null) return false;
         if (a.equals(b)) return true;
         Team teamA = TeamManager.getTeamByPlayer(a);
