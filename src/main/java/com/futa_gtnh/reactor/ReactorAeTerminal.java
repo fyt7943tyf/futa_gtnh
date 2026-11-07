@@ -31,6 +31,7 @@ import appeng.api.networking.security.PlayerSource;
 import appeng.api.networking.storage.IStorageGrid;
 import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEItemStack;
+import appeng.api.storage.data.IAEStack;
 import appeng.util.item.AEItemStack;
 import cpw.mods.fml.common.Loader;
 
@@ -183,13 +184,28 @@ public final class ReactorAeTerminal {
         return total;
     }
 
-    /** @return 该网络里有没有能合成这个（全新变体）的在线样板 */
-    public static boolean hasPattern(TerminalHandle handle, Item item, int meta) {
+    /**
+     * 在样板表里找能合成该 (物品, 耐久类型) 的在线样板，返回<b>样板实际产出的堆叠</b>。
+     *
+     * <p>
+     * 匹配口径与部署取料一致：<b>只看物品 + 耐久类型（meta），无视 NBT</b>。
+     * 不能用「裸全新键 + containsKey」精确匹配——IC2 渐变型组件（燃料棒/散热器/
+     * 热交换器）的合成产出自带初始状态 NBT（advDmg 之类），裸键会漏配，导致
+     * 「网络里有样板却被判没有」（实测 bug）。返回样板自己的产出堆叠作为下单
+     * 目标，保证合成任务精确对上网络能造的东西。
+     *
+     * @return 样板产出堆叠（未设数量）；没有能合成的在线样板时为 null
+     */
+    public static IAEItemStack findPatternOutput(TerminalHandle handle, Item item, int meta) {
         ICraftingGrid crafting = handle.crafting();
-        if (crafting == null) return false;
-        // 与 PublicMeCraftingView 同款判定：全新变体的 IAEStack 精确匹配样板表
-        return crafting.getCraftingMultiPatterns()
-            .containsKey(AEItemStack.create(new ItemStack(item, 1, meta)));
+        if (crafting == null) return null;
+        for (IAEStack<?> key : crafting.getCraftingMultiPatterns()
+            .keySet()) {
+            if (!(key instanceof IAEItemStack stack)) continue;
+            if (stack.getItem() != item || stack.getItemDamage() != meta) continue;
+            return stack.copy();
+        }
+        return null;
     }
 
     // ==================================================================

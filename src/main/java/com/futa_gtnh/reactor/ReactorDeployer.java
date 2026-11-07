@@ -138,7 +138,7 @@ public final class ReactorDeployer {
             if (ae != null) {
                 row.availableAe = (int) Math
                     .min(ReactorAeTerminal.itemCountLoose(ae, req.item, req.meta), Integer.MAX_VALUE);
-                row.orderable = ReactorAeTerminal.hasPattern(ae, req.item, req.meta);
+                row.orderable = ReactorAeTerminal.findPatternOutput(ae, req.item, req.meta) != null;
             }
             row.pendingOrder = ReactorAeOrders.pendingAmount(req.item, req.meta);
 
