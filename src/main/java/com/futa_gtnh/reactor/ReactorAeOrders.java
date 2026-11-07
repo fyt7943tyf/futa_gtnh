@@ -50,22 +50,20 @@ public final class ReactorAeOrders {
     /** 与 PublicMeCrafting 同款保鲜窗口：计划算好但一直没能提交就放弃（tick）。 */
     private static final long BATCH_TTL = 6000L;
 
-    /** 一行订单（一种材料的差额）。 */
+    /** 一行订单（一种材料的差额，按物品聚合）。 */
     private static final class Row {
 
         final String label;
         final Item item;
-        final int meta;
         final int amount;
 
         Future<ICraftingJob> future;
         ICraftingJob job;
         ICraftingLink link;
 
-        Row(String label, Item item, int meta, int amount) {
+        Row(String label, Item item, int amount) {
             this.label = label;
             this.item = item;
-            this.meta = meta;
             this.amount = amount;
         }
     }
@@ -89,13 +87,13 @@ public final class ReactorAeOrders {
     }
 
     private static final Map<UUID, Batch> BATCHES = new LinkedHashMap<>();
-    /** 全服在途订单账：物品id:meta → 数量（宽松口径）。 */
-    private static final Map<Long, Integer> PENDING = new HashMap<>();
+    /** 全服在途订单账：物品 → 数量（按物品聚合，宽松口径）。 */
+    private static final Map<Item, Integer> PENDING = new HashMap<>();
     private static long ticks;
 
-    /** @return (物品, 耐久) 的全服在途订单量；清单展示与差额防重复共用 */
-    public static int pendingAmount(Item item, int meta) {
-        Integer pending = PENDING.get(pendingKey(item, meta));
+    /** @return 该物品的全服在途订单量；清单展示与差额防重复共用 */
+    public static int pendingAmount(Item item) {
+        Integer pending = PENDING.get(item);
         return pending == null ? 0 : pending;
     }
 
@@ -147,7 +145,7 @@ public final class ReactorAeOrders {
             int shortfall = row.needed - row.availablePlayer
                 - row.availableStorage
                 - row.availableAe
-                - pendingAmount(row.display.getItem(), row.display.getItemDamage());
+                - pendingAmount(row.display.getItem());
             if (shortfall <= 0) continue;
             String label = row.display.getDisplayName();
             if (accepted.size() >= Config.reactorOrderMaxPending) {
@@ -157,13 +155,12 @@ public final class ReactorAeOrders {
             // 样板匹配与部署同口径：只看物品+耐久类型、无视 NBT 损耗（IC2 渐变型
             // 组件的样板产出自带初始 NBT，裸全新键精确匹配会漏配，实测 bug）。
             // 下单目标直接用样板自己的产出堆叠，保证任务精确对上网络能造的东西。
-            IAEItemStack patternOutput = ReactorAeTerminal
-                .findPatternOutput(handle, row.display.getItem(), row.display.getItemDamage());
+            IAEItemStack patternOutput = ReactorAeTerminal.findPatternOutput(handle, row.display.getItem());
             if (patternOutput == null) {
                 noPattern.add(label);
                 continue;
             }
-            Row order = new Row(label, row.display.getItem(), row.display.getItemDamage(), shortfall);
+            Row order = new Row(label, row.display.getItem(), shortfall);
             try {
                 IAEItemStack request = patternOutput.copy();
                 request.setStackSize(shortfall);
@@ -195,7 +192,7 @@ public final class ReactorAeOrders {
         batch.created = ticks;
         BATCHES.put(player.getUniqueID(), batch);
         for (Row order : accepted) {
-            PENDING.merge(pendingKey(order.item, order.meta), order.amount, Integer::sum);
+            PENDING.merge(order.item, order.amount, Integer::sum);
         }
 
         chat(player, "futa_gtnh.reactor.msg.order_head", accepted.size());
@@ -341,13 +338,8 @@ public final class ReactorAeOrders {
     // ==================================================================
 
     private static void refund(Row row) {
-        long key = pendingKey(row.item, row.meta);
-        Integer remaining = PENDING.merge(key, -row.amount, Integer::sum);
-        if (remaining != null && remaining <= 0) PENDING.remove(key);
-    }
-
-    private static long pendingKey(Item item, int meta) {
-        return ((long) Item.getIdFromItem(item) << 32) | (meta & 0xFFFFFFFFL);
+        Integer remaining = PENDING.merge(row.item, -row.amount, Integer::sum);
+        if (remaining != null && remaining <= 0) PENDING.remove(row.item);
     }
 
     private static void chat(EntityPlayerMP player, String key, Object... args) {

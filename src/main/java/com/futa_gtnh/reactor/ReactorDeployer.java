@@ -103,7 +103,7 @@ public final class ReactorDeployer {
      * {@link ManifestRow#exactAvailable} 标注。
      */
     public static List<ManifestRow> buildManifest(EntityPlayerMP player, ReactorLayout layout, boolean looseNbt) {
-        Map<String, Requirement> groups = collectRequirements(layout);
+        Map<Item, Requirement> groups = collectRequirements(layout);
 
         // 随身 ME 终端只找一次：AE 列是只读统计（不耗电），没有终端/离线时
         // availableAe 为 0、orderable 为 false，清单照常出 —— 行为回退到旧版
@@ -115,32 +115,22 @@ public final class ReactorDeployer {
             row.display = req.display();
             row.needed = req.needed;
 
+            // 可用量一律按「物品」聚合：IC2 组件的损耗记在 damage/NBT 里，同一组件
+            // 会按损耗拆成多个变体，而样板产出与宽松取料都是全变体通用的——
+            // 不按物品聚合的话，全新件算不进可用量、样板也匹配不上（实测 bug）
+            row.availablePlayer = countInPlayerInventory(player, req.item, null, false);
+            row.availableStorage = countInStorage(SharedStorageManager.getStorage(), req.item);
             if (req.exactKey != null) {
-                int exactPlayer = countInPlayerInventory(player, req.item, req.meta, req.exactKey.copyNbt(), true);
-                int exactStorage = (int) SharedStorageManager.getStorage()
-                    .getItemAmount(req.exactKey);
-                if (exactPlayer + exactStorage > 0) {
-                    row.exactAvailable = true;
-                    row.availablePlayer += exactPlayer;
-                    row.availableStorage += exactStorage;
-                }
+                row.exactAvailable = countInPlayerInventory(player, req.item, req.exactKey, true) > 0
+                    || SharedStorageManager.getStorage()
+                        .getItemAmount(req.exactKey) > 0;
             }
-
-            // 宽松口径补齐统计（同物品+耐久的其余 NBT 变体）
-            row.availablePlayer += countInPlayerInventory(player, req.item, req.meta, null, false)
-                - (req.exactKey != null ? countExactInPlayerOnly(player, req.exactKey) : 0);
-            if (row.availablePlayer < 0) row.availablePlayer = 0;
-            row.availableStorage += countInStorage(SharedStorageManager.getStorage(), req.item, req.meta)
-                - (req.exactKey != null ? (int) SharedStorageManager.getStorage()
-                    .getItemAmount(req.exactKey) : 0);
-            if (row.availableStorage < 0) row.availableStorage = 0;
 
             if (ae != null) {
-                row.availableAe = (int) Math
-                    .min(ReactorAeTerminal.itemCountLoose(ae, req.item, req.meta), Integer.MAX_VALUE);
-                row.orderable = ReactorAeTerminal.findPatternOutput(ae, req.item, req.meta) != null;
+                row.availableAe = (int) Math.min(ReactorAeTerminal.itemCountLoose(ae, req.item), Integer.MAX_VALUE);
+                row.orderable = ReactorAeTerminal.findPatternOutput(ae, req.item) != null;
             }
-            row.pendingOrder = ReactorAeOrders.pendingAmount(req.item, req.meta);
+            row.pendingOrder = ReactorAeOrders.pendingAmount(req.item);
 
             rows.add(row);
         }
@@ -208,7 +198,7 @@ public final class ReactorDeployer {
         // 随身 ME 终端找一次：缺失下单的产物落在终端网络里，部署从这里拿闭环的最后一截；
         // 没带终端/超范围时是 null，取料安静退回旧版三级
         ReactorAeTerminal.TerminalHandle ae = ReactorAeTerminal.find(player);
-        Map<String, Requirement> groups = collectRequirements(layout);
+        Map<Item, Requirement> groups = collectRequirements(layout);
         Map<ItemKey, Integer> pool = new LinkedHashMap<>();
         Map<ItemKey, Boolean> poolSubstituted = new LinkedHashMap<>();
         int shortageTotal = 0;
@@ -288,13 +278,16 @@ public final class ReactorDeployer {
         }
     }
 
-    /** 按需求出现顺序聚合布局里的非空格。 */
-    private static Map<String, Requirement> collectRequirements(ReactorLayout layout) {
-        Map<String, Requirement> groups = new LinkedHashMap<>();
+    /**
+     * 按需求出现顺序聚合布局里的非空格，<b>分组键只有物品</b>：IC2 组件的损耗记在
+     * damage/NBT 里（同一种组件在运行中的反应堆里会按损耗拆出很多变体），而样板
+     * 产出与宽松取料都是全变体通用的——按物品聚合才能和部署/下单的宽松口径对齐。
+     */
+    private static Map<Item, Requirement> collectRequirements(ReactorLayout layout) {
+        Map<Item, Requirement> groups = new LinkedHashMap<>();
         for (ItemStack slot : layout.slots) {
             if (slot == null || slot.getItem() == null) continue;
-            String key = Item.getIdFromItem(slot.getItem()) + ":" + slot.getItemDamage();
-            Requirement req = groups.get(key);
+            Requirement req = groups.get(slot.getItem());
             if (req == null) {
                 req = new Requirement();
                 req.item = slot.getItem();
@@ -303,7 +296,7 @@ public final class ReactorDeployer {
                 req.preferNbt = slot.getTagCompound() != null && !slot.getTagCompound()
                     .hasNoTags() ? (NBTTagCompound) slot.getTagCompound()
                         .copy() : null;
-                groups.put(key, req);
+                groups.put(slot.getItem(), req);
             }
             req.needed += Math.max(1, slot.stackSize);
         }
@@ -348,7 +341,6 @@ public final class ReactorDeployer {
             pool,
             poolSubstituted,
             key.getItem(),
-            key.getMeta(),
             amount,
             candidate -> candidate.equals(key),
             substituted);
@@ -363,7 +355,6 @@ public final class ReactorDeployer {
             pool,
             poolSubstituted,
             req.item,
-            req.meta,
             amount - taken,
             candidate -> !candidate.hasNbt(),
             true);
@@ -373,7 +364,6 @@ public final class ReactorDeployer {
                 pool,
                 poolSubstituted,
                 req.item,
-                req.meta,
                 amount - taken,
                 candidate -> true,
                 true);
@@ -387,15 +377,15 @@ public final class ReactorDeployer {
     }
 
     private static int takeFromPlayerMatching(EntityPlayerMP player, Map<ItemKey, Integer> pool,
-        Map<ItemKey, Boolean> poolSubstituted, Item item, int meta, int amount, KeyMatcher matcher,
-        boolean substituted) {
+        Map<ItemKey, Boolean> poolSubstituted, Item item, int amount, KeyMatcher matcher, boolean substituted) {
         if (amount <= 0) return 0;
         ItemStack[] main = player.inventory.mainInventory;
         int taken = 0;
 
         for (int i = 0; i < main.length && taken < amount; i++) {
             ItemStack slot = main[i];
-            if (slot == null || slot.getItem() != item || slot.getItemDamage() != meta) continue;
+            // 只按物品匹配：damage/NBT 是损耗状态不是类型，宽松层全变体通用
+            if (slot == null || slot.getItem() != item) continue;
             ItemKey key = ItemKey.of(slot);
             if (key == null || !matcher.matches(key)) continue;
 
@@ -426,7 +416,7 @@ public final class ReactorDeployer {
         List<Map.Entry<ItemKey, Long>> candidates = new ArrayList<>();
         for (Map.Entry<ItemKey, Long> entry : storage.snapshotItems()) {
             ItemKey key = entry.getKey();
-            if (key == null || key.getItem() != req.item || key.getMeta() != req.meta) continue;
+            if (key == null || key.getItem() != req.item) continue;
             if (entry.getValue() == null || entry.getValue() <= 0L) continue;
             candidates.add(entry);
         }
@@ -454,7 +444,7 @@ public final class ReactorDeployer {
     /** 宽松取第四级：随身 ME 终端网络。取到的变体照常登记进池（顶替口径同共享背包）。 */
     private static int takeFromAeLoose(EntityPlayerMP player, ReactorAeTerminal.TerminalHandle ae,
         Map<ItemKey, Integer> pool, Map<ItemKey, Boolean> poolSubstituted, Requirement req, int amount) {
-        Map<ItemKey, Integer> taken = ReactorAeTerminal.extractLoose(ae, player, req.item, req.meta, amount);
+        Map<ItemKey, Integer> taken = ReactorAeTerminal.extractLoose(ae, player, req.item, amount);
         int total = 0;
         for (Map.Entry<ItemKey, Integer> entry : taken.entrySet()) {
             boolean substituted = req.exactKey == null || !entry.getKey()
@@ -466,14 +456,14 @@ public final class ReactorDeployer {
     }
 
     /**
-     * 「新鲜度」排序值：越小越新。无 NBT = 0（全新）；带 {@code advDmg}（IC2
-     * {@code ItemGradualInt} 的损耗计数）按损耗排；其它 NBT 按最难看的兜底值排。
+     * 「新鲜度」排序值：越小越新。燃料棒类按 {@code advDmg}（IC2
+     * {@code ItemGradualInt} 的损耗计数）；散热器/热交换器类按 vanilla damage
+     * （ Durability: 9735/10000 那种）；其余按 damage 兜底。
      */
     static int freshnessRank(ItemKey key) {
         NBTTagCompound nbt = key.copyNbt();
-        if (nbt == null) return 0;
-        if (nbt.hasKey("advDmg")) return Math.max(1, nbt.getInteger("advDmg"));
-        return 1_000_000;
+        if (nbt != null && nbt.hasKey("advDmg")) return Math.max(1, nbt.getInteger("advDmg"));
+        return Math.max(0, key.getMeta());
     }
 
     private static void addToPool(Map<ItemKey, Integer> pool, Map<ItemKey, Boolean> poolSubstituted, ItemKey key,
@@ -502,40 +492,33 @@ public final class ReactorDeployer {
     // 可用量统计（预检清单用，只读不动库存）
     // ==================================================================
 
-    private static int countInPlayerInventory(EntityPlayerMP player, Item item, int meta, NBTTagCompound exactNbt,
-        boolean exactOnly) {
+    /**
+     * 按「物品」统计玩家背包里的数量（无视 damage/NBT 损耗变体）。
+     *
+     * @param exactKey
+     *                 非 null 时只统计与它完全一致的堆叠（exactOnly=true）
+     */
+    private static int countInPlayerInventory(EntityPlayerMP player, Item item, ItemKey exactKey, boolean exactOnly) {
         int count = 0;
         ItemStack[] main = player.inventory.mainInventory;
         for (ItemStack slot : main) {
-            if (slot == null || slot.getItem() != item || slot.getItemDamage() != meta) continue;
+            if (slot == null || slot.getItem() != item) continue;
             ItemKey key = ItemKey.of(slot);
             if (key == null) continue;
-            if (exactOnly) {
-                NBTTagCompound nbt = key.copyNbt();
-                if (exactNbt == null ? nbt != null : !equalsNbt(exactNbt, nbt)) continue;
-            }
+            if (exactOnly && !key.equals(exactKey)) continue;
             count += slot.stackSize;
         }
         return count;
     }
 
-    private static int countExactInPlayerOnly(EntityPlayerMP player, ItemKey key) {
-        return countInPlayerInventory(player, key.getItem(), key.getMeta(), key.copyNbt(), true);
-    }
-
-    private static int countInStorage(SharedStorage storage, Item item, int meta) {
+    private static int countInStorage(SharedStorage storage, Item item) {
         long total = 0L;
         for (Map.Entry<ItemKey, Long> entry : storage.snapshotItems()) {
             ItemKey key = entry.getKey();
-            if (key == null || key.getItem() != item || key.getMeta() != meta) continue;
+            if (key == null || key.getItem() != item) continue;
             if (entry.getValue() != null) total += entry.getValue();
         }
         return (int) Math.min(total, Integer.MAX_VALUE);
-    }
-
-    private static boolean equalsNbt(NBTTagCompound a, NBTTagCompound b) {
-        if (a == null || a.hasNoTags()) return b == null || b.hasNoTags();
-        return a.equals(b);
     }
 
     private static void markTileDirty(Ic2ReactorCompat.ReactorRef ref) {
