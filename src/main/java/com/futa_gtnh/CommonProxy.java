@@ -180,6 +180,8 @@ public class CommonProxy {
             Loader.instance()
                 .getConfigDir());
         com.futa_gtnh.medock.SuperDockRegistration.addCraftingRecipe();
+        com.futa_gtnh.miner.MinerRegistration.register();
+        com.futa_gtnh.miner.MinerRegistration.addCraftingRecipe();
     }
 
     /**

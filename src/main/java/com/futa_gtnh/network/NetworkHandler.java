@@ -127,5 +127,7 @@ public final class NetworkHandler {
         // ME 封装胶带：封装（C2S）与放回（C2S），同一条 onItemUseFirst 管线
         INSTANCE.registerMessage(PacketMeTapeUse.Handler.class, PacketMeTapeUse.class, 51, Side.SERVER);
         INSTANCE.registerMessage(PacketMePackageUse.Handler.class, PacketMePackageUse.class, 52, Side.SERVER);
+        // 矿机一站式部署：右键钻机控制器的部署请求（C2S），同一条 onItemUseFirst 管线
+        INSTANCE.registerMessage(PacketMinerDeployUse.Handler.class, PacketMinerDeployUse.class, 53, Side.SERVER);
     }
 }
