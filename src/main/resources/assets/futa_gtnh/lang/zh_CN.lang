@@ -817,3 +817,4 @@ futa_gtnh.me_tape.msg.not_packable=这不是可封装的部件（点到线缆本
 futa_gtnh.me_tape.msg.protected=这里受保护，不能封装
 futa_gtnh.me_tape.msg.packed=已封装：%s
 futa_gtnh.me_package.msg.failed=放回失败：换个位置或朝向试试
+futa_gtnh.me_package.msg.restore_failed=部件状态恢复失败，已按默认状态放置（详见日志）
