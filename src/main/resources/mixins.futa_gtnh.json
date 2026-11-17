@@ -7,6 +7,8 @@
 	"mixins": [
 		"MixinProspectingPacket",
 		"MixinGTPump",
+		"MixinGtStockingBus",
+		"MixinGtMultiBlockRecipeCheck",
 		"MixinAeStorageBusSupply",
 		"MixinAeNetworkMonitorSupply",
 		"MixinAeNetworkInventorySupply",

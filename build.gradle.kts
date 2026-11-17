@@ -143,6 +143,30 @@ tasks.register<JavaExec>("verifyPumpFluidUpdates") {
 }
 tasks.named("check") { dependsOn("verifyPumpFluidUpdates") }
 
+val compileStockingBusChecks = tasks.register<JavaCompile>("compileStockingBusChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/stocking-bus-check") { include("**/*.java") })
+    source(files("tools/terminal-io-check/appeng/core/Api.java"))
+    classpath = sourceSets["main"].output + sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("stocking-bus-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifyStockingBusGuard") {
+    group = "verification"
+    description = "Checks the real GT stocking bus Mixins against a fake AE grid: power cap, short-pull refund and scope"
+    dependsOn(compileStockingBusChecks, compileProspectorChecks)
+    mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+    args("--tweakClass", "com.futa_gtnh.stockingbuscheck.StockingBusCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+    classpath = files(compileStockingBusChecks.flatMap { it.destinationDirectory }) +
+        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/stocking-bus-check") +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifyStockingBusGuard") }
+
 val compileSupplyChecks = tasks.register<JavaCompile>("compileSupplyChecks") {
     dependsOn(tasks.named("classes"))
     source(fileTree("tools/supply-check") { include("**/*.java") })

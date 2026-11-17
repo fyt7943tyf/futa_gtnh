@@ -290,6 +290,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         // GregTech is required by this mod; this hook must not depend on optional TinkersConstruct.
         if ("com.futa_gtnh.mixins.MixinProspectingPacket".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinGTPump".equals(mixinClassName)) return true;
+        if ("com.futa_gtnh.mixins.MixinGtStockingBus".equals(mixinClassName)) return true;
+        if ("com.futa_gtnh.mixins.MixinGtMultiBlockRecipeCheck".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeStorageBusSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkMonitorSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkInventorySupply".equals(mixinClassName)) return true;
