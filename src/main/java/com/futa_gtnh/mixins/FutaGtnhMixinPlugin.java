@@ -185,6 +185,32 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         return false;
     }
 
+    private static Boolean bioVatNeedsVerticalFix;
+
+    /**
+     * Bacterial Vat only lacks a Y offset for its fluid area while it has getXDir/getZDir but no getYDir.
+     * If upstream adds getYDir (or removes the helpers) the hook is skipped so the offset is never applied twice.
+     */
+    private static boolean bioVatNeedsVerticalFix() {
+        if (bioVatNeedsVerticalFix != null) return bioVatNeedsVerticalFix;
+        if (Launch.classLoader == null) return false;
+        try {
+            ClassNode vat = readSkeleton("bartworks/common/tileentities/multis/MTEBioVat");
+            if (vat == null) return false;
+            boolean x = false, z = false, y = false;
+            for (MethodNode method : vat.methods) {
+                x |= "getXDir".equals(method.name);
+                z |= "getZDir".equals(method.name);
+                y |= "getYDir".equals(method.name);
+            }
+            return bioVatNeedsVerticalFix = x && z && !y;
+        } catch (Exception error) {
+            org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                .warn("Unable to inspect Bacterial Vat; vertical-facing fix disabled", error);
+            return false;
+        }
+    }
+
     private static boolean tinkersPresent() {
         if (present) return true;
 
@@ -292,6 +318,7 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         if ("com.futa_gtnh.mixins.MixinGTPump".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinGtStockingBus".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinGtMultiBlockRecipeCheck".equals(mixinClassName)) return true;
+        if ("com.futa_gtnh.mixins.MixinBioVatVerticalFacing".equals(mixinClassName)) return bioVatNeedsVerticalFix();
         if ("com.futa_gtnh.mixins.MixinAeStorageBusSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkMonitorSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkInventorySupply".equals(mixinClassName)) return true;

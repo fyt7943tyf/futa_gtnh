@@ -9,6 +9,7 @@
 		"MixinGTPump",
 		"MixinGtStockingBus",
 		"MixinGtMultiBlockRecipeCheck",
+		"MixinBioVatVerticalFacing",
 		"MixinAeStorageBusSupply",
 		"MixinAeNetworkMonitorSupply",
 		"MixinAeNetworkInventorySupply",

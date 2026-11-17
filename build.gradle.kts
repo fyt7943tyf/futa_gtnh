@@ -143,6 +143,29 @@ tasks.register<JavaExec>("verifyPumpFluidUpdates") {
 }
 tasks.named("check") { dependsOn("verifyPumpFluidUpdates") }
 
+val compileVatChecks = tasks.register<JavaCompile>("compileVatChecks") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/vat-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output + sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("vat-check/classes"))
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+    options.encoding = "UTF-8"
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifyBioVatVerticalFacing") {
+    group = "verification"
+    description = "Checks the real GT Bacterial Vat Mixin adds the Y offset for UP/DOWN controllers"
+    dependsOn(compileVatChecks, compileProspectorChecks, "extractTerminalClickLwjgl")
+    mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+    args("--tweakClass", "com.futa_gtnh.vatcheck.VatCheckTweaker", "--tweakClass", "org.spongepowered.asm.launch.MixinTweaker")
+    classpath = files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) + files(compileVatChecks.flatMap { it.destinationDirectory }) +
+        files(compileProspectorChecks.flatMap { it.destinationDirectory }) + files("tools/vat-check") +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifyBioVatVerticalFacing") }
+
 val compileStockingBusChecks = tasks.register<JavaCompile>("compileStockingBusChecks") {
     dependsOn(tasks.named("classes"))
     source(fileTree("tools/stocking-bus-check") { include("**/*.java") })
