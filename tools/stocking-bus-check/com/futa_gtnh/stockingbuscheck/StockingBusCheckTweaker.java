@@ -26,6 +26,7 @@ public final class StockingBusCheckTweaker implements ITweaker {
     @Override
     public void injectIntoClassLoader(LaunchClassLoader loader) {
         MixinEnvironment.getDefaultEnvironment().setSide(MixinEnvironment.Side.SERVER);
+        Mixins.addConfiguration("mixins.futa_stocking_bus_standin.json");
         Mixins.addConfiguration("mixins.futa_stocking_bus_check.json");
     }
 

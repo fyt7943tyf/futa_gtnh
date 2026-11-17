@@ -1,0 +1,6 @@
+{
+    "package": "com.futa_gtnh.standin",
+    "compatibilityLevel": "JAVA_8",
+    "required": true,
+    "mixins": ["MixinProgrammableHatchesStandIn"]
+}

@@ -67,6 +67,8 @@ public final class StockingBusRegression {
         shortPullInsideCheck();
         shortPullOutsideCheck();
         shortSecondSlotRefundsBoth();
+        powerShortRefund();
+        competingRedirectStillRuns();
         System.out.println("GT stocking bus guard: " + checks + " checks passed (real Mixin and fake AE grid)");
     }
 
@@ -74,7 +76,10 @@ public final class StockingBusRegression {
         check(
             hasMethod(MTEHatchInputBusME.class, "futa$capSimulatedAmount"),
             "bus gets the power-capped simulation hook");
-        check(hasMethod(MTEHatchInputBusME.class, "futa$trackPull"), "bus redirects the powered extraction");
+        check(hasMethod(MTEHatchInputBusME.class, "futa$recordPulls"), "bus observes the network inventory");
+        check(
+            hasMethod(MTEHatchInputBusME.class, "standIn"),
+            "a competing redirect on the powered extraction call still applies next to ours");
         check(hasMethod(MTEHatchInputBusME.class, "futa$refundPulled"), "bus gets the refund hook");
         check(hasMethod(MTEMultiBlockBase.class, "futa$enterRecipeCheck"), "multiblock base marks checkRecipe()");
     }
@@ -132,6 +137,31 @@ public final class StockingBusRegression {
         CheckRecipeResult result = bus.endRecipeProcessing(controller());
         check(!result.wasSuccessful(), "a short pull outside a recipe check still fails");
         check(INJECTED.isEmpty(), "outside checkRecipe() nothing is refunded (fuel machines could duplicate)");
+    }
+
+    private static void powerShortRefund() throws Exception {
+        MTEHatchInputBusME bus = newBus(new ItemStack(Items.apple));
+        prepare(bus, 0, 100, 60);
+        REAL.put(Items.apple, 100L);
+        INJECTED.clear();
+        power = 25;
+        StockingBusGuard.enterRecipeCheck();
+        CheckRecipeResult result = bus.endRecipeProcessing(controller());
+        StockingBusGuard.leaveRecipeCheck();
+        power = Double.MAX_VALUE;
+        long total = 0;
+        for (IAEItemStack stack : INJECTED) total += stack.getStackSize();
+        check(!result.wasSuccessful(), "a pull the grid cannot pay for in full still fails the check");
+        check(total == 25, "the 25 items the grid could pay for go back to the network");
+    }
+
+    private static void competingRedirectStillRuns() throws Exception {
+        int before = StandInCalls.calls;
+        MTEHatchInputBusME bus = newBus(new ItemStack(Items.apple));
+        prepare(bus, 0, 100, 60);
+        REAL.put(Items.apple, 100L);
+        bus.endRecipeProcessing(controller());
+        check(StandInCalls.calls == before + 1, "the competing redirect is still the one that runs");
     }
 
     private static void shortSecondSlotRefundsBoth() throws Exception {

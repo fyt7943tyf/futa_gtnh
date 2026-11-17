@@ -17,15 +17,12 @@ import com.futa_gtnh.ae2.StockingBusGuard;
 
 import appeng.api.config.Actionable;
 import appeng.api.networking.energy.IEnergyGrid;
-import appeng.api.networking.energy.IEnergySource;
 import appeng.api.networking.security.BaseActionSource;
-import appeng.api.storage.IMEInventory;
+import appeng.api.networking.storage.IStorageGrid;
 import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEItemStack;
-import appeng.api.storage.data.IAEStack;
 import appeng.me.GridAccessException;
 import appeng.me.helpers.AENetworkProxy;
-import appeng.util.Platform;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
 import gregtech.api.recipe.check.CheckRecipeResult;
@@ -36,8 +33,15 @@ import gregtech.common.tileentities.machines.MTEHatchInputBusME;
  *
  * <p>
  * Works on 5.09.54.175 through 5.09.55.x; the members used here are the same in all of them.
+ *
+ * <p>
+ * Deliberately does not redirect {@code Platform.poweredExtraction}: ProgrammableHatches redirects that very call and
+ * Mixin allows only one redirect per call site (the second one crashes class loading). The network is observed through
+ * the {@code getItemInventory()} call instead, the hooks are {@code require = 0} so a layout change disables them
+ * rather
+ * than the game, and the high priority makes this mixin the one that yields if another mod claims the same site.
  */
-@Mixin(value = MTEHatchInputBusME.class, remap = false)
+@Mixin(value = MTEHatchInputBusME.class, priority = 2000, remap = false)
 public abstract class MixinGtStockingBus {
 
     @Shadow
@@ -53,12 +57,13 @@ public abstract class MixinGtStockingBus {
     @Shadow
     protected abstract BaseActionSource getRequestSource();
 
-    /** Items already pulled in the current {@code endRecipeProcessing} call. */
+    /** Items taken from the network by the current {@code endRecipeProcessing} call. */
     @Unique
     private List<IAEItemStack> futa$pulled;
 
+    /** Items the bus meant to take from the network in the current {@code endRecipeProcessing} call. */
     @Unique
-    private boolean futa$shortPull;
+    private long futa$planned;
 
     /** Items of one kind that the grid can pay for this recipe check; valid when {@link #futa$capReady}. */
     @Unique
@@ -67,18 +72,23 @@ public abstract class MixinGtStockingBus {
     @Unique
     private boolean futa$capReady;
 
+    /** Another mod (ProgrammableHatches) replaces where this bus extracts from; leave those alone. */
+    @Unique
+    private boolean futa$skip;
+
     @Unique
     private long futa$lastLogMs;
 
-    @Inject(method = "startRecipeProcessing", at = @At("HEAD"), require = 1, remap = false)
+    @Inject(method = "startRecipeProcessing", at = @At("HEAD"), require = 0, remap = false)
     private void futa$resetCap(CallbackInfo ci) {
         futa$capReady = false;
+        futa$skip = StockingBusGuard.externallyOverridden(this);
     }
 
     /** The simulation ignores AE power; never promise the machine more than the grid can actually pay out. */
-    @Inject(method = "updateInformationSlot", at = @At("RETURN"), require = 1, remap = false)
+    @Inject(method = "updateInformationSlot", at = @At("RETURN"), require = 0, remap = false)
     private void futa$capSimulatedAmount(int index, CallbackInfo ci) {
-        if (!processingRecipe || !StockingBusGuard.enabled()) return;
+        if (!processingRecipe || futa$skip || !StockingBusGuard.enabled()) return;
         if (index < 0 || index >= slots.length) return;
         MTEHatchInputBusME.Slot slot = slots[index];
         if (slot == null || slot.extracted == null || slot.extractedAmount <= 0) return;
@@ -105,44 +115,54 @@ public abstract class MixinGtStockingBus {
         }
     }
 
-    @Inject(method = "endRecipeProcessing", at = @At("HEAD"), require = 1, remap = false)
+    @Inject(method = "endRecipeProcessing", at = @At("HEAD"), require = 0, remap = false)
     private void futa$beginPull(MTEMultiBlockBase controller, CallbackInfoReturnable<CheckRecipeResult> cir) {
         futa$pulled = null;
-        futa$shortPull = false;
+        futa$planned = 0;
+        if (futa$skip) return;
+        for (MTEHatchInputBusME.Slot slot : slots) {
+            if (slot == null || slot.extracted == null || slot.extractedAmount == 0) continue;
+            int toExtract = slot.extractedAmount - slot.extracted.stackSize;
+            if (toExtract > 0) futa$planned += toExtract;
+        }
     }
 
+    /** Hand the pull code a view of the network that remembers what it takes out. */
     @Redirect(
         method = "endRecipeProcessing",
         at = @At(
             value = "INVOKE",
-            target = "Lappeng/util/Platform;poweredExtraction(Lappeng/api/networking/energy/IEnergySource;Lappeng/api/storage/IMEInventory;Lappeng/api/storage/data/IAEStack;Lappeng/api/networking/security/BaseActionSource;)Lappeng/api/storage/data/IAEStack;"),
-        require = 1,
+            target = "Lappeng/api/networking/storage/IStorageGrid;getItemInventory()Lappeng/api/storage/IMEMonitor;"),
+        require = 0,
         remap = false)
-    @SuppressWarnings({ "rawtypes", "unchecked" })
-    private IAEStack futa$trackPull(IEnergySource energy, IMEInventory cell, IAEStack request, BaseActionSource src) {
-        IAEStack result = Platform.poweredExtraction(energy, cell, request, src);
-        if (result instanceof IAEItemStack pulled) {
-            if (futa$pulled == null) futa$pulled = new ArrayList<>();
-            futa$pulled.add(pulled);
-        }
-        if (result == null || result.getStackSize() != request.getStackSize()) {
-            futa$shortPull = true;
-            futa$lastLogMs = StockingBusGuard.logShortPull(futa$lastLogMs, futa$where(), energy, request, result);
-        }
-        return result;
+    private IMEMonitor<IAEItemStack> futa$recordPulls(IStorageGrid grid) {
+        IMEMonitor<IAEItemStack> network = grid.getItemInventory();
+        if (futa$skip || !StockingBusGuard.enabled()) return network;
+        futa$pulled = new ArrayList<>();
+        return StockingBusGuard.recordingMonitor(network, futa$pulled);
     }
 
     /** The machine is about to shut down; hand back what was pulled so the recipe's inputs are not lost. */
-    @Inject(method = "endRecipeProcessing", at = @At("RETURN"), require = 1, remap = false)
+    @Inject(method = "endRecipeProcessing", at = @At("RETURN"), require = 0, remap = false)
     private void futa$refundPulled(MTEMultiBlockBase controller, CallbackInfoReturnable<CheckRecipeResult> cir) {
         List<IAEItemStack> pulled = futa$pulled;
-        boolean shortPull = futa$shortPull;
+        long planned = futa$planned;
         futa$pulled = null;
-        futa$shortPull = false;
-        if (!shortPull || pulled == null || pulled.isEmpty() || !StockingBusGuard.enabled()) return;
+        futa$planned = 0;
+        CheckRecipeResult result = cir.getReturnValue();
+        if (pulled == null || result == null || result.wasSuccessful()) return;
 
         long items = 0;
         for (IAEItemStack stack : pulled) items += stack.getStackSize();
+
+        IEnergyGrid energy = null;
+        try {
+            energy = getProxy().getEnergy();
+        } catch (GridAccessException ignored) {
+            // the log line just omits the power figure
+        }
+        futa$lastLogMs = StockingBusGuard.logShortPull(futa$lastLogMs, futa$where(), energy, planned, items);
+        if (!StockingBusGuard.enabled() || pulled.isEmpty()) return;
 
         if (!StockingBusGuard.inRecipeCheck()) {
             StockingBusGuard.logRefund(futa$where(), pulled.size(), items, 0, false);

@@ -1,6 +1,10 @@
 package com.futa_gtnh.ae2;
 
-import net.minecraft.item.ItemStack;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -8,8 +12,8 @@ import org.apache.logging.log4j.Logger;
 import appeng.api.config.Actionable;
 import appeng.api.config.PowerMultiplier;
 import appeng.api.networking.energy.IEnergySource;
+import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEItemStack;
-import appeng.api.storage.data.IAEStack;
 
 /**
  * Support code for the GregTech stocking input bus hooks (see {@code MixinGtStockingBus}).
@@ -73,24 +77,85 @@ public final class StockingBusGuard {
         return items >= Long.MAX_VALUE ? Long.MAX_VALUE : (long) items;
     }
 
+    /**
+     * True when ProgrammableHatches (or anything else exposing {@code IMEHatchOverrided}) has replaced this bus's
+     * extraction source; the guard then neither caps nor refunds, because the items do not come from the AE network.
+     * Unknown or failing overrides count as overridden.
+     */
+    public static boolean externallyOverridden(Object bus) {
+        Method override = OVERRIDE.get(bus.getClass());
+        if (override == null) return false;
+        try {
+            return Boolean.TRUE.equals(override.invoke(bus));
+        } catch (Throwable error) {
+            return true;
+        }
+    }
+
+    private static final ClassValue<Method> OVERRIDE = new ClassValue<Method>() {
+
+        @Override
+        protected Method computeValue(Class<?> type) {
+            for (Class<?> c = type; c != null; c = c.getSuperclass()) {
+                for (Class<?> iface : c.getInterfaces()) {
+                    if (!iface.getName()
+                        .endsWith(".IMEHatchOverrided")) continue;
+                    try {
+                        return iface.getMethod("override");
+                    } catch (NoSuchMethodException ignored) {
+                        return null;
+                    }
+                }
+            }
+            return null;
+        }
+    };
+
+    /**
+     * A view of the network that records every item taken out with a real ({@code MODULATE}) extraction and otherwise
+     * forwards untouched. A dynamic proxy keeps it independent of the AE2 interface's exact method set.
+     */
+    @SuppressWarnings("unchecked")
+    public static IMEMonitor<IAEItemStack> recordingMonitor(final IMEMonitor<IAEItemStack> real,
+        final List<IAEItemStack> taken) {
+        return (IMEMonitor<IAEItemStack>) Proxy.newProxyInstance(
+            IMEMonitor.class.getClassLoader(),
+            new Class<?>[] { IMEMonitor.class },
+            new InvocationHandler() {
+
+                @Override
+                public Object invoke(Object self, Method method, Object[] args) throws Throwable {
+                    Object result;
+                    try {
+                        result = method.invoke(real, args);
+                    } catch (InvocationTargetException error) {
+                        throw error.getCause();
+                    }
+                    if (result instanceof IAEItemStack && args != null
+                        && args.length == 3
+                        && args[1] == Actionable.MODULATE
+                        && method.getName()
+                            .equals("extractItems")) {
+                        taken.add(((IAEItemStack) result).copy());
+                    }
+                    return result;
+                }
+            });
+    }
+
     /** Rate limiter shared by one bus; returns the new timestamp, or {@code lastLogMs} when logging is suppressed. */
-    public static long logShortPull(long lastLogMs, String where, IEnergySource energy, IAEStack<?> request,
-        IAEStack<?> result) {
+    public static long logShortPull(long lastLogMs, String where, IEnergySource energy, long planned, long pulled) {
         long now = System.currentTimeMillis();
         if (now - lastLogMs < LOG_INTERVAL_MS) return lastLogMs;
-        long wanted = request.getStackSize();
-        long got = result == null ? 0 : result.getStackSize();
-        double powerForRequest = energy == null ? -1
-            : energy.extractAEPower(request.getStackSize(), Actionable.SIMULATE, PowerMultiplier.CONFIG);
-        String item = request instanceof IAEItemStack stack ? describe(stack.getItemStack()) : String.valueOf(request);
+        double powerForPlan = energy == null ? -1
+            : energy.extractAEPower(planned, Actionable.SIMULATE, PowerMultiplier.CONFIG);
         LOG.warn(
-            "Stocking bus short pull at {}: item={} wanted={} got={} powerAvailableForRequest={} (needs {})",
+            "Stocking bus short pull at {}: planned={} pulled={} powerAvailableForPlanned={} (needs {})",
             where,
-            item,
-            wanted,
-            got,
-            powerForRequest,
-            wanted);
+            planned,
+            pulled,
+            powerForPlan,
+            planned);
         return now;
     }
 
@@ -108,10 +173,5 @@ public final class StockingBusGuard {
                 where,
                 items);
         }
-    }
-
-    private static String describe(ItemStack stack) {
-        if (stack == null || stack.getItem() == null) return "?";
-        return stack.getUnlocalizedName() + "@" + stack.getItemDamage();
     }
 }
