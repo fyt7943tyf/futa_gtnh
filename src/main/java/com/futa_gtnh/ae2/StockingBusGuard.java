@@ -6,14 +6,19 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.List;
 
+import net.minecraft.item.ItemStack;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import appeng.api.config.Actionable;
 import appeng.api.config.PowerMultiplier;
 import appeng.api.networking.energy.IEnergySource;
+import appeng.api.networking.security.BaseActionSource;
 import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEItemStack;
+import appeng.api.storage.data.IItemList;
+import cpw.mods.fml.common.registry.GameRegistry;
 
 /**
  * Support code for the GregTech stocking input bus hooks (see {@code MixinGtStockingBus}).
@@ -157,6 +162,47 @@ public final class StockingBusGuard {
             powerForPlan,
             planned);
         return now;
+    }
+
+    /**
+     * One line per slot that was part of a failed pull: what the check was told, what it asked for, what came out and
+     * what the network says now. {@code simNow} far above {@code listed} means a source is counted more than once;
+     * {@code simNow} close to {@code listed} but below {@code consumed} means the network really holds less than the
+     * simulation promised. Never throws: this is diagnostics on a path that already failed.
+     */
+    public static void logSlot(String where, ItemStack config, int simulatedAtCheck, long consumed, long pulled,
+        IMEMonitor<IAEItemStack> network, IAEItemStack kind, BaseActionSource source) {
+        try {
+            IAEItemStack probe = kind.copy();
+            probe.setStackSize(Integer.MAX_VALUE);
+            IAEItemStack simulated = network.extractItems(probe, Actionable.SIMULATE, source);
+            long simNow = simulated == null ? 0 : simulated.getStackSize();
+            long listed = -1;
+            IItemList<IAEItemStack> list = network.getStorageList();
+            if (list != null) {
+                IAEItemStack entry = list.findPrecise(kind);
+                listed = entry == null ? 0 : entry.getStackSize();
+            }
+            LOG.warn(
+                "Stocking bus {} slot item={} simulatedAtCheck={} consumed={} pulled={} simulatedNow={} networkListNow={}",
+                where,
+                describe(config),
+                simulatedAtCheck,
+                consumed,
+                pulled,
+                simNow,
+                listed);
+        } catch (RuntimeException error) {
+            LOG.warn("Stocking bus {} slot diagnostics failed: {}", where, error.toString());
+        }
+    }
+
+    private static String describe(ItemStack stack) {
+        if (stack == null || stack.getItem() == null) return "?";
+        GameRegistry.UniqueIdentifier id = GameRegistry.findUniqueIdentifierFor(stack.getItem());
+        return (id == null ? stack.getUnlocalizedName() : id.toString()) + "@"
+            + stack.getItemDamage()
+            + (stack.hasTagCompound() ? "+nbt" : "");
     }
 
     public static void logRefund(String where, int stacks, long items, long leftover, boolean refunded) {

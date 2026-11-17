@@ -161,27 +161,50 @@ public abstract class MixinGtStockingBus {
         } catch (GridAccessException ignored) {
             // the log line just omits the power figure
         }
+        long previousLogMs = futa$lastLogMs;
         futa$lastLogMs = StockingBusGuard.logShortPull(futa$lastLogMs, futa$where(), energy, planned, items);
-        if (!StockingBusGuard.enabled() || pulled.isEmpty()) return;
+        boolean diagnose = futa$lastLogMs != previousLogMs;
 
-        if (!StockingBusGuard.inRecipeCheck()) {
+        boolean refund = StockingBusGuard.enabled() && !pulled.isEmpty();
+        if (refund && !StockingBusGuard.inRecipeCheck()) {
             StockingBusGuard.logRefund(futa$where(), pulled.size(), items, 0, false);
+            refund = false;
+        }
+        if (!refund && !diagnose) return;
+
+        IMEMonitor<IAEItemStack> network;
+        try {
+            network = getProxy().getStorage()
+                .getItemInventory();
+        } catch (GridAccessException e) {
+            if (refund) StockingBusGuard.logRefund(futa$where(), pulled.size(), items, items, true);
             return;
         }
+        BaseActionSource source = getRequestSource();
 
-        long leftover = 0;
-        try {
-            IMEMonitor<IAEItemStack> network = getProxy().getStorage()
-                .getItemInventory();
-            BaseActionSource source = getRequestSource();
+        if (refund) {
+            long leftover = 0;
             for (IAEItemStack stack : pulled) {
                 IAEItemStack rest = network.injectItems(stack, Actionable.MODULATE, source);
                 if (rest != null) leftover += rest.getStackSize();
             }
-        } catch (GridAccessException e) {
-            leftover = items;
+            StockingBusGuard.logRefund(futa$where(), pulled.size(), items, leftover, true);
         }
-        StockingBusGuard.logRefund(futa$where(), pulled.size(), items, leftover, true);
+
+        // After the refund the network is back in the state the check started from, so these numbers are comparable.
+        if (diagnose) {
+            String where = futa$where();
+            for (MTEHatchInputBusME.Slot slot : slots) {
+                if (slot == null || slot.extracted == null || slot.extractedAmount == 0) continue;
+                long toExtract = slot.extractedAmount - slot.extracted.stackSize;
+                if (toExtract <= 0) continue;
+                long got = 0;
+                IAEItemStack kind = slot.createAEStack(1);
+                for (IAEItemStack stack : pulled) if (stack.isSameType(kind)) got += stack.getStackSize();
+                StockingBusGuard
+                    .logSlot(where, slot.config, slot.extractedAmount, toExtract, got, network, kind, source);
+            }
+        }
     }
 
     @Unique
