@@ -163,6 +163,32 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
         return lastMoved;
     }
 
+    // ------------------------------------------------------------------
+    // 采矿区域增强（一次性应用，见 {@link MinerAreaEnhance}）
+    // ------------------------------------------------------------------
+
+    /** 采矿区域倍率（1/2/3，1 = 该等级原版半径）；油气钻机宿主只存档不生效。 */
+    private int radiusFactor = 1;
+
+    public int getRadiusFactor() {
+        return radiusFactor;
+    }
+
+    /**
+     * GUI 选档（一次性应用）：存进覆盖板 NBT，并在宿主是采矿场、区块半径 mixin 在场且开关开启时，
+     * 把倍率写进 GT 的私有半径配置（之后归 GT 自己的 NBT 管，螺丝刀照常可调）。油气钻机只存档。
+     */
+    public void setRadiusFactor(int factor) {
+        factor = Math.max(1, Math.min(3, factor));
+        this.radiusFactor = factor;
+        markDirty();
+        if (!Config.enableMinerAreaEnhance) return;
+        MetaTileEntity mte = metaTileEntityOf(getTile());
+        if (mte instanceof MTEOreDrillingPlantBase && mte instanceof MinerAreaEnhance enhance) {
+            enhance.futa$applyRadiusFactor(factor);
+        }
+    }
+
     private void markDirty() {
         ICoverable coverable = getTile();
         if (coverable != null) coverable.markDirty();
@@ -486,6 +512,7 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
             tag.setInteger("y", targetY);
             tag.setInteger("z", targetZ);
         }
+        tag.setInteger("radiusFactor", radiusFactor);
         return tag;
     }
 
@@ -499,6 +526,8 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
             targetY = tag.getInteger("y");
             targetZ = tag.getInteger("z");
         }
+        int factor = tag.getInteger("radiusFactor");
+        radiusFactor = factor >= 1 && factor <= 3 ? factor : 1;
     }
 
     // ------------------------------------------------------------------

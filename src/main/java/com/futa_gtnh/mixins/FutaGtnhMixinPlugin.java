@@ -211,6 +211,30 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         }
     }
 
+    private static Boolean drillerRadiusSystemPresent;
+
+    /**
+     * The 采矿场 area multiplier writes the private chunk-radius config, so the mixin only applies to a GT
+     * whose MTEOreDrillingPlantBase carries the chunk radius system (config field + adjustChunkRadius cleanup).
+     * Older GT skips the mixin and the cover's selection degrades to a no-op via the duck-interface probe.
+     */
+    private static boolean drillerRadiusSystemPresent() {
+        if (drillerRadiusSystemPresent != null) return drillerRadiusSystemPresent;
+        if (Launch.classLoader == null) return false;
+        try {
+            ClassNode driller = readSkeleton("gregtech/common/tileentities/machines/multi/MTEOreDrillingPlantBase");
+            if (driller == null) return false;
+            boolean field = false, method = false;
+            for (FieldNode member : driller.fields) field |= "chunkRadiusConfig".equals(member.name);
+            for (MethodNode member : driller.methods) method |= "adjustChunkRadius".equals(member.name);
+            return drillerRadiusSystemPresent = field && method;
+        } catch (Exception error) {
+            org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                .warn("Unable to inspect 采矿场; area multiplier disabled", error);
+            return false;
+        }
+    }
+
     private static boolean tinkersPresent() {
         if (present) return true;
 
@@ -319,6 +343,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         if ("com.futa_gtnh.mixins.MixinGtStockingBus".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinGtMultiBlockRecipeCheck".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinBioVatVerticalFacing".equals(mixinClassName)) return bioVatNeedsVerticalFix();
+        if ("com.futa_gtnh.mixins.MixinMTEOreDrillingPlantBase".equals(mixinClassName))
+            return drillerRadiusSystemPresent();
         if ("com.futa_gtnh.mixins.MixinAeStorageBusSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkMonitorSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkInventorySupply".equals(mixinClassName)) return true;

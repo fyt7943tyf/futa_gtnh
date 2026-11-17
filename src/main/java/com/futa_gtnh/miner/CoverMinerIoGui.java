@@ -57,6 +57,9 @@ public class CoverMinerIoGui extends CoverBaseGui<CoverMinerIo> {
         IntSyncValue selection = new IntSyncValue(this::selectedIndex, this::selectByIndex).allowC2S();
         syncManager.syncValue("sender_selection", selection);
 
+        IntSyncValue radiusFactor = new IntSyncValue(cover::getRadiusFactor, cover::setRadiusFactor).allowC2S();
+        syncManager.syncValue("radius_factor", radiusFactor);
+
         IntSyncValue linkState = new IntSyncValue(
             () -> cover.getLinkState()
                 .ordinal());
@@ -65,7 +68,45 @@ public class CoverMinerIoGui extends CoverBaseGui<CoverMinerIo> {
         syncManager.syncValue("last_moved", lastMoved);
 
         column.child(positionRow(createSenderRow(senderList, selection)))
+            .child(positionRow(createAreaRow(radiusFactor)))
             .child(positionRow(createStatusRow(linkState, lastMoved)));
+    }
+
+    // ------------------------------------------------------------------
+    // 采矿区域档位（一次性应用，仅采矿场生效）
+    // ------------------------------------------------------------------
+
+    private Flow createAreaRow(IntSyncValue radiusFactor) {
+        ButtonWidget<?> prev = new ButtonWidget<>().size(16)
+            .overlay(IKey.str("<"))
+            .onMousePressed(button -> {
+                radiusFactor.setIntValue(wrapRadiusFactor(radiusFactor.getIntValue() - 1));
+                return true;
+            });
+        ButtonWidget<?> next = new ButtonWidget<>().size(16)
+            .overlay(IKey.str(">"))
+            .onMousePressed(button -> {
+                radiusFactor.setIntValue(wrapRadiusFactor(radiusFactor.getIntValue() + 1));
+                return true;
+            });
+        return row().child(
+            IKey.lang("futa_gtnh.miner.area")
+                .asWidget()
+                .verticalCenter())
+            .child(prev.marginLeft(4))
+            .child(
+                IKey.dynamic(
+                    () -> StatCollector
+                        .translateToLocal("futa_gtnh.miner.area." + wrapRadiusFactor(radiusFactor.getIntValue())))
+                    .asWidget()
+                    .verticalCenter()
+                    .marginRight(4))
+            .child(next);
+    }
+
+    /** 客户端：1→2→3→1 循环；服务端 setter 里有 1..3 钳制兜底。 */
+    private static int wrapRadiusFactor(int factor) {
+        return Math.floorMod(factor - 1, 3) + 1;
     }
 
     // ------------------------------------------------------------------

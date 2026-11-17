@@ -457,6 +457,9 @@ public class Config {
     /** AE 采矿枢纽覆盖板的搬运间隔（tick）。 */
     public static int minerIoCoverInterval = 20;
 
+    /** AE 采矿枢纽覆盖板的「采矿区域」档位是否生效（仅采矿场；关闭后 GUI 只存档不应用）。 */
+    public static boolean enableMinerAreaEnhance = true;
+
     // ------------------------------------------------------------------
     // 界面（客户端行为）
     // ------------------------------------------------------------------
@@ -1154,6 +1157,12 @@ public class Config {
             5,
             600,
             "AE 采矿枢纽覆盖板的搬运间隔（tick）。");
+
+        enableMinerAreaEnhance = configuration.getBoolean(
+            "enableMinerAreaEnhance",
+            Configuration.CATEGORY_GENERAL,
+            enableMinerAreaEnhance,
+            "AE 采矿枢纽覆盖板的「采矿区域」档位（原版/×2/×3）是否生效。仅采矿场支持；一次性应用，之后归 GT 自己的 NBT 管（螺丝刀照常可调），重摆机器需重新选档。");
 
         tinkersAutoFill = configuration.getBoolean(
             "tinkersAutoFill",

@@ -10,6 +10,7 @@
 		"MixinGtStockingBus",
 		"MixinGtMultiBlockRecipeCheck",
 		"MixinBioVatVerticalFacing",
+		"MixinMTEOreDrillingPlantBase",
 		"MixinAeStorageBusSupply",
 		"MixinAeNetworkMonitorSupply",
 		"MixinAeNetworkInventorySupply",
