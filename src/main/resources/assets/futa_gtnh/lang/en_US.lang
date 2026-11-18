@@ -820,3 +820,4 @@ futa_gtnh.me_tape.msg.not_packable=Not a packable part (hit the cable or a facad
 futa_gtnh.me_tape.msg.protected=This spot is protected; cannot pack here
 futa_gtnh.me_tape.msg.packed=Packed: %s
 futa_gtnh.me_package.msg.failed=Placement failed; try another spot or face
+futa_gtnh.me_package.msg.restore_failed=Part state could not be restored; placed with defaults (see log)

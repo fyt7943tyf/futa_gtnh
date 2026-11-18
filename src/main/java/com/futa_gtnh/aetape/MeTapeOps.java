@@ -50,7 +50,11 @@ import cpw.mods.fml.common.registry.GameRegistry.UniqueIdentifier;
  * {@code PartPlacement.wrenchLogic}（含 BreakEvent 兼容保护模组）。</li>
  * <li>{@link #place 放回}：方块设备在点击面外侧 setBlock + readFromNBT +
  * markForUpdate；部件设备对齐 {@code PartPlacement.placeItemPart} 的三段式 ——
- * 点击总线本身 / 点击面外侧已有总线 / 在外侧位置新建 multiPart 主方块再贴部件。</li>
+ * 点击总线本身 / 点击面外侧已有总线 / 在外侧位置新建 multiPart 主方块再贴部件。
+ * 部件状态灌回遵守 AE2 的加载契约（{@code GridNode.loadFromNBT} 禁止在入网后调用）：
+ * 已入网的部件走「摘网 → readFromNBT → 重挂」的 AE2 规范顺序，见
+ * {@link #restorePartState}——旧实现在这一步必抛异常且被吞，表现为「放到线缆上
+ * 是空部件且胶带不消耗」。</li>
  * </ul>
  *
  * <p>
@@ -59,12 +63,14 @@ import cpw.mods.fml.common.registry.GameRegistry.UniqueIdentifier;
  * 对应类注释见 {@code ItemMePackingTape}。
  *
  * <p>
- * <b>白名单默认是「存储设备组」</b>（用户选型）：ME 驱动器、ME 接口方块、
- * ME 接口部件、ME 箱子、IO 传输总线。配置项 {@code meTapeWhitelist} 可追加，
- * 格式 {@code block:modid:注册名} 或 {@code part:modid:物品名:子id}。
- * 内建四件方块走 AE2 自己的 definitions API（比写死注册名稳），部件用
- * def 物品栈的「物品+子id」精确匹配 —— AE2 所有部件共用一个物品，只按物品名
- * 匹配会把全部部件都放进来。
+ * <b>白名单 = 存储设备组（内建）+ 按类判定的设备全家桶 + 配置追加</b>。
+ * 内建四件方块（ME 驱动器、ME 接口方块、ME 箱子、IO 传输总线）走 AE2 自己的
+ * definitions API，外加 AE2FC 二合一接口/P2P 二合一；部件全家桶由
+ * {@link #PACKABLE_PART_BASES} 类判定探测（AE2 全部总线/P2P 隧道/接口/发信器/
+ * 平面 + AE2FC 流体版 + 第三方同基类插件）。配置项 {@code meTapeWhitelist} 可追加，
+ * 格式 {@code block:modid:注册名} 或 {@code part:modid:物品名:子id}（子id 可用
+ * {@code *} 通配该物品全部变体）。AE2 所有部件共用一个物品、按子 id 区分，
+ * 匹配一律「物品注册名 + 子id」精确键。
  */
 public final class MeTapeOps {
 
@@ -77,6 +83,21 @@ public final class MeTapeOps {
 
     /** 部件白名单（"modid:物品名#子id" 精确键）。 */
     private static Set<String> whitelistedParts;
+
+    /** 部件白名单通配前缀（"modid:物品名#"，来自 config 的 子id=* 条目）。 */
+    private static Set<String> wildcardPartPrefixes;
+
+    /**
+     * 「可封装部件」的判定基类（用户选型：设备全家桶）：总线三兄弟 + 全部 P2P
+     * 隧道 + 接口 + 电平发信器 + 消灭/成型平面 + 样板中继器。AE2FC 的流体部件
+     * （流体存储/输入/输出总线、二合一接口、P2P 二合一）全是这些基类的子类，
+     * 第三方 AE2 插件的同基类部件也自动覆盖。终端/监视器/线缆/面板不在此列。
+     */
+    private static final Class<?>[] PACKABLE_PART_BASES = { appeng.parts.automation.PartAnnihilationPlane.class,
+        appeng.parts.automation.PartExportBus.class, appeng.parts.automation.PartFormationPlane.class,
+        appeng.parts.automation.PartImportBus.class, appeng.parts.automation.PartLevelEmitter.class,
+        appeng.parts.misc.PartInterface.class, appeng.parts.misc.PartPatternRepeater.class,
+        appeng.parts.misc.PartStorageBus.class, appeng.parts.p2p.PartP2PTunnel.class };
 
     /** @return AE2 是否在场；结果缓存。 */
     public static boolean isAvailable() {
@@ -114,6 +135,7 @@ public final class MeTapeOps {
         if (whitelistedBlocks != null) return;
         whitelistedBlocks = new HashSet<>();
         whitelistedParts = new HashSet<>();
+        wildcardPartPrefixes = new HashSet<>();
 
         IBlocks blocks = AEApi.instance()
             .definitions()
@@ -143,8 +165,47 @@ public final class MeTapeOps {
             addPartByItemName("ae2fc", "part_fluid_p2p_interface", "P2P 二合一部件");
         }
 
+        // 按类判定的全家桶探测（见 PACKABLE_PART_BASES）：一次性覆盖 AE2 全部
+        // 总线/P2P 隧道（含二合一）/接口/发信器/平面 + AE2FC 流体版 + 未来第三方
+        // 同基类插件，不再逐个维护注册名
+        addProbeableParts();
+
         for (String entry : Config.meTapeWhitelist) {
             parseExtraEntry(entry);
+        }
+    }
+
+    /**
+     * 全家桶探测：遍历物品注册表里所有 {@code IPartItem} 的子项，构造一次部件
+     * 对象（纯内存操作，不入世界不进网格），命中 {@link #PACKABLE_PART_BASES}
+     * 任一基类就把该子项的精确键加入白名单。构造探测失败的第三方部件安静跳过。
+     */
+    private static void addProbeableParts() {
+        java.util.List<ItemStack> variants = new java.util.ArrayList<>();
+        java.util.Iterator<?> items = net.minecraft.item.Item.itemRegistry.iterator();
+        while (items.hasNext()) {
+            Object entry = items.next();
+            if (!(entry instanceof net.minecraft.item.Item item) || !(item instanceof IPartItem partItem)) continue;
+            variants.clear();
+            try {
+                item.getSubItems(item, null, variants);
+            } catch (Throwable failure) {
+                continue;
+            }
+            for (ItemStack variant : variants) {
+                try {
+                    IPart part = partItem.createPartFromItemStack(variant.copy());
+                    if (part == null) continue;
+                    for (Class<?> base : PACKABLE_PART_BASES) {
+                        if (base.isInstance(part)) {
+                            whitelistedParts.add(partKey(variant));
+                            break;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                    // 探测性构造失败（第三方部件对空 NBT/环境有额外假设）：跳过该子项
+                }
+            }
         }
     }
 
@@ -187,7 +248,7 @@ public final class MeTapeOps {
         }
     }
 
-    /** 配置追加条目：block:modid:注册名 / part:modid:物品名:子id */
+    /** 配置追加条目：block:modid:注册名 / part:modid:物品名:子id（子id 可为 * 通配全部变体） */
     private static void parseExtraEntry(String entry) {
         String trimmed = entry.trim();
         if (trimmed.isEmpty()) return;
@@ -198,10 +259,15 @@ public final class MeTapeOps {
             else FutaGtnhMod.LOG.warn("ME 胶带：白名单条目没解析到方块：{}", trimmed);
         } else if (parts.length == 4 && "part".equals(parts[0])) {
             net.minecraft.item.Item item = GameRegistry.findItem(parts[1], parts[2]);
-            if (item != null) whitelistedParts.add(parts[1] + ":" + parts[2] + "#" + parts[3]);
-            else FutaGtnhMod.LOG.warn("ME 胶带：白名单条目没解析到物品：{}", trimmed);
+            if (item == null) {
+                FutaGtnhMod.LOG.warn("ME 胶带：白名单条目没解析到物品：{}", trimmed);
+            } else if ("*".equals(parts[3])) {
+                wildcardPartPrefixes.add(parts[1] + ":" + parts[2] + "#");
+            } else {
+                whitelistedParts.add(parts[1] + ":" + parts[2] + "#" + parts[3]);
+            }
         } else {
-            FutaGtnhMod.LOG.warn("ME 胶带：白名单条目格式不对（block:modid:注册名 或 part:modid:物品名:子id）：{}", trimmed);
+            FutaGtnhMod.LOG.warn("ME 胶带：白名单条目格式不对（block:modid:注册名 或 part:modid:物品名:子id[|*]）：{}", trimmed);
         }
     }
 
@@ -210,7 +276,10 @@ public final class MeTapeOps {
     }
 
     private static boolean isPartWhitelisted(ItemStack def) {
-        return whitelistedParts.contains(partKey(def));
+        String key = partKey(def);
+        if (whitelistedParts.contains(key)) return true;
+        int hash = key.indexOf('#');
+        return hash >= 0 && wildcardPartPrefixes.contains(key.substring(0, hash + 1));
     }
 
     /** @return 部件 def 物品栈的精确键（物品注册名 + 子id）。 */
@@ -506,13 +575,50 @@ public final class MeTapeOps {
         IPartHost host = (IPartHost) tile;
         if (!host.canAddPart(def, side)) return false;
 
+        // 提交点：addPart 返回非 null 即视为部件已放进总线（消耗由 place() 统一处理）。
+        // 之后的状态恢复一律 best-effort——旧实现里恢复阶段的异常会把「部件已放置
+        // 但胶带未消耗」的死状态整个吞进包处理器的 catch(Throwable)，连提示都没有。
         ForgeDirection placed = host.addPart(def.copy(), side, player);
         if (placed == null) return false;
         IPart part = host.getPart(placed);
-        if (part == null) return false;
-        part.readFromNBT(extra);
+        if (part != null) restorePartState(tile, part, extra, player);
         host.markForSave();
         return true;
+    }
+
+    /**
+     * 把封装时保存的部件状态灌回去，且必须遵守 AE2 的加载契约。
+     *
+     * <p>
+     * AE2 的规范顺序是「构造 → readFromNBT → addToWorld」：节点的
+     * {@code loadFromNBT} 在 {@code myGrid != null} 时直接抛
+     * {@code IllegalStateException("Loading data after part of a grid")}。点击
+     * <b>已有总线</b>时 {@code host.addPart} 已经把部件入网，直接
+     * {@code part.readFromNBT(extra)} 必炸——恢复被中断、异常被包处理器吞掉，
+     * 表现为「放了空内容的部件且胶带不消耗」。这里按 AE2 自己的加载路径重放：
+     * 已入网的部件先 {@code removeFromWorld()} 摘网（节点销毁）→ 恢复 NBT
+     * （{@code AENetworkProxy} 在节点不存在时只是暂存节点数据，子类状态本次就恢复）
+     * → {@code addToWorld()} 重新入网（建节点时补加载暂存数据）。新建总线
+     * （onReady 还没跑、未入网）保持 AE2 原生顺序，直接恢复即可。
+     */
+    private static void restorePartState(TileEntity tile, IPart part, NBTTagCompound extra, EntityPlayer player) {
+        try {
+            boolean joined = part.getGridNode() != null;
+            if (joined) part.removeFromWorld();
+            part.readFromNBT(extra);
+            if (joined && part.getGridNode() == null) part.addToWorld();
+            // addPart 内部的 markForUpdate 发生在状态恢复之前（默认态）——恢复完
+            // 再同步一次，客户端立刻拿到真实内容，不用等重登
+            if (tile instanceof AEBaseTile baseTile) baseTile.markForUpdate();
+        } catch (Throwable failure) {
+            // 残余机型恢复失败：部件照常保留（默认状态），胶带照常消耗，日志留堆栈定位
+            FutaGtnhMod.LOG.warn(
+                "ME 胶带：部件状态恢复失败（{}），部件已按默认状态放置",
+                part.getClass()
+                    .getName(),
+                failure);
+            notify(player, "futa_gtnh.me_package.msg.restore_failed");
+        }
     }
 
     /** 在空位放下 AE 的 multiPart 主方块（线缆总线），返回它的 IPartHost。 */
