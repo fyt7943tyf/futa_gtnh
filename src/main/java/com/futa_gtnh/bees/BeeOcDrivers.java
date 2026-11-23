@@ -1,9 +1,6 @@
 package com.futa_gtnh.bees;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 import net.minecraft.item.ItemStack;
 import net.minecraft.tileentity.TileEntity;
@@ -147,7 +144,9 @@ public final class BeeOcDrivers {
 
         @Callback(doc = "function():string -- JSON list of current candidate UIDs")
         public Object[] candidates(Context context, Arguments args) throws ReflectiveOperationException {
-            return new Object[] { MutatronAccess.JSON.toJson(candidateSlots(liveTile()).keySet()) };
+            return new Object[] { MutatronAccess.JSON.toJson(
+                access.candidates(liveTile())
+                    .keySet()) };
         }
 
         @Callback(
@@ -170,25 +169,17 @@ public final class BeeOcDrivers {
             if (!princess.equals(access.primary(p)) || !drone.equals(access.primary(d))) {
                 return new Object[] { false, "Parents in the machine differ from the request" };
             }
-            List<Integer> matches = candidateSlots(live).get(target);
-            if (matches == null || !access.hasCandidate(live, target, p, d)) {
-                return new Object[] { false, "Target UID is not in the current candidate list" };
+            if (!access.hasCandidate(live, target, p, d)) {
+                return new Object[] { false, "Live parents do not allow " + target + " in this mutatron" };
             }
-            access.select(live, matches.get(0));
+            // Gendustry rebuilds the selector slots and clears the old selection in markDirty().
+            live.markDirty();
+            Map<String, Integer> candidates = access.candidates(live);
+            Integer match = candidates.get(target);
+            if (match == null) return new Object[] { false,
+                "Refreshed mutatron selectors lack " + target + "; candidates: " + candidates.keySet() };
+            access.select(live, match);
             return new Object[] { true };
-        }
-
-        private Map<String, List<Integer>> candidateSlots(TileEntity live) throws ReflectiveOperationException {
-            Map<String, List<Integer>> result = new TreeMap<>();
-            for (Map.Entry<?, ?> entry : access.candidates(live)
-                .entrySet()) {
-                if (entry.getKey() instanceof Integer slot && entry.getValue() instanceof ItemStack stack) {
-                    String uid = access.primary(stack);
-                    if (uid != null) result.computeIfAbsent(uid, key -> new ArrayList<>())
-                        .add(slot);
-                }
-            }
-            return result;
         }
     }
 

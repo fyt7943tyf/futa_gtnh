@@ -3,13 +3,20 @@ package com.futa_gtnh.bees;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
+import net.minecraft.inventory.InventoryBasic;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.launchwrapper.Launch;
 import net.minecraft.launchwrapper.LaunchClassLoader;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
 import net.minecraft.tileentity.TileEntity;
 
 import cpw.mods.fml.common.Loader;
@@ -48,6 +55,7 @@ public final class BeeOcCallbackCheck {
         API.network = Network$.MODULE$;
         verify(new BeeOcDrivers.Mutatron(new TileEntity(), null), "futa_mutatron");
         verify(new BeeOcDrivers.Engineer(new TileEntity()), "futa_bee_engineer");
+        verifyMutatronPreview();
         System.out.println("OC compound adapter dispatches beePosition on both concrete drivers");
     }
 
@@ -64,5 +72,34 @@ public final class BeeOcCallbackCheck {
         } catch (IllegalStateException expected) {
             if (!"Bee machine is no longer attached".equals(expected.getMessage())) throw expected;
         }
+    }
+
+    private static void verifyMutatronPreview() {
+        String space = "gregtech.bee.speciesSpace";
+        InventoryBasic inventory = new InventoryBasic("mutatron", false, 10);
+        inventory.setInventorySlotContents(0, preview("forestry.speciesHeroic", "forestry.speciesHeroic"));
+        inventory.setInventorySlotContents(4, preview(space, space));
+        inventory.setInventorySlotContents(5, preview("forestry.speciesHeroic", space));
+        Map<String, Integer> slots = MutatronAccess.readSelectors(inventory, Arrays.asList(4, 5, 6, 7, 8, 9));
+        if (!slots.equals(Collections.singletonMap(space, 4))) {
+            throw new AssertionError("The native selector slot must resolve the saved Space queen preview: " + slots);
+        }
+        System.out.println("Mutatron selector reads the Space queen preview directly from native slot 4");
+    }
+
+    private static ItemStack preview(String primary, String secondary) {
+        ItemStack stack = new ItemStack((Item) null);
+        NBTTagCompound root = new NBTTagCompound();
+        NBTTagCompound genome = new NBTTagCompound();
+        NBTTagList chromosomes = new NBTTagList();
+        NBTTagCompound species = new NBTTagCompound();
+        species.setByte("Slot", (byte) 0);
+        species.setString("UID0", primary);
+        species.setString("UID1", secondary);
+        chromosomes.appendTag(species);
+        genome.setTag("Chromosomes", chromosomes);
+        root.setTag("Genome", genome);
+        stack.setTagCompound(root);
+        return stack;
     }
 }

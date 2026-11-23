@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -19,7 +20,10 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
+import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraftforge.common.DimensionManager;
 
@@ -36,7 +40,6 @@ final class MutatronAccess {
     private final Class<?> alleleType = Class.forName("forestry.api.genetics.IAllele");
     private final Class<?> beeType = Class.forName("forestry.api.apiculture.IBee");
     private final Class<?> genomeType = Class.forName("forestry.api.apiculture.IBeeGenome");
-    private final Method getCandidates = advanced.getMethod("getPossibleMutations");
     private final Method setMutation = advanced.getMethod("setMutation", int.class);
     private final Method getParent1 = advanced.getMethod("getParent1");
     private final Method getParent2 = advanced.getMethod("getParent2");
@@ -87,8 +90,42 @@ final class MutatronAccess {
         return getProgress.invoke(tile);
     }
 
-    Map<?, ?> candidates(TileEntity tile) throws ReflectiveOperationException {
-        return (Map<?, ?>) getCandidates.invoke(tile);
+    Map<String, Integer> candidates(TileEntity tile) throws ReflectiveOperationException {
+        Object selectors = selectors(tile);
+        int size = (int) seqSize.invoke(selectors);
+        List<Integer> slots = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            slots.add((int) seqAt.invoke(selectors, i));
+        }
+        return readSelectors((IInventory) tile, slots);
+    }
+
+    private Object selectors(TileEntity tile) throws ReflectiveOperationException {
+        Object slots = tile.getClass()
+            .getMethod("slots")
+            .invoke(tile);
+        return slots.getClass()
+            .getMethod("selectors")
+            .invoke(slots);
+    }
+
+    static Map<String, Integer> readSelectors(IInventory inventory, List<Integer> slots) {
+        Map<String, Integer> result = new TreeMap<>();
+        for (int slot : slots) {
+            ItemStack preview = inventory.getStackInSlot(slot);
+            if (preview == null || preview.stackSize <= 0 || !preview.hasTagCompound()) continue;
+            NBTTagList chromosomes = preview.getTagCompound()
+                .getCompoundTag("Genome")
+                .getTagList("Chromosomes", 10);
+            for (int i = 0; i < chromosomes.tagCount(); i++) {
+                NBTTagCompound chromosome = chromosomes.getCompoundTagAt(i);
+                if (!chromosome.hasKey("Slot", 99) || chromosome.getInteger("Slot") != 0) continue;
+                String uid = chromosome.getString("UID0");
+                if (!uid.isEmpty() && uid.equals(chromosome.getString("UID1"))) result.putIfAbsent(uid, slot);
+                break;
+            }
+        }
+        return result;
     }
 
     ItemStack parent(TileEntity tile, boolean princess) throws ReflectiveOperationException {
@@ -117,8 +154,8 @@ final class MutatronAccess {
             .invoke(tile);
         Object valid = getValidMutations.invoke(helper, princess, drone, housing);
         int size = (int) seqSize.invoke(valid);
-        // The advanced machine has six selector slots.
-        for (int i = 0; i < Math.min(size, 6); i++) {
+        int selectorCount = (int) seqSize.invoke(selectors(tile));
+        for (int i = 0; i < Math.min(size, selectorCount); i++) {
             if (target.equals(uid(getMutationSpecies.invoke(helper, seqAt.invoke(valid, i))))) return true;
         }
         return false;
