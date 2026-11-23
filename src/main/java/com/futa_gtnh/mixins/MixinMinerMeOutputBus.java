@@ -22,7 +22,7 @@ public abstract class MixinMinerMeOutputBus implements MinerMeOutputBus {
     @Override
     @SuppressWarnings("unchecked")
     public int futa$drainPendingItems(int budget, ToIntFunction<IAEItemStack> insert) {
-        if (!(provider instanceof PendingCache<?> pending)) return 0;
+        if (!(provider instanceof PendingCache<?>pending)) return 0;
         return ((PendingCache<IAEItemStack>) pending).futa$drainPending(budget, insert);
     }
 }

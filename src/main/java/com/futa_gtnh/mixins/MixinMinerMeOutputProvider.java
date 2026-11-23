@@ -55,7 +55,8 @@ public abstract class MixinMinerMeOutputProvider<T extends IAEStack<T>> implemen
                 int offered = (int) Math.min(amount, budget - moved[0]);
                 if (offered <= 0) return amount;
                 // The provider's cache key must keep its original identity and tags.
-                T stack = key.copy().setStackSize(offered);
+                T stack = key.copy()
+                    .setStackSize(offered);
                 int accepted = Math.max(0, Math.min(offered, insert.applyAsInt(stack)));
                 moved[0] += accepted;
                 return amount - accepted;

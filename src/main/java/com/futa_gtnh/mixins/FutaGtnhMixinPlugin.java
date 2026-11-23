@@ -389,7 +389,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         if ("com.futa_gtnh.mixins.MixinMTEOreDrillingPlantBase".equals(mixinClassName))
             return drillerRadiusSystemPresent();
         if ("com.futa_gtnh.mixins.MixinMinerMeOutputBus".equals(mixinClassName)
-            || "com.futa_gtnh.mixins.MixinMinerMeOutputProvider".equals(mixinClassName)) return minerMeOutputCompatible();
+            || "com.futa_gtnh.mixins.MixinMinerMeOutputProvider".equals(mixinClassName))
+            return minerMeOutputCompatible();
         if ("com.futa_gtnh.mixins.MixinAeStorageBusSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkMonitorSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkInventorySupply".equals(mixinClassName)) return true;
