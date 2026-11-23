@@ -105,8 +105,8 @@ public final class BeeOcDrivers {
             return 10;
         }
 
-        @Callback(doc = "function():number,number,number,number -- World x, y, z and dimension")
-        public Object[] beePosition(Context context, Arguments args) {
+        // OC's compound adapter dispatches callbacks by the concrete environment class.
+        final Object[] position() {
             TileEntity live = liveTile();
             return new Object[] { live.xCoord, live.yCoord, live.zCoord, live.getWorldObj().provider.dimensionId };
         }
@@ -119,6 +119,11 @@ public final class BeeOcDrivers {
         Mutatron(TileEntity tile, MutatronAccess access) {
             super(tile, "futa_mutatron");
             this.access = access;
+        }
+
+        @Callback(doc = "function():number,number,number,number -- World x, y, z and dimension")
+        public Object[] beePosition(Context context, Arguments args) {
+            return position();
         }
 
         @Callback(doc = "function():string -- Fingerprint of the active bee mutation catalog")
@@ -190,6 +195,11 @@ public final class BeeOcDrivers {
 
         Engineer(TileEntity tile) {
             super(tile, "futa_bee_engineer");
+        }
+
+        @Callback(doc = "function():number,number,number,number -- World x, y, z and dimension")
+        public Object[] beePosition(Context context, Arguments args) {
+            return position();
         }
 
         @Callback(

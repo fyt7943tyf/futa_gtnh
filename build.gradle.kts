@@ -469,6 +469,25 @@ tasks.register<JavaExec>("verifyStorageBusWithoutDrawers") {
 }
 tasks.named("check") { dependsOn("verifyStorageBusWithoutDrawers") }
 
+val compileBeeOcCheck = tasks.register<JavaCompile>("compileBeeOcCheck") {
+    dependsOn(tasks.named("classes"))
+    source(fileTree("tools/bee-oc-check") { include("**/*.java") })
+    classpath = sourceSets["main"].output +
+        sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+    destinationDirectory.set(layout.buildDirectory.dir("bee-oc-check/classes"))
+    options.compilerArgs.add("-proc:none")
+}
+
+tasks.register<JavaExec>("verifyBeeOcCallbacks") {
+    group = "verification"
+    description = "Checks position callbacks through OpenComputers' actual compound adapter"
+    dependsOn(compileBeeOcCheck)
+    mainClass.set("com.futa_gtnh.bees.BeeOcCallbackCheck")
+    classpath = files(compileBeeOcCheck.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifyBeeOcCallbacks") }
+
 // Botania is optional at runtime; only these checks need its concrete classes.
 val botaniaAuraCheckDependencies = configurations.create("botaniaAuraCheckDependencies") {
     isTransitive = false
