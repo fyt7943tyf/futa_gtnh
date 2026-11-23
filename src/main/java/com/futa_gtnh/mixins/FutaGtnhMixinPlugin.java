@@ -235,6 +235,49 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         }
     }
 
+    private static Boolean minerMeOutputCompatible;
+
+    private static boolean minerMeOutputCompatible() {
+        if (minerMeOutputCompatible != null) return minerMeOutputCompatible;
+        if (Launch.classLoader == null) return false;
+        String outputMe = "gregtech/common/tileentities/machines/outputme/";
+        String providerName = outputMe + "base/MTEHatchOutputMEBase";
+        String cacheName = outputMe + "util/AECacheCounter";
+        String environmentName = providerName + "$Environment";
+        try {
+            ClassNode bus = readSkeleton(outputMe + "MTEHatchOutputBusME");
+            ClassNode provider = readSkeleton(providerName);
+            ClassNode cache = readSkeleton(cacheName);
+            ClassNode environment = readSkeleton(environmentName);
+            if (bus == null || provider == null || cache == null || environment == null) return false;
+            return minerMeOutputCompatible = hasMinerMeField(bus, "provider", "L" + providerName + ";")
+                && hasMinerMeField(provider, "cache", "L" + cacheName + ";")
+                && hasMinerMeField(provider, "env", "L" + environmentName + ";")
+                && hasMinerMeMethod(provider, "flushCachedStack", "()V")
+                && hasMinerMeMethod(cache, "isEmpty", "()Z")
+                && hasMinerMeMethod(cache, "updateAll", "(L" + cacheName + "$EntryProcessor;)V")
+                && hasMinerMeMethod(environment, "dispatchMarkDirty", "()V");
+        } catch (Exception error) {
+            org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                .warn("Unable to inspect GregTech ME output bus; wireless cache drain disabled", error);
+            return false;
+        }
+    }
+
+    private static boolean hasMinerMeField(ClassNode node, String name, String descriptor) {
+        for (FieldNode field : node.fields) {
+            if (name.equals(field.name) && descriptor.equals(field.desc)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasMinerMeMethod(ClassNode node, String name, String descriptor) {
+        for (MethodNode method : node.methods) {
+            if (name.equals(method.name) && descriptor.equals(method.desc)) return true;
+        }
+        return false;
+    }
+
     private static boolean tinkersPresent() {
         if (present) return true;
 
@@ -345,6 +388,8 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         if ("com.futa_gtnh.mixins.MixinBioVatVerticalFacing".equals(mixinClassName)) return bioVatNeedsVerticalFix();
         if ("com.futa_gtnh.mixins.MixinMTEOreDrillingPlantBase".equals(mixinClassName))
             return drillerRadiusSystemPresent();
+        if ("com.futa_gtnh.mixins.MixinMinerMeOutputBus".equals(mixinClassName)
+            || "com.futa_gtnh.mixins.MixinMinerMeOutputProvider".equals(mixinClassName)) return minerMeOutputCompatible();
         if ("com.futa_gtnh.mixins.MixinAeStorageBusSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkMonitorSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkInventorySupply".equals(mixinClassName)) return true;

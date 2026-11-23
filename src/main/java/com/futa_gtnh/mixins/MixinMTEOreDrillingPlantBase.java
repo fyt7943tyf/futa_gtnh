@@ -7,7 +7,11 @@ import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import com.futa_gtnh.miner.CoverMinerIo;
 import com.futa_gtnh.miner.MinerAreaEnhance;
 
 import gregtech.api.objects.GTChunkManager;
@@ -48,6 +52,11 @@ public abstract class MixinMTEOreDrillingPlantBase implements MinerAreaEnhance {
 
     @Shadow
     private void createInitialWorkingChunk() {}
+
+    @Inject(method = "tryProcessOreList()Z", at = @At("HEAD"), require = 0)
+    private void futa$refillDrillingFluid(CallbackInfoReturnable<Boolean> cir) {
+        CoverMinerIo.refillBeforeMining((MTEOreDrillingPlantBase) (Object) this);
+    }
 
     @Override
     @Unique

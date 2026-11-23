@@ -11,6 +11,8 @@
 		"MixinGtMultiBlockRecipeCheck",
 		"MixinBioVatVerticalFacing",
 		"MixinMTEOreDrillingPlantBase",
+		"MixinMinerMeOutputBus",
+		"MixinMinerMeOutputProvider",
 		"MixinAeStorageBusSupply",
 		"MixinAeNetworkMonitorSupply",
 		"MixinAeNetworkInventorySupply",

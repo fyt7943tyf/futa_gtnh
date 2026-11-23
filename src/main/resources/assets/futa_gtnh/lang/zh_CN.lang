@@ -822,7 +822,7 @@ futa_gtnh.me_package.msg.restore_failed=部件状态恢复失败，已按默认�
 # 矿机一站式部署（采矿场/油气钻机）
 item.futa_gtnh.miner_deployer.name=矿机一站式部署器
 item.futa_gtnh.miner_io_cover.name=AE 采矿枢纽覆盖板
-gt.blockmachines.futa_gtnh.free_maintenance.lv.name=免料自动维护仓
+gt.blockmachines.futa_gtnh.free_maintenance.lv.name=旧版维护仓
 futa_gtnh.miner.sender=发信器
 futa_gtnh.miner.sender.none=<未选发信器>
 futa_gtnh.miner.link.ok=正常

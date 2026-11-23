@@ -3,6 +3,7 @@ package com.futa_gtnh.miner;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.ToIntFunction;
 
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTBase;
@@ -19,6 +20,7 @@ import com.futa_gtnh.aewireless.AeSignalRegistry;
 import com.futa_gtnh.aewireless.AeSignalTeam;
 import com.futa_gtnh.aewireless.TileAeSignalTransmitter;
 
+import appeng.api.networking.energy.IEnergySource;
 import appeng.api.networking.security.MachineSource;
 import appeng.api.networking.storage.IStorageGrid;
 import appeng.api.storage.IMEMonitor;
@@ -43,6 +45,7 @@ import gregtech.api.metatileentity.implementations.MTEHatchOutput;
 import gregtech.api.metatileentity.implementations.MTEHatchOutputBus;
 import gregtech.api.util.GTModHandler;
 import gregtech.api.util.GTUtility;
+import gregtech.common.tileentities.machines.MTEHatchInputME;
 import gregtech.common.tileentities.machines.multi.MTEOilDrillBase;
 import gregtech.common.tileentities.machines.multi.MTEOreDrillingPlantBase;
 
@@ -52,7 +55,7 @@ import gregtech.common.tileentities.machines.multi.MTEOreDrillingPlantBase;
  * 接管整台机器的物料进出：
  *
  * <ul>
- * <li><b>补给</b>：采矿场 → 钻井液补进输入仓（缓冲量见 {@link Config#minerIoFluidBuffer}）、
+ * <li><b>补给</b>：采矿场 → 钻井液补满输入仓、
  * 采矿管道补进输入总线（{@link Config#minerIoPipeBuffer}）；油气钻机 → 只补采矿管道；</li>
  * <li><b>回收</b>：输出总线里的矿物、输出仓里的油气，全部泵回 ME 网络。</li>
  * </ul>
@@ -111,6 +114,7 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
 
     private int targetDim = 0, targetX = 0, targetY = 0, targetZ = 0;
     private boolean hasTarget = false;
+    private int pendingDrillingFluid;
 
     // 运行期状态（服务端更新，GUI 通过 sync value 展示）
     private LinkState linkState = LinkState.NOT_SET;
@@ -206,6 +210,19 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
             linkState = LinkState.NOT_SET;
             return;
         }
+        TileAeSignalTransmitter transmitter = resolveLinkedTransmitter(coverable);
+        if (transmitter == null) return;
+
+        long moved;
+        if (mte instanceof MTEOreDrillingPlantBase ore) {
+            moved = runOreDrillIo(ore, transmitter);
+        } else {
+            moved = runOilDrillIo((MTEOilDrillBase) mte, transmitter);
+        }
+        if (moved > 0) lastMoved = moved;
+    }
+
+    private TileAeSignalTransmitter resolveLinkedTransmitter(ICoverable coverable) {
         UUID machineOwner = coverable instanceof IGregTechTileEntity gte ? gte.getOwnerUuid() : null;
 
         // 未绑定且同队伍发信器唯一 → 自动绑定（零配置路径）
@@ -223,41 +240,22 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
 
         if (!hasTarget) {
             linkState = LinkState.NOT_SET;
-            lastMoved = -1;
-            return;
-        }
-        if (transmitter == null) {
+        } else if (transmitter == null) {
             linkState = LinkState.NOT_FOUND;
-            lastMoved = -1;
-            return;
-        }
-        if (!AeSignalTeam.sameTeam(machineOwner, transmitter.getOwner())) {
+        } else if (!AeSignalTeam.sameTeam(machineOwner, transmitter.getOwner())) {
             linkState = LinkState.NO_TEAM;
-            lastMoved = -1;
-            return;
-        }
-        switch (transmitter.getState()) {
-            case OFFLINE -> {
-                linkState = LinkState.OFFLINE;
-                lastMoved = -1;
-                return;
-            }
-            case CONFLICT -> {
-                linkState = LinkState.CONFLICT;
-                lastMoved = -1;
-                return;
-            }
-            default -> {}
-        }
-
-        linkState = LinkState.OK;
-        long moved;
-        if (mte instanceof MTEOreDrillingPlantBase ore) {
-            moved = runOreDrillIo(ore, transmitter);
         } else {
-            moved = runOilDrillIo((MTEOilDrillBase) mte, transmitter);
+            switch (transmitter.getState()) {
+                case OFFLINE -> linkState = LinkState.OFFLINE;
+                case CONFLICT -> linkState = LinkState.CONFLICT;
+                default -> {
+                    linkState = LinkState.OK;
+                    return transmitter;
+                }
+            }
         }
-        if (moved > 0) lastMoved = moved;
+        lastMoved = -1;
+        return null;
     }
 
     /** @return 本次搬运总量（mB + 件数按各自口径相加，>0 即有过实际搬运）。 */
@@ -280,35 +278,49 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
     // 补给：钻井液
     // ------------------------------------------------------------------
 
+    /** Refill before GT's first fluid check, including runs with output protection enabled. */
+    public static void refillBeforeMining(MTEOreDrillingPlantBase ore) {
+        IGregTechTileEntity base = ore.getBaseMetaTileEntity();
+        if (base == null || !base.isServerSide()) return;
+        for (ForgeDirection side : ForgeDirection.VALID_DIRECTIONS) {
+            if (base.getCoverAtSide(side) instanceof CoverMinerIo cover) {
+                TileAeSignalTransmitter transmitter = cover.resolveLinkedTransmitter(base);
+                if (transmitter != null) {
+                    long moved = cover.supplyDrillingFluid(ore, transmitter);
+                    if (moved > 0) cover.lastMoved = moved;
+                }
+                return;
+            }
+        }
+    }
+
     private long supplyDrillingFluid(MTEOreDrillingPlantBase ore, TileAeSignalTransmitter transmitter) {
-        // GT 把钻井液注册成 ItemList 上的静态 Fluid 字段（配方逻辑同款引用）
         Fluid drilling = ItemList.sDrillingFluid;
         if (drilling == null) return 0;
 
-        List<MTEHatchInput> hatches = alive(ore.mInputHatches);
-        if (hatches.isEmpty()) return 0;
+        int previousPending = pendingDrillingFluid;
+        long moved = 0;
+        for (MTEHatchInput hatch : alive(ore.mInputHatches)) {
+            if (hatch instanceof MTEHatchInputME) continue;
+            int space = hatch.fill(new FluidStack(drilling, Integer.MAX_VALUE), false);
+            if (space <= 0) continue;
 
-        int have = 0;
-        for (MTEHatchInput hatch : hatches) {
-            FluidStack tank = hatch.mFluid;
-            if (tank != null && tank.getFluid() == drilling) have += tank.amount;
+            // Retrying a remainder from an earlier fill takes precedence over another withdrawal.
+            if (pendingDrillingFluid == 0) {
+                IAEFluidStack extracted = extractFluid(transmitter, new FluidStack(drilling, space));
+                if (extracted == null || extracted.getStackSize() <= 0) break;
+                pendingDrillingFluid = (int) extracted.getStackSize();
+            }
+            int filled = hatch.fill(new FluidStack(drilling, Math.min(space, pendingDrillingFluid)), true);
+            pendingDrillingFluid -= filled;
+            moved += filled;
         }
-        int deficit = Config.minerIoFluidBuffer - have;
-        if (deficit <= 0) return 0;
-        int want = Math.min(deficit, MAX_FLUID_PER_PASS);
-
-        IAEFluidStack extracted = extractFluid(transmitter, new FluidStack(drilling, want));
-        if (extracted == null) return 0;
-
-        int leftover = (int) extracted.getStackSize();
-        for (MTEHatchInput hatch : hatches) {
-            if (leftover <= 0) break;
-            FluidStack tank = hatch.mFluid;
-            if (tank != null && tank.getFluid() != drilling) continue; // 仓里已是别的流体，不动
-            leftover -= hatch.fill(new FluidStack(drilling, leftover), true);
+        if (pendingDrillingFluid > 0) {
+            IAEFluidStack rejected = injectFluid(transmitter, new FluidStack(drilling, pendingDrillingFluid));
+            pendingDrillingFluid = rejected == null ? 0 : (int) rejected.getStackSize();
         }
-        if (leftover > 0) injectFluid(transmitter, new FluidStack(drilling, leftover)); // 填不完的退回网络
-        return extracted.getStackSize() - leftover;
+        if (pendingDrillingFluid != previousPending) markDirty();
+        return moved;
     }
 
     // ------------------------------------------------------------------
@@ -361,15 +373,42 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
     // ------------------------------------------------------------------
 
     private long drainOutputBuses(List<MTEHatchOutputBus> buses, TileAeSignalTransmitter transmitter) {
+        if (buses.isEmpty()) return 0;
+        IMEMonitor<IAEItemStack> monitor;
+        IEnergySource energy;
+        try {
+            AENetworkProxy proxy = transmitter.getProxy();
+            if (!proxy.isActive()) return 0;
+            monitor = itemMonitor(proxy);
+            if (monitor == null) return 0;
+            energy = proxy.getEnergy();
+        } catch (GridAccessException | IllegalStateException ignored) {
+            return 0;
+        }
+
+        MachineSource source = new MachineSource(transmitter);
+        ToIntFunction<IAEItemStack> insert = stack -> {
+            long offered = stack.getStackSize();
+            IAEItemStack rest = Platform.poweredInsert(energy, monitor, stack, source);
+            long rejected = rest == null ? 0 : rest.getStackSize();
+            return (int) Math.max(0, Math.min(offered, offered - rejected));
+        };
         long moved = 0;
         for (MTEHatchOutputBus bus : alive(buses)) {
+            if (bus instanceof MinerMeOutputBus meBus) {
+                moved += meBus.futa$drainPendingItems(MAX_ITEMS_PER_PASS, insert);
+                continue;
+            }
+
             IGregTechTileEntity base = bus.getBaseMetaTileEntity();
             for (int i = 0; i < base.getSizeInventory(); i++) {
                 ItemStack slot = base.getStackInSlot(i);
-                if (slot == null) continue;
-                int want = Math.min(slot.stackSize, MAX_ITEMS_PER_PASS);
-                IAEItemStack rejected = injectItems(transmitter, GTUtility.copyAmount(want, slot));
-                int accepted = want - (rejected == null ? 0 : (int) rejected.getStackSize());
+                // GT ME buses disallow slot extraction, including when their cache bridge is unavailable.
+                if (slot == null || slot.stackSize <= 0 || !bus.allowPullStack(base, i, base.getFrontFacing(), slot))
+                    continue;
+                IAEItemStack offer = AEItemStack.create(slot);
+                if (offer == null) continue;
+                int accepted = insert.applyAsInt(offer.setStackSize(Math.min(slot.stackSize, MAX_ITEMS_PER_PASS)));
                 if (accepted <= 0) continue;
                 base.decrStackSize(i, accepted);
                 moved += accepted;
@@ -470,16 +509,15 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
     }
 
     private IAEFluidStack injectFluid(TileAeSignalTransmitter transmitter, FluidStack fluid) {
-        if (fluid == null) return null;
+        IAEFluidStack input = fluid == null ? null : AEFluidStack.create(fluid);
+        if (input == null) return null;
         try {
             AENetworkProxy proxy = transmitter.getProxy();
             IMEMonitor<IAEFluidStack> monitor = fluidMonitor(proxy);
-            if (monitor == null) return null;
-            IAEFluidStack input = AEFluidStack.create(fluid);
-            if (input == null) return null;
+            if (monitor == null) return input;
             return Platform.poweredInsert(proxy.getEnergy(), monitor, input, new MachineSource(transmitter));
         } catch (GridAccessException | IllegalStateException ignored) {
-            return null;
+            return input;
         }
     }
 
@@ -512,6 +550,7 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
             tag.setInteger("y", targetY);
             tag.setInteger("z", targetZ);
         }
+        if (pendingDrillingFluid > 0) tag.setInteger("pendingDrillingFluid", pendingDrillingFluid);
         tag.setInteger("radiusFactor", radiusFactor);
         return tag;
     }
@@ -526,6 +565,7 @@ public class CoverMinerIo extends gregtech.common.covers.Cover {
             targetY = tag.getInteger("y");
             targetZ = tag.getInteger("z");
         }
+        pendingDrillingFluid = Math.max(0, tag.getInteger("pendingDrillingFluid"));
         int factor = tag.getInteger("radiusFactor");
         radiusFactor = factor >= 1 && factor <= 3 ? factor : 1;
     }

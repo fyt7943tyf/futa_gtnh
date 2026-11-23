@@ -825,7 +825,7 @@ futa_gtnh.me_package.msg.restore_failed=Part state could not be restored; placed
 # Miner one-stop deployer (mining farm / oil-gas drill rig)
 item.futa_gtnh.miner_deployer.name=Miner One-Stop Deployer
 item.futa_gtnh.miner_io_cover.name=AE Miner IO Cover
-gt.blockmachines.futa_gtnh.free_maintenance.lv.name=Free Auto Maintenance Hatch
+gt.blockmachines.futa_gtnh.free_maintenance.lv.name=Legacy Maintenance Hatch
 futa_gtnh.miner.sender=Transmitter
 futa_gtnh.miner.sender.none=<no transmitter selected>
 futa_gtnh.miner.link.ok=OK

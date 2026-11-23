@@ -13,6 +13,7 @@ import net.minecraftforge.common.util.ForgeDirection;
 
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.MetaTileEntity;
+import gregtech.api.metatileentity.implementations.MTEHatchMaintenance;
 
 /**
  * 采矿场/油气钻机的结构布局与逐格摆放。
@@ -54,7 +55,7 @@ public final class MinerStructure {
         /** 油气出口仓（仅油气钻机）。 */
         OUTPUT_HATCH,
 
-        /** 免料自动维护仓。 */
+        /** 普通 GT 维护仓。 */
         MAINTENANCE,
 
         /** 能源仓（玩家备料才摆）。 */
@@ -108,9 +109,9 @@ public final class MinerStructure {
     /**
      * 生成完整结构计划。
      *
-     * @return 形状里全部非空格（除控制器本体），共 27 格；由调用方按世界现状分拣摆放
+     * @return 形状里全部非空格（除控制器本体），由调用方按世界现状分拣摆放
      */
-    public static List<Cell> plan(MetaTileEntity controller, MinerMachines.Spec spec) {
+    public static List<Cell> plan(MetaTileEntity controller, MinerMachines.Spec spec, World world) {
         IGregTechTileEntity base = controller.getBaseMetaTileEntity();
         int cx = base.getXCoord();
         int cy = base.getYCoord();
@@ -140,7 +141,32 @@ public final class MinerStructure {
                 }
             }
         }
+        reuseMaintenanceHatch(world, cells);
         return cells;
+    }
+
+    /** GT 的 'b' 格都能放维护仓。保留已有维护仓，并交换原定仓位的用途。 */
+    private static void reuseMaintenanceHatch(World world, List<Cell> cells) {
+        int planned = -1;
+        int existing = -1;
+        for (int i = 0; i < cells.size(); i++) {
+            Cell cell = cells.get(i);
+            if (cell.role == HatchRole.MAINTENANCE) planned = i;
+            if (isMaintenanceHatch(world, cell)) {
+                if (cell.role == HatchRole.MAINTENANCE) return;
+                if (existing < 0) existing = i;
+            }
+        }
+        if (existing < 0 || planned < 0) return;
+        Cell installed = cells.get(existing);
+        Cell original = cells.get(planned);
+        cells.set(existing, new Cell(installed.x, installed.y, installed.z, installed.code, HatchRole.MAINTENANCE));
+        cells.set(planned, new Cell(original.x, original.y, original.z, original.code, installed.role));
+    }
+
+    static boolean isMaintenanceHatch(World world, Cell cell) {
+        return cell.code == 'b' && world.getTileEntity(cell.x, cell.y, cell.z) instanceof IGregTechTileEntity gt
+            && gt.getMetaTileEntity() instanceof MTEHatchMaintenance;
     }
 
     /**
@@ -152,6 +178,7 @@ public final class MinerStructure {
      * </ul>
      */
     private static char cellAt(int px, int py, int pz) {
+        if (py == 6) return 'b'; // 控制器本体已由 plan 排除
         if (py <= 2) {
             if (pz != 1) return ' ';
             return px == 1 ? 'f' : ' ';

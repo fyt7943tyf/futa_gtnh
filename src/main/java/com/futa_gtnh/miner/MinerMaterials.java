@@ -45,26 +45,9 @@ public final class MinerMaterials {
         return shortage;
     }
 
-    public static int poolCount(Map<ItemKey, Integer> pool) {
-        int total = 0;
-        for (Integer count : pool.values()) {
-            if (count != null) total += count;
-        }
-        return total;
-    }
-
-    /** 优先扣「首选键」的账，再扣池里其它变体（同物品不同来源的容错）。 */
-    public static void consumeOne(Map<ItemKey, Integer> pool, ItemKey preferred) {
-        if (preferred != null && pool.getOrDefault(preferred, 0) > 0) {
-            pool.merge(preferred, -1, Integer::sum);
-            return;
-        }
-        for (Map.Entry<ItemKey, Integer> entry : pool.entrySet()) {
-            if (entry.getValue() != null && entry.getValue() > 0) {
-                entry.setValue(entry.getValue() - 1);
-                return;
-            }
-        }
+    /** 只扣该摆放动作所需的精确物品。 */
+    public static void consumeOne(Map<ItemKey, Integer> pool, ItemKey key) {
+        if (key != null && pool.getOrDefault(key, 0) > 0) pool.merge(key, -1, Integer::sum);
     }
 
     /** 没摆出去的余料退回共享背包（与部署回收同一套路）。 */

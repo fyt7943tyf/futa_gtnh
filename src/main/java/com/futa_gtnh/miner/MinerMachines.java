@@ -12,6 +12,7 @@ import gregtech.api.metatileentity.implementations.MTEHatch;
 import gregtech.api.metatileentity.implementations.MTEHatchEnergy;
 import gregtech.api.metatileentity.implementations.MTEHatchInput;
 import gregtech.api.metatileentity.implementations.MTEHatchInputBus;
+import gregtech.api.metatileentity.implementations.MTEHatchMaintenance;
 import gregtech.api.metatileentity.implementations.MTEHatchOutput;
 import gregtech.api.metatileentity.implementations.MTEHatchOutputBus;
 import gregtech.api.util.GTOreDictUnificator;
@@ -197,8 +198,13 @@ public final class MinerMachines {
         return stackOf(findHatch(MTEHatchOutput.class, 1));
     }
 
-    /** @return 免料自动维护仓物品（随矿机部署器注册；未启用时 null）。 */
-    public static ItemStack autoMaintenanceStack() {
-        return MinerRegistration.autoMaintenanceStack();
+    /** 从 GT 原版物品表解析普通维护仓，避免选中自动仓或旧存档兼容仓。 */
+    static MTEHatchMaintenance maintenanceHatch() {
+        ItemStack stack = ItemList.Hatch_Maintenance.get(1);
+        if (stack == null) return null;
+        int id = stack.getItemDamage();
+        IMetaTileEntity[] registry = GregTechAPI.METATILEENTITIES;
+        if (id < 1 || id >= registry.length) return null;
+        return registry[id] instanceof MTEHatchMaintenance hatch && !hatch.mAuto ? hatch : null;
     }
 }

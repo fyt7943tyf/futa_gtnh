@@ -9,26 +9,22 @@ import cpw.mods.fml.common.registry.GameRegistry;
 import gregtech.api.GregTechAPI;
 import gregtech.api.covers.CoverPlacer;
 import gregtech.api.covers.CoverRegistry;
-import gregtech.api.enums.ItemList;
 import gregtech.api.interfaces.ITexture;
+import gregtech.api.metatileentity.implementations.MTEHatchMaintenance;
 import gregtech.api.render.TextureFactory;
 import gregtech.api.util.GTModHandler;
 import gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer;
 
-/**
- * 矿机一站式部署的注册：部署器物品 + 免料自动维护仓 MTE（ID 冲突检查）+
- * AE 采矿枢纽覆盖板 + 合成配方。postInit 里注册（构造即写入 METATILEENTITIES），
- * 姿势与 {@code SuperDockRegistration} / {@code registerAeSignalWireless} 相同。
- */
+/** 注册矿机部署器、AE 采矿枢纽覆盖板与配方，并为旧存档保留维护仓 MTE ID。 */
 public final class MinerRegistration {
 
     private static ItemMinerDeployer deployer;
     private static ItemCoverMinerIo cover;
-    private static MTEAutoMaintenanceHatch maintenance;
 
     private MinerRegistration() {}
 
     public static void register() {
+        registerLegacyMaintenanceHatch();
         if (!Config.enableMinerDeployer) return;
         if (!com.futa_gtnh.ae2.Ae2Compat.isAvailable()) {
             FutaGtnhMod.LOG.info("没有检测到 Applied Energistics 2，跳过矿机一站式部署的注册");
@@ -37,19 +33,6 @@ public final class MinerRegistration {
 
         deployer = new ItemMinerDeployer();
         GameRegistry.registerItem(deployer, ItemMinerDeployer.NAME);
-
-        if (Config.enableMinerAutoMaintenance) {
-            int id = Config.minerAutoMaintenanceMetaTileId;
-            if (id < 1 || id >= GregTechAPI.METATILEENTITIES.length || GregTechAPI.METATILEENTITIES[id] != null) {
-                throw new IllegalStateException(
-                    "Free auto maintenance hatch MTE ID conflict: " + id
-                        + "; change minerAutoMaintenanceMetaTileId in futa_gtnh.cfg before starting the world");
-            }
-            maintenance = new MTEAutoMaintenanceHatch(
-                id,
-                "futa_gtnh.free_maintenance.lv",
-                "Free Auto Maintenance Hatch");
-        }
 
         cover = new ItemCoverMinerIo();
         GameRegistry.registerItem(cover, ItemCoverMinerIo.NAME);
@@ -62,7 +45,18 @@ public final class MinerRegistration {
                 .onlyPlaceIf(CoverMinerIo::isCoverPlaceable)
                 .build());
 
-        FutaGtnhMod.LOG.info("已注册矿机一站式部署（部署器 + 免料自动维护仓 + AE 采矿枢纽覆盖板）");
+        FutaGtnhMod.LOG.info("已注册矿机一站式部署（部署器 + AE 采矿枢纽覆盖板）");
+    }
+
+    /** 保留旧 ID 和本地化键，旧仓体由 GT 按普通维护仓加载。 */
+    private static void registerLegacyMaintenanceHatch() {
+        int id = Config.minerAutoMaintenanceMetaTileId;
+        if (id < 1 || id >= GregTechAPI.METATILEENTITIES.length || GregTechAPI.METATILEENTITIES[id] != null) {
+            throw new IllegalStateException(
+                "Legacy maintenance hatch MTE ID conflict: " + id
+                    + "; check minerAutoMaintenanceMetaTileId in futa_gtnh.cfg before starting the world");
+        }
+        new MTEHatchMaintenance(id, "futa_gtnh.free_maintenance.lv", "Legacy Maintenance Hatch", 1);
     }
 
     public static void addCraftingRecipe() {
@@ -80,28 +74,10 @@ public final class MinerRegistration {
                 new ItemStack(cover),
                 new Object[] { " E ", "RPR", 'E', "enderpearl", 'R', "dustRedstone", 'P', "plateIron" });
         }
-
-        if (maintenance != null) {
-            // 免料自动维护仓：钢板 + 胶带 + 螺丝 + MV 机器壳
-            GTModHandler.addCraftingRecipe(
-                maintenance.getStackForm(1),
-                new Object[] { "PTP", "SHS", "PTP", 'P', "plateSteel", 'T', "craftingDuctTape", 'S', "screwSteel", 'H',
-                    ItemList.Hull_MV.get(1) });
-        }
     }
 
     /** @return AE 采矿枢纽覆盖板物品；功能未启用时 null。 */
     public static ItemStack minerIoStack() {
         return cover == null ? null : new ItemStack(cover);
-    }
-
-    /** @return 免料自动维护仓物品；功能未启用时 null。 */
-    public static ItemStack autoMaintenanceStack() {
-        return maintenance == null ? null : maintenance.getStackForm(1);
-    }
-
-    /** @return 免料自动维护仓原型 MTE；功能未启用时 null。 */
-    public static MTEAutoMaintenanceHatch maintenanceMte() {
-        return maintenance;
     }
 }

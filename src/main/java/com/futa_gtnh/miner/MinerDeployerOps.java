@@ -36,8 +36,8 @@ import gregtech.common.covers.Cover;
  *
  * <p>
  * 仓位分配（见 {@link MinerStructure}）：采矿场 = 输入总线 + 输入仓（钻井液）+
- * 2×输出总线 + 免料自动维护仓 + 能源仓；油气钻机 = 输入总线 + 输出仓（油气）+
- * 免料自动维护仓 + 能源仓。某种仓的原型找不到（如维护仓未启用）时该位补外壳。
+ * 2×输出总线 + 普通 GT 维护仓 + 能源仓；油气钻机 = 输入总线 + 输出仓（油气）+
+ * 普通 GT 维护仓 + 能源仓。已有维护仓保留；仓体原型找不到时该位补外壳。
  *
  * <p>
  * 摆放只往空气/可替换方块里放（同反应堆 {@code ShellBuilder}）；<b>升级</b>路径：
@@ -84,6 +84,7 @@ public final class MinerDeployerOps {
 
         DONE,
         PLACEABLE,
+        REPLACE_CASING,
         BLOCKED;
 
         public static final State[] VALUES = values();
@@ -103,7 +104,7 @@ public final class MinerDeployerOps {
         World world = ((TileEntity) base).getWorldObj();
         if (world == null || world.isRemote) return;
 
-        List<MinerStructure.Cell> cells = MinerStructure.plan(mte, spec);
+        List<MinerStructure.Cell> cells = MinerStructure.plan(mte, spec, world);
         if (preview) {
             preview(player, world, spec, cells);
         } else {
@@ -122,10 +123,10 @@ public final class MinerDeployerOps {
         for (MinerStructure.Cell cell : cells) {
             ItemStack want = wantOfCell(cell, spec);
             if (want == null) continue; // 仓体原型缺失 → 补外壳位，不单列
-            switch (classify(world, cell, want)) {
+            switch (classify(world, cell, want, spec)) {
                 case DONE -> done++;
                 case BLOCKED -> blocked++;
-                default -> {
+                case PLACEABLE, REPLACE_CASING -> {
                     Demand demand = demandOf(demands, want);
                     if (demand != null) demand.needed++;
                 }
@@ -156,31 +157,20 @@ public final class MinerDeployerOps {
             ItemStack want = wantOfCell(cell, spec);
             if (want == null) continue; // 仓体原型缺失 → 该位留给外壳
 
-            State state = classify(world, cell, want);
+            State state = classify(world, cell, want, spec);
             if (state == State.DONE) {
                 done++;
                 continue;
             }
-            if (state == State.PLACEABLE) {
-                work.add(new Work(cell, want, hatchOf(cell, spec), false));
-                Demand demand = demandOf(demands, want);
-                if (demand != null) demand.needed++;
+            if (state == State.BLOCKED) {
+                blocked++;
                 continue;
             }
-            // BLOCKED：仓位格上是本机型外壳 → 升级（拆外壳换仓体）；其余跳过
-            if (cell.code == 'b' && isOwnCasing(world, cell, spec)) {
-                MetaTileEntity hatch = hatchOf(cell, spec);
-                if (hatch == null) {
-                    blocked++;
-                    continue;
-                }
-                ItemStack hatchStack = hatch.getStackForm(1);
-                work.add(new Work(cell, hatchStack, hatch, true));
-                Demand demand = demandOf(demands, hatchStack);
-                if (demand != null) demand.needed++;
-                continue;
+            Demand demand = demandOf(demands, want);
+            if (demand != null) {
+                demand.needed++;
+                work.add(new Work(cell, want, hatchOf(cell, spec), state == State.REPLACE_CASING));
             }
-            blocked++;
         }
 
         if (work.isEmpty()) {
@@ -199,13 +189,12 @@ public final class MinerDeployerOps {
 
         // ---- 摆放（摆一个扣一个；断了账也是平的）----
         int placed = 0;
+        int recoveredCasings = 0;
         for (Work op : work) {
-            if (MinerMaterials.poolCount(pool) <= 0) break;
+            ItemKey key = ItemKey.of(op.want);
+            if (pool.getOrDefault(key, 0) <= 0) continue;
 
-            if (op.replacing) {
-                // 升级：先收回本机型外壳（放不成再补回来）
-                world.setBlockToAir(op.cell.x, op.cell.y, op.cell.z);
-            }
+            if (op.replacing && !world.setBlockToAir(op.cell.x, op.cell.y, op.cell.z)) continue;
             boolean placedOk;
             if (op.hatch != null) {
                 placedOk = MinerStructure.placeHatch(world, op.cell.x, op.cell.y, op.cell.z, op.hatch, player, cx, cz);
@@ -218,11 +207,15 @@ public final class MinerDeployerOps {
                 if (op.replacing) restoreCasing(world, op.cell, spec);
                 continue;
             }
-            MinerMaterials.consumeOne(pool, ItemKey.of(op.want));
+            MinerMaterials.consumeOne(pool, key);
+            if (op.replacing) recoveredCasings++;
             placed++;
         }
 
-        // ---- 余料退回共享背包 ----
+        // ---- 余料和换下的外壳退回共享背包 ----
+        if (recoveredCasings > 0) {
+            pool.merge(ItemKey.of(MinerMachines.casingStack(spec)), recoveredCasings, Integer::sum);
+        }
         MinerMaterials.refund(pool);
 
         // ---- 报告 ----
@@ -294,7 +287,7 @@ public final class MinerDeployerOps {
      * 一格该摆什么：
      * <ul>
      * <li>'f' → 本机型框架；'c' → 本机型外壳；</li>
-     * <li>'b' + 角色 → 对应仓体物品（原型缺失 → null，该位留给外壳）；</li>
+     * <li>'b' + 角色 → 对应仓体物品（原型缺失 → 补外壳）；</li>
      * <li>'b' 无角色 → 补外壳。</li>
      * </ul>
      */
@@ -329,7 +322,7 @@ public final class MinerDeployerOps {
             case INPUT_BUS -> MinerMachines.inputBusStack();
             case OUTPUT_BUS -> MinerMachines.outputBusStack();
             case OUTPUT_HATCH -> MinerMachines.outputHatchStack();
-            case MAINTENANCE -> MinerMachines.autoMaintenanceStack();
+            case MAINTENANCE -> MinerMachines.stackOf(MinerMachines.maintenanceHatch());
             case ENERGY -> MinerMachines.energyHatchStack(spec.minTier);
         };
     }
@@ -342,13 +335,16 @@ public final class MinerDeployerOps {
             case INPUT_BUS -> MinerMachines.findHatch(MTEHatchInputBus.class, 1);
             case OUTPUT_BUS -> MinerMachines.findHatch(MTEHatchOutputBus.class, 1);
             case OUTPUT_HATCH -> MinerMachines.findHatch(MTEHatchOutput.class, 1);
-            case MAINTENANCE -> MinerRegistration.maintenanceMte();
+            case MAINTENANCE -> MinerMachines.maintenanceHatch();
             case ENERGY -> MinerMachines.findHatch(MTEHatchEnergy.class, spec.minTier);
         };
     }
 
-    /** 格子现状：已就位 / 可摆（空气或可替换、无实体）/ 被挡。 */
-    private static State classify(World world, MinerStructure.Cell cell, ItemStack want) {
+    /** 格子现状：已就位 / 可摆 / 可换外壳 / 被挡。 */
+    private static State classify(World world, MinerStructure.Cell cell, ItemStack want, MinerMachines.Spec spec) {
+        if (cell.role == MinerStructure.HatchRole.MAINTENANCE && MinerStructure.isMaintenanceHatch(world, cell)) {
+            return State.DONE;
+        }
         int x = cell.x, y = cell.y, z = cell.z;
         Block current = world.getBlock(x, y, z);
         Block wantBlock = Block.getBlockFromItem(want.getItem());
@@ -366,10 +362,9 @@ public final class MinerDeployerOps {
             }
         }
 
-        if ((world.isAirBlock(x, y, z) || current.isReplaceable(world, x, y, z))
-            && !isBlockedByEntity(world, x, y, z)) {
-            return State.PLACEABLE;
-        }
+        if (isBlockedByEntity(world, x, y, z)) return State.BLOCKED;
+        if (world.isAirBlock(x, y, z) || current.isReplaceable(world, x, y, z)) return State.PLACEABLE;
+        if (cell.role != null && isOwnCasing(world, cell, spec)) return State.REPLACE_CASING;
         return State.BLOCKED;
     }
 
