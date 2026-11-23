@@ -14,6 +14,7 @@ import com.futa_gtnh.FutaGtnhMod;
 
 import cpw.mods.fml.common.Loader;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
+import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
 import li.cil.oc.api.Driver;
 import li.cil.oc.api.Network;
 import li.cil.oc.api.driver.NamedBlock;
@@ -203,11 +204,14 @@ public final class BeeOcDrivers {
         }
 
         @Callback(
-            doc = "function():boolean,number,number,boolean,boolean -- Running, elapsed ticks, total ticks, allowed, shutdown")
+            doc = "function():boolean,number,number,boolean,boolean,number -- Running, elapsed ticks, total ticks, allowed, shutdown, last working tick")
         public Object[] beeMachineStatus(Context context, Arguments args) {
             IGregTechTileEntity machine = (IGregTechTileEntity) liveTile();
+            if (!(machine.getMetaTileEntity() instanceof MTEMultiBlockBase engineer)) {
+                throw new IllegalStateException("Bee engineer controller is no longer attached");
+            }
             return new Object[] { machine.isActive(), machine.getProgress(), machine.getMaxProgress(),
-                machine.isAllowedToWork(), machine.wasShutdown() };
+                machine.isAllowedToWork(), machine.wasShutdown(), engineer.getLastWorkingTick() };
         }
     }
 }
