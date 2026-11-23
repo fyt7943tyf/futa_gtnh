@@ -185,6 +185,8 @@ public class CommonProxy {
         com.futa_gtnh.medock.SuperDockRegistration.addCraftingRecipe();
         com.futa_gtnh.miner.MinerRegistration.register();
         com.futa_gtnh.miner.MinerRegistration.addCraftingRecipe();
+        com.futa_gtnh.spacecenter.SpaceCenterRegistration.register();
+        com.futa_gtnh.spacecenter.SpaceCenterRegistration.addCraftingRecipe();
     }
 
     /**
@@ -251,6 +253,7 @@ public class CommonProxy {
         event.registerServerCommand(new com.futa_gtnh.command.CommandProductionLines());
         event.registerServerCommand(new com.futa_gtnh.me.CommandPublicMe());
         event.registerServerCommand(new com.futa_gtnh.command.CommandFluidRefresh());
+        event.registerServerCommand(new com.futa_gtnh.command.CommandFutaSpacer());
     }
 
     // ==================================================================
@@ -276,6 +279,9 @@ public class CommonProxy {
         GameRegistry.registerBlock(blockIoNode, BlockIoNode.NAME);
         GameRegistry.registerTileEntity(TileEntityIoNode.class, FutaGtnhMod.MODID + ":" + BlockIoNode.NAME);
         FutaGtnhMod.blockIoNode = blockIoNode;
+
+        // 深空采矿指挥中心的结构方块（桁架/全息核心/天线）
+        com.futa_gtnh.spacecenter.SpaceCenterRegistration.registerBlocks();
 
         // 存储总线：把一个相邻容器接进共享存储（终端可见，按优先级写入/抽取）
         if (Config.enableStorageBus) {

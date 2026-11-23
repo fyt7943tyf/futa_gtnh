@@ -455,6 +455,37 @@ public class Config {
     public static boolean enableMinerAreaEnhance = true;
 
     // ------------------------------------------------------------------
+    // 深空采矿指挥中心（远程虚拟采矿多方块）
+    // ------------------------------------------------------------------
+
+    /** 是否注册「深空采矿指挥中心」多方块机器（需装 GT 与 Galacticraft）。 */
+    public static boolean enableSpaceMiningCenter = true;
+
+    /** 深空采矿指挥中心的稳定 GT MTE ID。 */
+    public static int spaceMiningCenterMetaTileId = 32703;
+
+    /** 指挥中心结构的最低高度（层数，含底座与顶盖）。 */
+    public static int spaceCenterMinHeight = 2;
+
+    /** 指挥中心结构的最高高度（层数，含底座与顶盖）。 */
+    public static int spaceCenterMaxHeight = 9;
+
+    /** 最矮结构（2 层）提供的虚拟机位数量。 */
+    public static int spaceCenterBaseCapacity = 8;
+
+    /** 每增加一层结构额外提供的虚拟机位数量。 */
+    public static int spaceCenterCapacityPerLayer = 8;
+
+    /** 每台运行中的虚拟机器每秒消耗的润滑油（mB）。 */
+    public static int spaceCenterLubricantPerMachine = 1000;
+
+    /** 虚拟流体钻机产出相对当地油田上界产量的系数（0.8 = 八成）。 */
+    public static double spaceCenterOilYieldFactor = 0.8D;
+
+    /** 虚拟矿机的开采区域采完后是否原地重置矿脉（false 时采完即停，等待手动重置）。 */
+    public static boolean spaceCenterAutoResetVein = true;
+
+    // ------------------------------------------------------------------
     // 界面（客户端行为）
     // ------------------------------------------------------------------
 
@@ -1146,6 +1177,74 @@ public class Config {
             Configuration.CATEGORY_GENERAL,
             enableMinerAreaEnhance,
             "AE 采矿枢纽覆盖板的「采矿区域」档位（原版/×2/×3）是否生效。仅采矿场支持；一次性应用，之后归 GT 自己的 NBT 管（螺丝刀照常可调），重摆机器需重新选档。");
+
+        enableSpaceMiningCenter = configuration.getBoolean(
+            "enableSpaceMiningCenter",
+            Configuration.CATEGORY_GENERAL,
+            enableSpaceMiningCenter,
+            "注册深空采矿指挥中心：7x7xN 多方块，塞入 X 级火箭后可按星球远程配置虚拟的 1-4 级采矿场与流体钻机，产出按 GT 原版算法模拟。需装 Galacticraft（本体即可，各星球由整合包提供）。");
+
+        spaceMiningCenterMetaTileId = configuration.getInt(
+            "spaceMiningCenterMetaTileId",
+            Configuration.CATEGORY_GENERAL,
+            spaceMiningCenterMetaTileId,
+            1,
+            32766,
+            "深空采矿指挥中心的稳定 GT MTE ID；冲突时修改，已有世界不可随意更换。客户端和服务端需一致。");
+
+        spaceCenterMinHeight = configuration.getInt(
+            "spaceCenterMinHeight",
+            Configuration.CATEGORY_GENERAL,
+            spaceCenterMinHeight,
+            2,
+            9,
+            "指挥中心结构的最低高度（层数，含底座与顶盖）。");
+
+        spaceCenterMaxHeight = configuration.getInt(
+            "spaceCenterMaxHeight",
+            Configuration.CATEGORY_GENERAL,
+            spaceCenterMaxHeight,
+            spaceCenterMinHeight,
+            9,
+            "指挥中心结构的最高高度（层数，含底座与顶盖）。越高机位越多。");
+
+        spaceCenterBaseCapacity = configuration.getInt(
+            "spaceCenterBaseCapacity",
+            Configuration.CATEGORY_GENERAL,
+            spaceCenterBaseCapacity,
+            0,
+            1024,
+            "最矮结构提供的虚拟机器机位数量。");
+
+        spaceCenterCapacityPerLayer = configuration.getInt(
+            "spaceCenterCapacityPerLayer",
+            Configuration.CATEGORY_GENERAL,
+            spaceCenterCapacityPerLayer,
+            0,
+            1024,
+            "每增加一层结构额外提供的虚拟机器机位数量。");
+
+        spaceCenterLubricantPerMachine = configuration.getInt(
+            "spaceCenterLubricantPerMachine",
+            Configuration.CATEGORY_GENERAL,
+            spaceCenterLubricantPerMachine,
+            0,
+            100000,
+            "每台运行中的虚拟机器每秒消耗的润滑油（mB）。");
+
+        spaceCenterOilYieldFactor = (double) configuration.getFloat(
+            "spaceCenterOilYieldFactor",
+            Configuration.CATEGORY_GENERAL,
+            (float) spaceCenterOilYieldFactor,
+            0.0F,
+            10.0F,
+            "虚拟流体钻机产出相对当地油田上界产量的系数（GT 油气钻机模拟读取的上界产量的倍率）。");
+
+        spaceCenterAutoResetVein = configuration.getBoolean(
+            "spaceCenterAutoResetVein",
+            Configuration.CATEGORY_GENERAL,
+            spaceCenterAutoResetVein,
+            "虚拟矿机把开采区域（按等级 6x6~18x18 区块）采完后是否原地重置矿脉（换随机纪元重新生成，等同无限矿）。关闭后采完即停，可在 GUI 手动重置。");
 
         tinkersAutoFill = configuration.getBoolean(
             "tinkersAutoFill",
