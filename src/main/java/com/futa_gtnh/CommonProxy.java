@@ -167,6 +167,9 @@ public class CommonProxy {
     }
 
     public void init(FMLInitializationEvent event) {
+        if (Loader.isModLoaded("OpenComputers")) {
+            com.futa_gtnh.bees.BeeOcDrivers.register();
+        }
         // GT and GT++ finish machine registration before our postInit.
     }
 

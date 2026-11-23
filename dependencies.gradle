@@ -21,6 +21,8 @@
 def lwjgl3ifyVersion = '3.0.35'
 
 dependencies {
+    // Optional OC driver for the Mutatron and TST Bee Engineer.
+    compileOnly("com.github.GTNewHorizons:OpenComputers:1.13.0-GTNH:dev") { transitive = false }
     // Opt-in local GTSWN 1.8.8 verification. The integration itself has no required GTSWN dependency.
     if (project.hasProperty('gtswnCompatJar')) {
         runtimeOnlyNonPublishable(files(project.property('gtswnCompatJar')))
