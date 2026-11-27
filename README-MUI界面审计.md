@@ -61,6 +61,7 @@
 | 10 | 页码动态文本夹在固定按钮间，右侧间隙随内容宽窄跳动 | `MTELVDisassembler.pageButtons()` L507-516 | 页码文本固定宽度居中 | ☑ |
 | 11 | 标题与副标题零行距；输入框双重描边（drawRect + SLOT 贴图） | `GuiAeSignalTransmitter` L110-111/L103 | 副标题下移；删 drawRect | ☑ |
 | 13 | **追记（1.33.2 后实测）**：第 8 项的 `verticalCenter()` 修法不彻底——三个选项组首行与类型行仍偏上。真因是行被 `Flow + positionRow` 嵌套：Flow 对交叉轴居中会跳过尺寸未算好的子控件，`verticalCenter()`（= `topRel(0.5)` 相对锚点）又与 Flow 的居中互相打架 | `CoverAeSignalReceiverGui` | **1.33.4**：选项组 Grid 直挂列（参数逐字对齐 `CoverControlsWorkGui`，单元格数学居中）；类型行改 GT 液体模式同款图标开关 + tooltip，文字不再贴按钮摆 | ☑ |
+| 14 | **铁律（2.1.0 深空采矿指挥中心实测）**：`Flow` 的子控件带显式 `pos()` 就不参与流式布局——`SimpleFlow.layout` 主循环第一步 `resizer().hasPos(axis)` 为真直接跳过，控件按绝对坐标留在原处。三个页签按钮全部 `pos(0,0)`，整排叠印在 Flow 原点，文字糊成一团（截图上像两个不存在的汉字） | `SpaceCenterGui.tabRow()` | Flow 行内的控件一律不带 pos（新增 `flowButton` 助手）；绝对 pos 只在 `ParentWidget` 这类绝对容器里用（`button` 助手保留给页面内部） | ☑ |
 
 ### 明确不做（仅记录）
 
