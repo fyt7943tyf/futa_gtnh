@@ -7,7 +7,6 @@ import java.util.regex.Pattern;
 
 import net.minecraft.item.ItemStack;
 
-import cpw.mods.fml.common.Loader;
 import micdoodle8.mods.galacticraft.api.galaxies.CelestialBody;
 import micdoodle8.mods.galacticraft.api.galaxies.GalaxyRegistry;
 import micdoodle8.mods.galacticraft.api.galaxies.Moon;
@@ -20,18 +19,20 @@ import micdoodle8.mods.galacticraft.api.galaxies.Planet;
  * <p>
  * 提供两件事：
  * <ul>
- * <li>{@link #listReachableBodies()}：枚举注册的全部行星/卫星（含 GalaxySpace、AmunRa
- * 等通过 GC API 注册的天体），读出 GT 矿脉系统用的维度键（天体 name，如 {@code "moon"}）、
+ * <li>{@link #listReachableBodies()}：枚举注册的全部行星与卫星（含 GalaxySpace 等通过
+ * GC API 注册的天体），读出 GT 矿脉系统用的维度键（天体 name，如 {@code "moon"}）、
  * 数字维度 id 与「到达所需火箭等级」；</li>
  * <li>{@link #rocketTierOf(ItemStack)}：识别火箭物品的等级。GC 系火箭物品是平铺的
- * {@code ItemTier{N}Rocket} 类（没有公共接口），这里按类名模式识别，核心三档再做实例兜底。</li>
+ * {@code ItemTier{N}Rocket} 类（没有公共接口），这里按类名模式识别，核心三档再做实例兜底。
  * </ul>
+ *
+ * <p>
+ * <b>本类只在 Galacticraft 确认在场之后才能被链接</b>（门在
+ * {@link SpaceCenterRegistration#isGalacticraftPresent()}，这里故意不提供「GC 在不在」的判断）：
+ * 类里有把 {@code Planet} 传给形参为 {@code CelestialBody} 的方法，GC 缺席时 JVM 校验这一句
+ * 就会抛 {@code NoClassDefFoundError}，放在本类里的门自己就先炸了。
  */
 public final class GcCompat {
-
-    public static final String MOD_ID = "GalacticraftCore";
-
-    private static Boolean available;
 
     /** 天体信息（服务端注册完成后填充）。 */
     public static final class BodyInfo {
@@ -52,12 +53,7 @@ public final class GcCompat {
 
     private GcCompat() {}
 
-    public static boolean isAvailable() {
-        if (available == null) available = Loader.isModLoaded(MOD_ID);
-        return available;
-    }
-
-    /** 枚举所有可达行星与卫星；必须只在 {@link #isAvailable()} 为真时调用。 */
+    /** 枚举所有可达行星与卫星；必须只在 Galacticraft 确认在场后调用。 */
     public static List<BodyInfo> listReachableBodies() {
         List<BodyInfo> bodies = new ArrayList<>();
         for (Planet planet : GalaxyRegistry.getRegisteredPlanets()
@@ -75,6 +71,9 @@ public final class GcCompat {
         if (body == null || !body.getReachable()) return;
         String name = body.getName();
         if (name == null || name.isEmpty()) return;
+        // Galacticraft 把主世界也注册成了一颗行星（维度 0）：它没有矿脉但有油田，而本功能是
+        // 「深空」采矿，主世界不该出现在可选列表里，否则等于送一台免搭建的远程抽油机
+        if (body.getDimensionID() == 0) return;
         bodies.add(new BodyInfo(name, body.getDimensionID(), body.getTierRequirement()));
     }
 

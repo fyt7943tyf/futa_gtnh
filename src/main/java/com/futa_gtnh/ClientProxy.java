@@ -78,8 +78,8 @@ public class ClientProxy extends CommonProxy {
         com.futa_gtnh.storagebus.BlockStorageBus.renderId = RenderingRegistry.getNextAvailableRenderId();
         RenderingRegistry.registerBlockHandler(new com.futa_gtnh.client.StorageBusRenderer());
 
-        // 深空采矿指挥中心结构方块：全息核心（星环+扫描线贴图）与天线（呼吸灯）
-        // 走 ISBRH 画不满格几何体；renderId 同样只有客户端赋得上。
+        // 深空采矿指挥中心结构方块：全息能量柱与天线走 ISBRH 画不满格的静态几何体，
+        // 扫描线 / 呼吸灯靠贴图帧动画；renderId 同样只有客户端赋得上。
         com.futa_gtnh.block.BlockSpaceCenterPart.renderId = RenderingRegistry.getNextAvailableRenderId();
         RenderingRegistry.registerBlockHandler(new com.futa_gtnh.client.SpaceCenterPartRenderer());
 
@@ -91,8 +91,8 @@ public class ClientProxy extends CommonProxy {
         MinecraftForge.EVENT_BUS.register(new LocatorBeamRenderer());
         MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.client.SupplyHighlightRenderer());
         MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.rts.client.RtsOverlayRenderer());
-        // 深空采矿指挥中心运行时的上行链路光柱（RenderWorldLastEvent 逐帧，仅 active 时画）
-        MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.client.SpaceCenterBeamRenderer());
+        // 深空采矿指挥中心的逐帧特效：星环、上行链路、全息星球（RenderWorldLastEvent）
+        MinecraftForge.EVENT_BUS.register(new com.futa_gtnh.client.SpaceCenterEffects());
 
         // 俯瞰模式的客户端 tick（相机推进/守卫）。TickEvent 在 FML 总线上，
         // 和 KeyHandler 的 Listener 同一条，见 RtsClientTickHandler 的类注释

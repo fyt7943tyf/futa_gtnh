@@ -9,6 +9,8 @@ import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.IIcon;
+import net.minecraft.world.IBlockAccess;
+import net.minecraftforge.common.util.ForgeDirection;
 
 import com.futa_gtnh.FutaGtnhMod;
 
@@ -70,6 +72,45 @@ public class BlockSpaceCenterPart extends Block {
     @Override
     public boolean renderAsNormalBlock() {
         return false;
+    }
+
+    /**
+     * 全息核心与天线是发光体，夜里整座塔是亮的。亮度是静态的：跟着机器开关变亮需要触发
+     * 方块更新重算光照，为了个灯不值当。
+     */
+    @Override
+    public int getLightValue(IBlockAccess world, int x, int y, int z) {
+        int meta = world.getBlockMetadata(x, y, z);
+        if (meta == META_HOLO_CORE) return 10;
+        if (meta == META_ANTENNA) return 6;
+        return 0;
+    }
+
+    /** 这个位置是不是本方块组（任意形态）。 */
+    public static boolean isPart(IBlockAccess world, int x, int y, int z) {
+        return world.getBlock(x, y, z) instanceof BlockSpaceCenterPart;
+    }
+
+    /**
+     * 同一个方块类的相邻面默认会被当成「实心贴实心」剔除。这里三个形态共用一个方块类，
+     * 而全息核心和天线是镂空模型：桁架贴着它们的那一面被剔掉之后，从镂空处望进去就是一个
+     * 能看穿桁架的洞。所以相邻的是「同一个方块的别的形态」时照常渲染这一面。
+     */
+    @Override
+    public boolean shouldSideBeRendered(IBlockAccess world, int x, int y, int z, int side) {
+        // 入参 (x,y,z) 是邻居的坐标：自己 = 邻居沿该面的反方向退一格
+        if (world.getBlock(x, y, z) == this) {
+            ForgeDirection face = ForgeDirection.getOrientation(side);
+            int selfMeta = world.getBlockMetadata(x - face.offsetX, y - face.offsetY, z - face.offsetZ);
+            if (selfMeta != world.getBlockMetadata(x, y, z)) return true;
+        }
+        return super.shouldSideBeRendered(world, x, y, z, side);
+    }
+
+    /** 这个位置的形态 meta；不是本方块组返回 -1。 */
+    public static int partMeta(IBlockAccess world, int x, int y, int z) {
+        Block block = world.getBlock(x, y, z);
+        return block instanceof BlockSpaceCenterPart ? world.getBlockMetadata(x, y, z) : -1;
     }
 
     @Override

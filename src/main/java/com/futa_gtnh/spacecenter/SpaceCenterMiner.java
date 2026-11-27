@@ -1,15 +1,8 @@
 package com.futa_gtnh.spacecenter;
 
 import java.util.ArrayDeque;
-import java.util.Map;
 
-import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
-
-import gregtech.api.enums.OrePrefixes;
-import gregtech.api.interfaces.IOreMaterial;
-import gregtech.api.util.GTOreDictUnificator;
-import gregtech.api.util.GTUtility;
 
 /**
  * 虚拟采矿场：模拟一台对应等级的 GT 采矿场（Ore Drilling Plant）在目标星球上开采。
@@ -20,25 +13,23 @@ import gregtech.api.util.GTUtility;
  * <li>下潜阶段：每周期消耗 1 根采矿管道，深度取当前区块确定性矿脉的 veinMinY；</li>
  * <li>开采阶段：每周期耗 2000mB 钻井液、挖掉当前区块模拟队列里的 1 个矿石方块，
  * 产物 = 该矿石打粉机产出的粉碎矿 ×(1~4)；</li>
- * <li>区块队列空 → 行优先推进到开采区域的下一个区块（跳到新区块重新下潜）；
+ * <li>区块队列空 → 行优先推进到开采区域的下一个区块（跳到新区块重新下潜）；</li>
  * <li>整个 (2R)×(2R) 区域采完 → {@code era+1} 原地重置（AutoResetVein），
  * 或停在「区域采完」等玩家手动重置。</li>
  * </ol>
+ *
+ * <p>
+ * <b>队列不持久化。</b>矿石由「星球 seed + era + 区块坐标」确定性决定，所以存档只记
+ * 「当前区块还剩几个没挖」（{@code queued}），读档后把整块重新模拟出来、再从队头跳掉
+ * 已经挖掉的那一截。为此宿主交进来的 {@link OreChunk#entries} 必须每次都是同一个顺序，
+ * 跳过的数量必须是「总数 − 剩余」——方向反了就等于每次读档都把挖过的矿再发一遍。
  */
 public class SpaceCenterMiner extends SpaceCenterMachine {
 
-    /** 待挖矿石条目。 */
-    private static final class OrePop {
-
-        final IOreMaterial material;
-        /** true = placer 小矿（产出不乘 1~4）。 */
-        final boolean small;
-
-        OrePop(IOreMaterial material, boolean small) {
-            this.material = material;
-            this.small = small;
-        }
-    }
+    /** 下潜深度下限：没有矿脉碰到的区块同样要把管道下到地下（真实采矿场是下到基岩）。 */
+    private static final int MIN_DESCEND = 16;
+    /** 下潜深度上限。 */
+    private static final int MAX_DESCEND = 128;
 
     /** 随机纪元（0 = 复现真实矿脉；采完 +1 重置）。 */
     public int era;
@@ -46,14 +37,16 @@ public class SpaceCenterMiner extends SpaceCenterMachine {
     public int chunkIndex;
     /** 剩余下潜方块数（= 剩余管道消耗）。 */
     public int descendRemaining;
-    /** 当前区块待挖队列（进入新区块时构建）。 */
-    private final ArrayDeque<OrePop> queue = new ArrayDeque<>();
-    /** 存档恢复时待跳过的已挖方块数（首次 tick 重建队列后消费）。 */
-    private int pendingQueueSkip = -1;
+    /** 当前区块待挖队列（进区块时按确定性模拟构建）。 */
+    private final ArrayDeque<OreChunk.Entry> queue = new ArrayDeque<>();
+    /** 当前区块的队列是否已建好：新建 / 读档 / 纪元重置后为 false，首次推进时重建。 */
+    private boolean queueBuilt;
+    /** 读档恢复：重启前当前区块还剩多少方块没挖；-1 = 不需要恢复。 */
+    private int resumeRemaining = -1;
 
     public SpaceCenterMiner(int tier, String planet) {
         super(tier, planet);
-        enterFreshChunk(null);
+        // 此刻没有宿主可查星球种子：下潜深度与队列都留到首次 advance 时定
     }
 
     @Override
@@ -63,36 +56,36 @@ public class SpaceCenterMiner extends SpaceCenterMachine {
 
     @Override
     public long euPerTick() {
-        return 3L << (voltageTier() << 1);
+        return minerEu(tier);
     }
 
     @Override
     public int cycleTicks() {
-        return Math.max(1, MINER_BASE_TIME[tier - 1] >> voltageTier());
+        return minerCycle(tier);
     }
 
     /** 开采区域边长（区块）。 */
     public int areaSide() {
-        return 2 * MINER_RADIUS_CHUNKS[tier - 1];
+        return minerAreaSide(tier);
     }
 
     /** 当前区块坐标（行优先遍历，中心在原点附近）。 */
     public int[] currentChunk() {
         int side = areaSide();
         int radius = MINER_RADIUS_CHUNKS[tier - 1];
-        int idx = Math.min(chunkIndex, side * side - 1);
+        int idx = Math.min(Math.max(0, chunkIndex), side * side - 1);
         return new int[] { idx % side - radius + 1, idx / side - radius + 1 };
     }
 
     @Override
-    public void advance(int ticks, MTESpaceMiningCenter host) {
-        // 存档恢复：重建当前区块队列并跳过重启前已挖掉的部分
-        if (pendingQueueSkip >= 0 && descendRemaining <= 0 && queue.isEmpty()) {
-            enterFreshChunk(host);
-            for (int i = 0; i < pendingQueueSkip && !queue.isEmpty(); i++) {
-                queue.poll();
+    public void advance(int ticks, MachineHost host) {
+        if (!queueBuilt) {
+            // 读档恢复时下潜进度以存档为准，只重建队列；其余情况（新建 / 换纪元）连深度一起定
+            boolean keepDepth = resumeRemaining >= 0;
+            if (!buildChunk(host, !keepDepth)) {
+                pauseReason = PAUSE_UNKNOWN_PLANET;
+                return;
             }
-            pendingQueueSkip = -1;
         }
         for (int i = 0; i < ticks; i++) {
             if (pauseReason != null) return;
@@ -103,101 +96,115 @@ public class SpaceCenterMiner extends SpaceCenterMachine {
         }
     }
 
-    private void doCycle(MTESpaceMiningCenter host) {
+    private void doCycle(MachineHost host) {
         if (descendRemaining > 0) {
-            // 下潜：1 根管道/周期
+            // 下潜：1 根管道/周期。队列在进区块时就建好了，下潜到底直接转入开采——
+            // 这里绝不能再调 buildChunk：它会按矿脉深度把 descendRemaining 重新填满，
+            // 机器就永远在「下潜 → 到底 → 又满 → 再下潜」里打转，只烧管道一块矿不出
             if (!host.consumeMiningPipe()) {
-                pauseReason = "no_mining_pipe";
+                pauseReason = PAUSE_NO_MINING_PIPE;
                 return;
             }
             descendRemaining--;
-            if (descendRemaining <= 0) enterFreshChunk(host);
             return;
         }
-        OrePop pop = queue.poll();
-        if (pop == null) {
+        OreChunk.Entry ore = queue.poll();
+        if (ore == null) {
             nextChunk(host);
             return;
         }
         if (!host.consumeDrillingFluid()) {
-            pauseReason = "no_drilling_fluid";
-            queue.push(pop);
+            pauseReason = PAUSE_NO_DRILLING_FLUID;
+            // 放回队头：补上钻井液后挖的还是这一块
+            queue.addFirst(ore);
             return;
         }
-        host.emitOre(pop.material, !pop.small);
+        host.emitOre(ore);
     }
 
-    /** 进入当前 chunkIndex 的区块（构建队列 + 设定下潜深度）。 */
-    private void enterFreshChunk(MTESpaceMiningCenter host) {
+    /**
+     * 按确定性模拟（重新）构建当前区块的队列。
+     *
+     * @param setDepth 是否同时按下潜参考深度重设 {@link #descendRemaining}（读档恢复时为 false）
+     * @return 星球未知时 false，此时队列保持「未建」状态
+     */
+    private boolean buildChunk(MachineHost host, boolean setDepth) {
+        int[] chunk = currentChunk();
+        OreChunk ore = host.simulateChunk(planet, era, chunk[0], chunk[1]);
+        if (ore == null) return false;
         queue.clear();
-        Long seed = host != null ? host.planetSeed(planet) : null;
-        if (seed != null) {
-            PlanetRegistry.PlanetInfo info = PlanetRegistry.byName(planet);
-            if (info != null) {
-                int[] chunk = currentChunk();
-                VirtualVeinSim.ChunkOre ore = VirtualVeinSim
-                    .simulateChunk(planet, seed, info.dimensionId, era, chunk[0], chunk[1]);
-                for (Map.Entry<IOreMaterial, Integer> entry : ore.veinBlocks.entrySet()) {
-                    for (int i = 0; i < entry.getValue(); i++) queue.add(new OrePop(entry.getKey(), false));
-                }
-                for (Map.Entry<IOreMaterial, Integer> entry : ore.smallOres.entrySet()) {
-                    for (int i = 0; i < entry.getValue(); i++) queue.add(new OrePop(entry.getKey(), true));
-                }
-                // 下潜深度 ≈ 矿脉高度（真实机器把管道下到矿层再扫柱）
-                descendRemaining = ore.minVeinY == Integer.MAX_VALUE ? 16 : GTUtility.clamp(ore.minVeinY - 8, 16, 128);
-                return;
-            }
+        // entries 由宿主按材料 id 排好序：读档重建时跳过的才是同一批矿
+        for (OreChunk.Entry entry : ore.entries) {
+            for (int i = 0; i < entry.count; i++) queue.add(entry);
         }
-        // 星球未知（未勘查）：队列空、下潜 16，等宿主重试
-        descendRemaining = 16;
+        if (resumeRemaining >= 0) {
+            // 整块重建的队列里，前「总数 − 剩余」个是重启前已经挖掉的
+            int mined = Math.max(0, queue.size() - resumeRemaining);
+            for (int i = 0; i < mined; i++) queue.poll();
+            resumeRemaining = -1;
+        }
+        if (setDepth) {
+            // 下潜深度 ≈ 矿脉高度（真实机器把管道下到矿层再扫柱）
+            descendRemaining = ore.veinMinY == Integer.MAX_VALUE ? MIN_DESCEND
+                : clamp(ore.veinMinY - 8, MIN_DESCEND, MAX_DESCEND);
+        }
+        queueBuilt = true;
+        return true;
     }
 
-    private void nextChunk(MTESpaceMiningCenter host) {
-        int side = areaSide();
-        int total = side * side;
+    private void nextChunk(MachineHost host) {
+        int total = areaSide() * areaSide();
         if (chunkIndex + 1 >= total) {
-            if (host != null && host.autoResetVein()) {
+            if (host.autoResetVein()) {
                 era++;
                 chunkIndex = 0;
             } else {
-                pauseReason = "area_exhausted";
+                pauseReason = PAUSE_AREA_EXHAUSTED;
                 return;
             }
         } else {
             chunkIndex++;
         }
         progress = 0;
-        enterFreshChunk(host);
+        resumeRemaining = -1;
+        queueBuilt = false;
+        if (!buildChunk(host, true)) pauseReason = PAUSE_UNKNOWN_PLANET;
     }
 
-    /** 当前区块剩余待挖方块数（GUI 展示）。 */
+    /**
+     * 手动「矿脉重置」：era+1 回到区域起点。旧纪元的队列整体作废，
+     * 下次推进时按新纪元重建——否则会先把旧队列挖完、还顺手跳过新纪元的第 0 块。
+     */
+    public void resetVein() {
+        era++;
+        chunkIndex = 0;
+        progress = 0;
+        queue.clear();
+        queueBuilt = false;
+        resumeRemaining = -1;
+        pauseReason = null;
+    }
+
+    /** 当前区块剩余待挖方块数。 */
     public int remainingBlocks() {
         return queue.size();
     }
 
     @Override
     public void save(NBTTagCompound nbt) {
-        saveCommon(nbt, this);
         nbt.setInteger("era", era);
         nbt.setInteger("chunkIndex", chunkIndex);
         nbt.setInteger("descend", descendRemaining);
-        nbt.setInteger("queued", queue.size());
+        // -1 = 队列还没建过（从没推进过）：读档后按新区块对待，下潜深度重新算
+        nbt.setInteger("queued", queueBuilt ? queue.size() : -1);
     }
 
     @Override
     public void load(NBTTagCompound nbt) {
-        era = nbt.getInteger("era");
-        chunkIndex = nbt.getInteger("chunkIndex");
-        descendRemaining = nbt.getInteger("descend");
-        // 队列不持久化：首次 tick 用确定性模拟重建，再跳过重启前已挖的数量
-        pendingQueueSkip = nbt.getInteger("queued");
-    }
-
-    /** 供 GUI 取粉碎矿预览：材料的 ore 物品（与产出同一口径）。 */
-    public static ItemStack orePreview(IOreMaterial material) {
-        if (material instanceof gregtech.api.enums.Materials m) {
-            return GTOreDictUnificator.get(OrePrefixes.ore, m, 1);
-        }
-        return null;
+        era = Math.max(0, nbt.getInteger("era"));
+        chunkIndex = clamp(nbt.getInteger("chunkIndex"), 0, areaSide() * areaSide() - 1);
+        descendRemaining = Math.max(0, nbt.getInteger("descend"));
+        resumeRemaining = Math.max(-1, nbt.getInteger("queued"));
+        queueBuilt = false;
     }
 }

@@ -2,26 +2,53 @@ package com.futa_gtnh.spacecenter;
 
 import net.minecraft.block.Block;
 import net.minecraft.item.ItemStack;
+import net.minecraftforge.oredict.OreDictionary;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.block.BlockSpaceCenterPart;
 
+import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.registry.GameRegistry;
 import gregtech.api.GregTechAPI;
+import gregtech.api.enums.ItemList;
+import gregtech.api.enums.Materials;
+import gregtech.api.enums.OrePrefixes;
 import gregtech.api.util.GTModHandler;
 
 /** 注册深空采矿指挥中心：结构方块 + 控制器 MTE + 星球种子捕获事件 + 配方。 */
 public final class SpaceCenterRegistration {
+
+    /** Galacticraft 的 modid。 */
+    public static final String GC_MOD_ID = "GalacticraftCore";
 
     private static BlockSpaceCenterPart partBlock;
     private static MTESpaceMiningCenter controller;
 
     private SpaceCenterRegistration() {}
 
+    /**
+     * Galacticraft 是否在场。整个功能组唯一的门。
+     *
+     * <p>
+     * <b>这个门必须放在不引用任何 {@code micdoodle8.*} 类型的类里。</b>JVM 链接 {@link GcCompat}
+     * 时就会校验它的全部方法，而 {@code listReachableBodies} 把 {@code Planet} 传给形参为
+     * {@code CelestialBody} 的方法，校验器为了判子类关系会立刻加载这两个类——GC 缺席时连
+     * {@code GcCompat.isAvailable()} 自己都会抛 {@code NoClassDefFoundError}（实测），根本走不到
+     * 「跳过」。所以先在这里用 modid 判断，确认在场之后才允许碰 {@link GcCompat}。
+     */
+    public static boolean isGalacticraftPresent() {
+        return Loader.isModLoaded(GC_MOD_ID);
+    }
+
+    /** 功能组是否启用：配置开关 + Galacticraft 在场。 */
+    public static boolean isEnabled() {
+        return Config.enableSpaceMiningCenter && isGalacticraftPresent();
+    }
+
     /** preInit：方块注册（必须在 preInit，稳定方块 id）。 */
     public static void registerBlocks() {
-        if (!Config.enableSpaceMiningCenter) return;
+        if (!isEnabled()) return;
         partBlock = new BlockSpaceCenterPart();
         GameRegistry.registerBlock(partBlock, BlockSpaceCenterPart.NAME);
     }
@@ -29,7 +56,7 @@ public final class SpaceCenterRegistration {
     /** postInit：MTE 注册（构造即写入 GregTechAPI.METATILEENTITIES，仓库既有范式）。 */
     public static void register() {
         if (!Config.enableSpaceMiningCenter) return;
-        if (!GcCompat.isAvailable()) {
+        if (!isGalacticraftPresent()) {
             FutaGtnhMod.LOG.info("没有检测到 Galacticraft，跳过深空采矿指挥中心的注册");
             return;
         }
@@ -50,16 +77,30 @@ public final class SpaceCenterRegistration {
 
     public static void addCraftingRecipe() {
         if (partBlock == null || !Config.enableRecipe) return;
+        for (String ore : new String[] { "plateIridium", "plateTungstenSteel", "plateSteel", "blockGlass", "enderpearl",
+            "stickTungstenSteel" }) {
+            warnIfMissingOre(ore);
+        }
 
-        // 控制器（UV 级）：UV 机器外壳 + UV 电路 + 铱板 + 天线 + 全息核心
+        // 控制器（UV 级）：UV 机器外壳 + 电路 + 铱板 + 天线 + 全息核心。
+        //
+        // 电路照 GT 自家 UV 机器配方的写法取「低一档」的 ZPM 电路，并且直接用 OrePrefixes 取物品：
+        // 这个版本的 GT 没有 "circuitUV" 这个矿辞（启动告警实测为空），照字面写只会得到一条
+        // 永远合不出来的配方。
+        // OrePrefixes.get 的返回类型就是 Object：有对应物品给 ItemStack，没有就给矿辞名，配方数组原样收
+        Object circuit = OrePrefixes.circuit.get(Materials.ZPM);
+        ItemStack hull = ItemList.Hull_UV.get(1);
         if (controller != null) {
-            GTModHandler.addCraftingRecipe(
-                controller.getStackForm(1),
-                new Object[] { "PHP", "CKA", "IUI", 'P', "plateIridium", 'H',
-                    gregtech.api.enums.ItemList.Hull_UV.get(1), 'C', "circuitUV", 'K',
-                    new ItemStack(partBlock, 1, BlockSpaceCenterPart.META_HOLO_CORE), 'A',
-                    new ItemStack(partBlock, 1, BlockSpaceCenterPart.META_ANTENNA), 'I', "plateTungstenSteel", 'U',
-                    "circuitUV" });
+            if (circuit == null || hull == null) {
+                FutaGtnhMod.LOG.warn("深空采矿指挥中心：取不到 UV 机器外壳或 ZPM 级电路，控制器配方未注册");
+            } else {
+                GTModHandler.addCraftingRecipe(
+                    controller.getStackForm(1),
+                    new Object[] { "PHP", "CKA", "IUI", 'P', "plateIridium", 'H', hull, 'C', circuit, 'K',
+                        new ItemStack(partBlock, 1, BlockSpaceCenterPart.META_HOLO_CORE), 'A',
+                        new ItemStack(partBlock, 1, BlockSpaceCenterPart.META_ANTENNA), 'I', "plateTungstenSteel", 'U',
+                        circuit });
+            }
         }
 
         // 采掘桁架：钢 + 钨钢
@@ -78,6 +119,17 @@ public final class SpaceCenterRegistration {
             new ItemStack(partBlock, 1, BlockSpaceCenterPart.META_ANTENNA),
             new Object[] { " R ", " R ", "RCR", 'R', "stickTungstenSteel", 'C',
                 new ItemStack(partBlock, 1, BlockSpaceCenterPart.META_TRUSS) });
+    }
+
+    /**
+     * 配方引用的矿辞名若在当前整合包里没人注册，配方不会报错、只会永远合不出来。
+     * 启动时点名报出来，免得要到玩家合成时才发现。
+     */
+    private static void warnIfMissingOre(String oreName) {
+        if (OreDictionary.getOres(oreName)
+            .isEmpty()) {
+            FutaGtnhMod.LOG.warn("深空采矿指挥中心：矿辞 {} 为空，引用它的合成配方当前不可用", oreName);
+        }
     }
 
     /** @return 结构方块；未启用时 null。 */

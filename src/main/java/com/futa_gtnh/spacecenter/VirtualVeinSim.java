@@ -81,10 +81,30 @@ public final class VirtualVeinSim {
         }
     };
 
-    /** era 重置会让缓存整体失效，直接按 era 进 key 即可。 */
-    private static long cacheKey(String dimName, int era, int chunkX, int chunkZ) {
-        long h = dimName.hashCode();
-        return (h << 32) ^ ((era & 0xFFFFL) << 20) ^ ((chunkX & 0x3FFFL) << 8) ^ (chunkZ & 0xFFL) ^ (h >>> 48);
+    /**
+     * 缓存键：维度名、世界种子、era、区块坐标全部无截断地混进 64 位 FNV-1a。
+     *
+     * <p>
+     * 世界种子必须进键：这个缓存是静态的，单机退出到标题再进另一个存档时 JVM 不重启，
+     * 不带种子就会把上个存档的矿脉当成本存档的。区块坐标也不能截位——旧键只保留了
+     * Z 的低 8 位，(0,0) 和 (0,256) 会撞成同一格，取回的是别的区块的矿。
+     */
+    private static long cacheKey(String dimName, long worldSeed, int era, int chunkX, int chunkZ) {
+        long h = 0xcbf29ce484222325L;
+        h = mix(h, dimName.hashCode());
+        h = mix(h, (int) worldSeed);
+        h = mix(h, (int) (worldSeed >>> 32));
+        h = mix(h, era);
+        h = mix(h, chunkX);
+        return mix(h, chunkZ);
+    }
+
+    /** 把一个 32 位值按小端 4 字节喂进 FNV-1a 状态。 */
+    private static long mix(long state, int value) {
+        for (int i = 0; i < 4; i++) {
+            state = (state ^ ((value >>> (i * 8)) & 0xFFL)) * 0x100000001b3L;
+        }
+        return state;
     }
 
     private VirtualVeinSim() {}
@@ -92,7 +112,7 @@ public final class VirtualVeinSim {
     /** 模拟某星球某区块的矿石（带缓存）。 */
     public static ChunkOre simulateChunk(String dimName, long worldSeed, int dimensionId, int era, int chunkX,
         int chunkZ) {
-        long key = cacheKey(dimName, era, chunkX, chunkZ);
+        long key = cacheKey(dimName, worldSeed, era, chunkX, chunkZ);
         synchronized (CACHE) {
             ChunkOre cached = CACHE.get(key);
             if (cached != null) return cached;

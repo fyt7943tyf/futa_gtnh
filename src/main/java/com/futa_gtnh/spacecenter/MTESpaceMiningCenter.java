@@ -12,9 +12,11 @@ import static gregtech.api.enums.HatchElement.OutputHatch;
 import static gregtech.api.util.GTStructureUtility.buildHatchAdder;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
@@ -28,6 +30,7 @@ import org.jetbrains.annotations.NotNull;
 
 import com.futa_gtnh.Config;
 import com.futa_gtnh.block.BlockSpaceCenterPart;
+import com.futa_gtnh.spacecenter.SpaceCenterMachine.OreChunk;
 import com.gtnewhorizon.structurelib.alignment.constructable.ISurvivalConstructable;
 import com.gtnewhorizon.structurelib.structure.IStructureDefinition;
 import com.gtnewhorizon.structurelib.structure.ISurvivalBuildEnvironment;
@@ -37,11 +40,14 @@ import gregtech.api.casing.Casings;
 import gregtech.api.enums.Materials;
 import gregtech.api.enums.OrePrefixes;
 import gregtech.api.enums.SoundResource;
+import gregtech.api.interfaces.IIconContainer;
 import gregtech.api.interfaces.IOreMaterial;
 import gregtech.api.interfaces.ITexture;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
+import gregtech.api.metatileentity.GregTechTileClientEvents;
 import gregtech.api.metatileentity.implementations.MTEEnhancedMultiBlockBase;
+import gregtech.api.objects.GTUOFluid;
 import gregtech.api.objects.XSTR;
 import gregtech.api.recipe.RecipeMaps;
 import gregtech.api.recipe.check.CheckRecipeResult;
@@ -50,7 +56,6 @@ import gregtech.api.recipe.check.SimpleCheckRecipeResult;
 import gregtech.api.render.TextureFactory;
 import gregtech.api.structure.error.StructureError;
 import gregtech.api.util.GTModHandler;
-import gregtech.api.util.GTOreDictUnificator;
 import gregtech.api.util.GTRecipe;
 import gregtech.api.util.GTUtility;
 import gregtech.api.util.MultiblockTooltipBuilder;
@@ -66,29 +71,40 @@ import gregtech.common.misc.GTStructureChannels;
  * <p>
  * 结构（7x7 底座 + 可叠加层 + 顶盖，模板 {@code MTEMegaDistillationTower}）：
  * <ul>
- * <li>底座：采掘桁架地板，控制器在前中，边缘可贴输入总线/输入仓/输出总线/输出仓/维护/能源仓；</li>
+ * <li>底座：采掘桁架地板，控制器在前缘正中，边缘可贴输入总线/输入仓/输出总线/输出仓/维护/能源仓；</li>
  * <li>中间层：桁架边框 + 中央全息投影核心柱；</li>
- * <li>顶盖：桁架边框 + 全息核心环 + 中央天线阵列。</li>
+ * <li>顶盖：桁架边框 + 全息核心十字 + 外围一圈信号天线阵列。</li>
  * </ul>
+ * 整体随控制器朝向旋转：{@code '~'} 在深度第 0 行（最前排），结构朝控制器背面延伸。
+ * 形状数组的约定是 {@code String[层(上→下)][深度行(前→后)][水平列]}，
+ * 偏移量直接按这个输入数组的下标给——这是 StructureLib {@code transpose} 的输入约定，
+ * 不是转置之后的。
+ *
+ * <p>
  * 机位容量 = {@code baseCapacity + (height-2) * capacityPerLayer}（默认 8/层，9 层 64 台）。
  * 控制器槽（GUI 槽位 1）放火箭物品（Galacticraft {@code ItemTier{N}Rocket} 系）。
  */
 public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMiningCenter>
-    implements ISurvivalConstructable {
+    implements ISurvivalConstructable, MachineHost {
 
     private static final String PIECE_BASE = "base";
     private static final String PIECE_LAYER = "layer";
     private static final String PIECE_TOP = "top";
     private static final int HORIZONTAL_OFFSET = 3;
     private static final int DEPTH_OFFSET = 0;
+    /** 层数硬上限（形状与 tooltip 都按它写）。 */
+    private static final int MAX_HEIGHT = 9;
+    /** 最矮结构（底座 + 顶盖）的桁架数：底座 25 + 顶盖 24；每多一层再 +24。 */
+    private static final int TRUSS_MIN = 49;
+    private static final int TRUSS_PER_LAYER = 24;
 
     private static IStructureDefinition<MTESpaceMiningCenter> structureDefinition;
 
-    private static final gregtech.api.interfaces.IIconContainer FRONT_OVERLAY = gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
+    private static final IIconContainer FRONT_OVERLAY = gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
         .create("futa_gtnh", "space_center_front");
-    private static final gregtech.api.interfaces.IIconContainer FRONT_OVERLAY_ACTIVE = gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
+    private static final IIconContainer FRONT_OVERLAY_ACTIVE = gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
         .create("futa_gtnh", "space_center_front_active");
-    private static final gregtech.api.interfaces.IIconContainer CASING_ICON = gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
+    private static final IIconContainer CASING_ICON = gregtech.client.iconContainers.blocks.GTCustomBlockIconContainer
         .create("futa_gtnh", "space_center_truss");
 
     /** 采矿管道（IC2 管道，与真实钻机同款判定）。 */
@@ -100,11 +116,14 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
     /** 每挖一个矿方块的钻井液消耗（mB，对齐真实采矿场）。 */
     private static final int DRILLING_FLUID_PER_ORE = 2000;
 
+    /** 全息投影每换一颗星球隔多少个批次（30 批 = 30 秒）。 */
+    private static final int HOLO_SWITCH_BATCHES = 30;
+
     // ------------------------------------------------------------------
     // 状态
     // ------------------------------------------------------------------
 
-    /** 结构高度（层数，2..9）。 */
+    /** 结构高度（总层数，2..9）。 */
     private int height = 2;
 
     /** 每星球配置：8 个计数（矿机1-4、钻机1-4）+ 钻机所选油田。 */
@@ -112,7 +131,7 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
 
         public int[] miners = new int[4];
         public int[] drillers = new int[4];
-        /** 选中油田的流体注册名；null = 未选（产出按该星球权重最大的流体）。 */
+        /** 选中油田的流体注册名；null = 未选（取该星球权重最大的流体）。 */
         public String fluidKey;
 
         public int total() {
@@ -133,6 +152,13 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
     private final Map<String, Integer> fluidBuffer = new HashMap<>();
     /** 虚拟机自己的随机源（打粉产出 1~4 倍）。 */
     private final XSTR machineRandom = new XSTR();
+
+    /** 全息投影轮播计数（每批次 +1）。 */
+    private int holoBatch;
+    /** 同步给客户端的全息图标包：0 = 不显示，其余 = 图标槽位 + 1。 */
+    private byte holoPacket;
+    /** 客户端收到的全息图标槽位（-1 = 不显示）。 */
+    private byte clientHoloIconSlot = -1;
 
     public MTESpaceMiningCenter(int aID, String aName, String aNameRegional) {
         super(aID, aName, aNameRegional);
@@ -156,8 +182,7 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
         if (structureDefinition == null) {
             structureDefinition = StructureDefinition.<MTESpaceMiningCenter>builder()
                 // spotless:off
-                // 轴向约定与 MTEDrillerBase 相同：String[height][depth][width]，层从上到下、行从前到后
-                // '~' 必须落在 (HORIZONTAL_OFFSET, 0, DEPTH_OFFSET) 上（结构 lib 用它认控制器）
+                // String[层(上→下)][深度行(前→后)][水平列]；'~' 必须落在 (HORIZONTAL_OFFSET, 0, DEPTH_OFFSET) 上
                 .addShape(PIECE_BASE, transpose(new String[][] {
                     { "HHH~HHH",
                       "HCCCCCH",
@@ -215,6 +240,7 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
 
     @Override
     public void construct(ItemStack stackSize, boolean hintsOnly) {
+        // total = 总层数：1 层底座 + (total-2) 层中间层 + 1 层顶盖
         int total = GTStructureChannels.STRUCTURE_HEIGHT.getValueClamped(stackSize, minHeight(), maxHeight());
         buildPiece(PIECE_BASE, stackSize, hintsOnly, HORIZONTAL_OFFSET, 0, DEPTH_OFFSET);
         for (int layer = 1; layer <= total - 2; layer++) {
@@ -261,28 +287,32 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
             false);
     }
 
+    /**
+     * 结构 = 底座（1 层）+ 若干中间层 + 顶盖（1 层），{@link #height} 是<b>总层数</b>。
+     * 逐层的判定逻辑在 {@link SpaceCenterMachine#resolveHeight}（纯逻辑，有回归检查）。
+     */
     @Override
     public void checkMachine(IGregTechTileEntity aBaseMetaTileEntity, ItemStack aStack, List<StructureError> errors) {
         height = minHeight();
         if (!checkPiece(PIECE_BASE, HORIZONTAL_OFFSET, 0, DEPTH_OFFSET, errors)) return;
-        while (height < maxHeight()) {
-            if (checkPiece(PIECE_TOP, HORIZONTAL_OFFSET, height - 1, DEPTH_OFFSET, null)) {
-                height++;
-                break;
-            }
-            if (!checkPiece(PIECE_LAYER, HORIZONTAL_OFFSET, height - 1, DEPTH_OFFSET, errors)) return;
-            height++;
-        }
+        int resolved = SpaceCenterMachine.resolveHeight(
+            minHeight(),
+            maxHeight(),
+            // 没到上限时这一格还有可能是中间层，顶盖探测失败不算错；最上面一格的顶盖是硬性要求，要报错
+            n -> checkPiece(PIECE_TOP, HORIZONTAL_OFFSET, n, DEPTH_OFFSET, n == maxHeight() - 1 ? errors : null),
+            n -> checkPiece(PIECE_LAYER, HORIZONTAL_OFFSET, n, DEPTH_OFFSET, errors));
+        if (resolved < 0) return;
+        height = resolved;
         checkHasAnyEnergy(errors);
         checkOneMaintenanceHatch(errors);
     }
 
     private int minHeight() {
-        return Math.max(2, Config.spaceCenterMinHeight);
+        return SpaceCenterMachine.clamp(Config.spaceCenterMinHeight, 2, MAX_HEIGHT);
     }
 
     private int maxHeight() {
-        return GTUtility.clamp(Config.spaceCenterMaxHeight, minHeight(), 9);
+        return SpaceCenterMachine.clamp(Config.spaceCenterMaxHeight, minHeight(), MAX_HEIGHT);
     }
 
     /** 机位容量 = 基础 + 每层加成。 */
@@ -341,52 +371,142 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
 
     /** 火箭等级（未放/非火箭 = -1）。 */
     public int rocketTier() {
-        if (!GcCompat.isAvailable()) return -1;
         return GcCompat.rocketTierOf(getControllerSlot());
     }
 
-    public boolean autoResetVein() {
-        return Config.spaceCenterAutoResetVein;
+    /** 该星球上的虚拟机现在能不能推进：在星球表里、火箭等级够、种子已勘查。 */
+    private boolean isRunnable(SpaceCenterMachine machine, int rocketTier) {
+        return canOperate(PlanetRegistry.byName(machine.planet), rocketTier);
     }
 
-    public double oilYieldFactor() {
-        return Config.spaceCenterOilYieldFactor;
+    /**
+     * GUI 状态色用：给定火箭等级下这颗星球是否可以开工。
+     * 没放火箭（rocketTier ≤ 0）一律 false。
+     */
+    public boolean canOperate(PlanetRegistry.PlanetInfo info, int rocketTier) {
+        return info != null && rocketTier > 0 && info.tierRequirement <= rocketTier && planetSeed(info) != null;
     }
 
-    /** 该星球选中油田的流体注册名（未选 = null → 视为该星球权重最大的流体）。 */
+    /** 该星球是否勘查过（维度加载过、种子有记录）。 */
+    public boolean isSurveyed(PlanetRegistry.PlanetInfo info) {
+        return info != null && planetSeed(info) != null;
+    }
+
+    /** 星球 seed（未勘查 = null）。 */
+    private Long planetSeed(PlanetRegistry.PlanetInfo info) {
+        return PlanetSeeds.seedOf(info.dimensionId);
+    }
+
+    /** GUI 里存的所选油田流体注册名（未选 = null；不校验是否仍在星球的流体表里）。 */
     public String selectedFluidKey(String dimName) {
         PlanetConfig config = configFor(dimName, false);
         return config == null ? null : config.fluidKey;
     }
 
-    /** 星球 seed（未勘查 = null）。 */
-    public Long planetSeed(String dimName) {
-        PlanetRegistry.PlanetInfo info = PlanetRegistry.byName(dimName);
-        if (info == null) return null;
-        return PlanetSeeds.seedOf(info.dimensionId);
+    /**
+     * 钻机在该星球实际要抽的流体：GUI 选中的那一个；没选、或选中的流体已经不在该星球的
+     * 油田表里（配置改过）时，退回权重最大的那一个。
+     *
+     * @return 流体注册名；星球没有油田或已不在星球表里时 null
+     */
+    @Override
+    public String drillingFluid(String planet) {
+        PlanetRegistry.PlanetInfo info = PlanetRegistry.byName(planet);
+        if (info == null || info.fluids.isEmpty()) return null;
+        String selected = selectedFluidKey(planet);
+        if (selected != null) {
+            for (GTUOFluid fluid : info.fluids) {
+                if (fluid.Registry.equals(selected)) return selected;
+            }
+        }
+        // fluids 已按权重降序排好
+        return info.fluids.get(0).Registry;
     }
 
     // ------------------------------------------------------------------
-    // 资源口（虚拟机调用）
+    // MachineHost：虚拟机的资源口
     // ------------------------------------------------------------------
 
-    boolean consumeMiningPipe() {
+    @Override
+    public OreChunk simulateChunk(String planet, int era, int chunkX, int chunkZ) {
+        PlanetRegistry.PlanetInfo info = PlanetRegistry.byName(planet);
+        if (info == null) return null;
+        Long seed = planetSeed(info);
+        if (seed == null) return null;
+        return toOreChunk(VirtualVeinSim.simulateChunk(planet, seed, info.dimensionId, era, chunkX, chunkZ));
+    }
+
+    /**
+     * 把模拟结果摊成状态机消费的列表：先矿脉、后小矿，各自按材料 id（再按内部名）升序。
+     * 顺序必须是确定的——HashMap 的迭代顺序在两次启动之间并不保证一样，而读档恢复靠
+     * 「整块重建 + 跳过已挖数量」，顺序一变跳过的就不是同一批矿。
+     */
+    private static OreChunk toOreChunk(VirtualVeinSim.ChunkOre ore) {
+        List<OreChunk.Entry> entries = new ArrayList<>();
+        addEntries(entries, ore.veinBlocks, false);
+        addEntries(entries, ore.smallOres, true);
+        return new OreChunk(ore.minVeinY, entries);
+    }
+
+    private static void addEntries(List<OreChunk.Entry> entries, Map<IOreMaterial, Integer> ores, boolean small) {
+        List<Map.Entry<IOreMaterial, Integer>> sorted = new ArrayList<>(ores.entrySet());
+        sorted.sort(
+            Comparator.comparingInt(
+                (Map.Entry<IOreMaterial, Integer> entry) -> entry.getKey()
+                    .getId())
+                .thenComparing(
+                    entry -> entry.getKey()
+                        .getInternalName()));
+        for (Map.Entry<IOreMaterial, Integer> entry : sorted) {
+            IOreMaterial material = entry.getKey();
+            entries.add(new OreChunk.Entry(material, material.getInternalName(), entry.getValue(), small));
+        }
+    }
+
+    @Override
+    public int oilUpperBound(String planet, String fluidKey, int chunkX, int chunkZ) {
+        PlanetRegistry.PlanetInfo info = PlanetRegistry.byName(planet);
+        if (info == null || fluidKey == null) return -1;
+        Long seed = planetSeed(info);
+        if (seed == null) return -1;
+        VirtualOilField.PristineField field = VirtualOilField.pristine(info.dimensionId, seed, chunkX, chunkZ);
+        if (field == null || field.fluid == null || !fluidKey.equals(field.fluid.Registry)) return 0;
+        return field.upperBoundPerCycle();
+    }
+
+    @Override
+    public boolean autoResetVein() {
+        return Config.spaceCenterAutoResetVein;
+    }
+
+    @Override
+    public double oilYieldFactor() {
+        return Config.spaceCenterOilYieldFactor;
+    }
+
+    @Override
+    public boolean consumeMiningPipe() {
         if (MINING_PIPE == null) return false;
         return depleteInput(GTUtility.copyAmount(1, MINING_PIPE));
     }
 
-    boolean consumeDrillingFluid() {
+    @Override
+    public boolean consumeDrillingFluid() {
         if (gregtech.api.enums.ItemList.sDrillingFluid == null) return false;
         FluidStack fluid = new FluidStack(gregtech.api.enums.ItemList.sDrillingFluid, DRILLING_FLUID_PER_ORE);
+        // 先 simulate 再实扣：GT 的流体扣取会跨多个输入仓凑量，不能只看第一个仓
         if (!depleteInput(fluid, true)) return false;
         return depleteInput(fluid, false);
     }
 
-    void emitOre(IOreMaterial material, boolean allowMultiplier) {
-        if (!(material instanceof Materials gtMaterial)) return;
-        ItemStack oreStack = GTOreDictUnificator.get(OrePrefixes.ore, gtMaterial, 1);
+    @Override
+    public void emitOre(OreChunk.Entry ore) {
+        if (ore == null || ore.material == null) return;
+        // 不限定 GT 自家材料：BartWorks / GT++ 的材料走 IOreMaterial 自己的取物口径，
+        // 否则这些矿脉挖到了却什么都不产出
+        ItemStack oreStack = ore.material.getPart(OrePrefixes.ore, 1);
         if (oreStack == null) return;
-        // 精准采集 → 打粉机配方 → 粉碎矿（对齐 MTEOreDrillingPlantBase.getOutputByDrops）
+        // 精准采集 → 打粉机配方 → 粉碎矿
         GTRecipe recipe = RecipeMaps.maceratorRecipes.findRecipeQuery()
             .caching(true)
             .items(oreStack)
@@ -397,27 +517,26 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
             return;
         }
         for (int i = 0; i < recipe.mOutputs.length; i++) {
+            // 概率没 Roll 中的副产物就是不产出，而不是「保底给 1 个」
+            int chance = recipe.getOutputChance(i);
+            if (chance < 10000 && machineRandom.nextInt(10000) >= chance) continue;
             ItemStack out = recipe.mOutputs[i].copy();
-            if (machineRandom.nextInt(10000) < recipe.getOutputChance(i)) {
-                if (allowMultiplier) out.stackSize *= 1 + machineRandom.nextInt(4);
-            }
+            // 小矿不套 1~4 倍率
+            if (!ore.small) out.stackSize *= 1 + machineRandom.nextInt(4);
             if (out.stackSize > 0) itemBuffer.add(out);
         }
     }
 
-    void emitOil(String planet, int amount) {
+    @Override
+    public void emitOil(String planet, int amount) {
         if (amount <= 0) return;
-        String registry = selectedFluidKey(planet);
-        if (registry == null) {
-            PlanetRegistry.PlanetInfo info = PlanetRegistry.byName(planet);
-            if (info == null || info.fluids.isEmpty()) return;
-            registry = info.fluids.get(0).Registry;
-        }
+        String registry = drillingFluid(planet);
+        if (registry == null) return;
         Integer current = fluidBuffer.get(registry);
         fluidBuffer.put(registry, (current == null ? 0 : current) + amount);
     }
 
-    /** 把缓冲推到输出总线/输出仓（批次结束或手动按钮时调用）。 */
+    /** 把缓冲推到输出总线/输出仓（批次结束或手动按钮时调用）。塞不进去的部分按 GT 多方块惯例丢弃。 */
     public void flushBuffers() {
         for (ItemStack stack : itemBuffer) {
             addOutputPartial(stack);
@@ -449,16 +568,14 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
         List<SpaceCenterMachine> runnable = new ArrayList<>();
         long totalEu = 0;
         for (SpaceCenterMachine machine : machines) {
-            PlanetRegistry.PlanetInfo info = PlanetRegistry.byName(machine.planet);
-            if (info == null) continue;
-            if (info.tierRequirement > rocketTier) continue; // 火箭等级不够
-            if (planetSeed(machine.planet) == null) continue; // 星球未勘查
+            if (!isRunnable(machine, rocketTier)) continue;
             runnable.add(machine);
             totalEu += machine.euPerTick();
         }
+        updateHoloPlanet(runnable);
         if (runnable.isEmpty()) return SimpleCheckRecipeResult.ofFailure("futa_sc_no_machine");
 
-        // 润滑油：每台每秒 1000mB（本批次正好 1 秒）
+        // 润滑油：每台每秒 1000mB（本批次正好 1 秒）；正停着等料的机器不收
         int lubricantMachines = 0;
         for (SpaceCenterMachine machine : runnable) {
             if (machine.pauseReason == null) lubricantMachines++;
@@ -472,9 +589,9 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
             depleteInput(lubricant, false);
         }
 
-        // 新批次清一遍软暂停（缺料的会再次置位；区域采完等硬停保留）
+        // 新批次清一遍软暂停（缺料的会再次置位；「区域采完」是硬停，保留）
         for (SpaceCenterMachine machine : runnable) {
-            if (machine.pauseReason != null && !"area_exhausted".equals(machine.pauseReason)) {
+            if (machine.pauseReason != null && !SpaceCenterMachine.PAUSE_AREA_EXHAUSTED.equals(machine.pauseReason)) {
                 machine.pauseReason = null;
             }
         }
@@ -487,6 +604,63 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
         mMaxProgresstime = BATCH_TICKS;
         mEUt = (int) -totalEu;
         return CheckRecipeResultRegistry.SUCCESSFUL;
+    }
+
+    /**
+     * 全息投影轮播当前有可运行虚拟机的星球，每 {@value #HOLO_SWITCH_BATCHES} 个批次换一颗。
+     * 只同步图标槽位（7 位 custom data），客户端不需要星球名也不需要星球表。
+     */
+    private void updateHoloPlanet(List<SpaceCenterMachine> runnable) {
+        TreeSet<String> planets = new TreeSet<>();
+        for (SpaceCenterMachine machine : runnable) {
+            planets.add(machine.planet);
+        }
+        byte packet = 0;
+        if (!planets.isEmpty()) {
+            holoBatch++;
+            String shown = (String) planets.toArray()[Math.floorMod(holoBatch / HOLO_SWITCH_BATCHES, planets.size())];
+            packet = (byte) (1 + PlanetRegistry.iconSlotOf(shown));
+        }
+        setHoloPacket(packet);
+    }
+
+    private void setHoloPacket(byte packet) {
+        if (packet == holoPacket) return;
+        holoPacket = packet;
+        IGregTechTileEntity base = getBaseMetaTileEntity();
+        if (base != null) base.sendBlockEvent(GregTechTileClientEvents.CHANGE_CUSTOM_DATA, packet);
+    }
+
+    /** 服务端：随描述包发给客户端的一小段展示数据（这里是全息图标包）。 */
+    @Override
+    public byte getUpdateData() {
+        return holoPacket;
+    }
+
+    /** 客户端：收到 {@link #getUpdateData()} / 块事件传来的全息图标包。 */
+    @Override
+    public void onValueUpdate(byte aValue) {
+        int packet = aValue & 0x7F;
+        clientHoloIconSlot = (byte) (packet == 0 ? -1 : packet - 1);
+    }
+
+    /** 客户端特效用：全息投影要显示的星球图标槽位；-1 = 不显示。 */
+    public byte clientHoloIconSlot() {
+        return clientHoloIconSlot;
+    }
+
+    @Override
+    public void onFirstTick(IGregTechTileEntity aBaseMetaTileEntity) {
+        super.onFirstTick(aBaseMetaTileEntity);
+        // 虚拟机列表是服务端状态：客户端那边 machines 本来就是空的， reconcile 还会顺手去碰星球表
+        if (aBaseMetaTileEntity.isServerSide()) reconcileMachines();
+    }
+
+    @Override
+    public void onPostTick(IGregTechTileEntity aBaseMetaTileEntity, long aTick) {
+        super.onPostTick(aBaseMetaTileEntity, aTick);
+        // 机器停下之后 checkProcessing 不再被调用，全息投影要在这里收掉
+        if (holoPacket != 0 && !aBaseMetaTileEntity.isActive()) setHoloPacket((byte) 0);
     }
 
     // ------------------------------------------------------------------
@@ -505,12 +679,23 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
 
     @Override
     public boolean isItemValidForSlot(int aSlot, ItemStack aStack) {
-        return aSlot == 1 && GcCompat.isAvailable() && GcCompat.rocketTierOf(aStack) > 0;
+        return aSlot == 1 && GcCompat.rocketTierOf(aStack) > 0;
     }
 
     @Override
     public boolean isValidSlot(int aSlot) {
         return aSlot == 1;
+    }
+
+    // 终端区被本机器自己的三页界面占满：GT 默认塞在右下角的关机原因 / 维护图标 / Logo 会压在页面上
+    @Override
+    public boolean supportsTerminalRightCornerColumn() {
+        return false;
+    }
+
+    @Override
+    public boolean supportsLogo() {
+        return false;
     }
 
     // ------------------------------------------------------------------
@@ -522,7 +707,7 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
         int colorIndex, boolean active, boolean redstoneLevel) {
         ITexture casing = TextureFactory.of(CASING_ICON);
         if (side == facing) {
-            gregtech.api.interfaces.IIconContainer overlay = active ? FRONT_OVERLAY_ACTIVE : FRONT_OVERLAY;
+            IIconContainer overlay = active ? FRONT_OVERLAY_ACTIVE : FRONT_OVERLAY;
             return new ITexture[] { casing, TextureFactory.builder()
                 .addIcon(overlay)
                 .extFacing()
@@ -558,7 +743,7 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
             .addSeparator()
             .beginStructureBlock(7, 2, 7, false)
             .addController(front)
-            .addCasingInfoMin(truss, 36, false)
+            .addCasingInfoMin(truss, TRUSS_MIN, false)
             .addOtherStructurePart(holo, centerColumn)
             .addOtherStructurePart(antenna, topCenter)
             .addInputBus(baseEdge, 1)
@@ -607,7 +792,8 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
     @Override
     public void loadNBTData(NBTTagCompound aNBT) {
         super.loadNBTData(aNBT);
-        height = Math.max(minHeight(), aNBT.getInteger("height"));
+        // 钳到当前配置允许的范围：改过配置或 NBT 被改坏的存档不能把这里撑爆
+        height = SpaceCenterMachine.clamp(aNBT.getInteger("height"), minHeight(), maxHeight());
         planetConfigs.clear();
         NBTTagList configList = aNBT.getTagList("planetConfigs", 10);
         for (int i = 0; i < configList.tagCount(); i++) {
@@ -626,19 +812,14 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
             NBTTagCompound tag = machineList.getCompoundTagAt(i);
             SpaceCenterMachine.Type type = tag.getInteger("type") == 1 ? SpaceCenterMachine.Type.DRILLER
                 : SpaceCenterMachine.Type.MINER;
+            // 等级只有 1..4：越界的话下面按等级查表直接 ArrayIndexOutOfBounds，整台机器跟着炸
             SpaceCenterMachine machine = SpaceCenterMachine
-                .create(type, Math.max(1, tag.getInteger("tier")), tag.getString("planet"));
-            machine.progress = tag.getInteger("progress");
-            if (tag.hasKey("pause")) machine.pauseReason = tag.getString("pause");
+                .create(type, SpaceCenterMachine.clamp(tag.getInteger("tier"), 1, 4), tag.getString("planet"));
+            machine.progress = Math.max(0, tag.getInteger("progress"));
+            machine.pauseReason = tag.hasKey("pause") ? tag.getString("pause") : null;
             machine.load(tag);
             machines.add(machine);
         }
-    }
-
-    @Override
-    public void onFirstTick(IGregTechTileEntity aBaseMetaTileEntity) {
-        super.onFirstTick(aBaseMetaTileEntity);
-        reconcileMachines();
     }
 
     // ------------------------------------------------------------------
@@ -651,40 +832,5 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
 
     public int structureHeight() {
         return height;
-    }
-
-    /** 顶盖天线格上表面中心的世界坐标（运行光柱与粒子的锚点）。 */
-    public double[] beamAnchor() {
-        IGregTechTileEntity base = getBaseMetaTileEntity();
-        // 结构 7×7：宽向 x-3..x+3（控制器居中），深向 z..z+6（前缘贴控制器），天线列在 (x, z+3)
-        return new double[] { base.getXCoord() + 0.5, base.getYCoord() + height, base.getZCoord() + 3.5 };
-    }
-
-    // ------------------------------------------------------------------
-    // 客户端氛围（粒子）
-    // ------------------------------------------------------------------
-
-    @Override
-    public void onPreTick(IGregTechTileEntity aBaseMetaTileEntity, long aTick) {
-        super.onPreTick(aBaseMetaTileEntity, aTick);
-        // 运行中：天线顶偶发火花 + 传送门涡旋（对齐 MTEIndustrialMacerator 的客户端粒子范式）
-        if (!aBaseMetaTileEntity.isClientSide() || !aBaseMetaTileEntity.isActive()) return;
-        if (aTick % 10 != 0) return;
-        net.minecraft.world.World world = aBaseMetaTileEntity.getWorld();
-        java.util.Random random = world.rand;
-        double[] anchor = beamAnchor();
-        for (int i = 0; i < 2; i++) {
-            world.spawnParticle(
-                "magicCrit",
-                anchor[0] + (random.nextDouble() - 0.5D) * 5.0D,
-                anchor[1] + random.nextDouble() * 1.5D,
-                anchor[2] + (random.nextDouble() - 0.5D) * 5.0D,
-                0.0D,
-                0.05D + random.nextDouble() * 0.10D,
-                0.0D);
-        }
-        if (aTick % 40 == 0) {
-            world.spawnParticle("portal", anchor[0], anchor[1], anchor[2], 0.0D, 0.3D, 0.0D);
-        }
     }
 }

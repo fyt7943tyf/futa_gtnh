@@ -2,12 +2,11 @@ package com.futa_gtnh.spacecenter;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 import net.minecraft.world.World;
 import net.minecraftforge.common.DimensionManager;
-
-import com.gtnewhorizon.gtnhlib.hash.Fnv1a64;
 
 import gregtech.GTLoggers;
 import gregtech.GTMod;
@@ -73,19 +72,40 @@ public final class PlanetRegistry {
         }
     }
 
+    /**
+     * 星球图标图集（{@code textures/gui/planets.png}）的格数。
+     * 与 {@link PlanetIconWidget}、{@code tools/GenSpaceCenterTextures} 三处必须一致。
+     */
+    public static final int ICON_SLOTS = 64;
+
+    /** 油田按权重降序、同权重按注册名，保证「第 0 个 = 权重最大」在两端与重启后都成立。 */
+    private static final Comparator<GTUOFluid> FLUID_ORDER = Comparator.comparingInt((GTUOFluid fluid) -> -fluid.Chance)
+        .thenComparing(fluid -> fluid.Registry);
+
     private static volatile List<PlanetInfo> planets = null;
 
     private PlanetRegistry() {}
 
-    /** 服务端调用：Galacticraft 与 GT 世界生成注册完成后构建（postInit 之后首次使用时惰性构建）。 */
+    /**
+     * 服务端调用：Galacticraft 与 GT 世界生成注册完成后构建（首次使用时惰性构建）。
+     *
+     * <p>
+     * 顺序固定为「火箭等级 → 维度名」：GUI 的选中态就是这个列表的下标，顺序必须稳定。
+     * <b>不要在客户端调本方法</b>——专用服务器的客户端，本地矿脉/油田配置未必与服务端一致，
+     * 界面展示一律走 GUI 同步串（{@code SpaceCenterGui}），不读这张表。
+     */
     public static List<PlanetInfo> planets() {
         if (planets != null) return planets;
         synchronized (PlanetRegistry.class) {
             if (planets != null) return planets;
             List<PlanetInfo> result = new ArrayList<>();
-            if (GcCompat.isAvailable()) {
+            if (SpaceCenterRegistration.isGalacticraftPresent()) {
+                List<GcCompat.BodyInfo> bodies = new ArrayList<>(GcCompat.listReachableBodies());
+                bodies.sort(
+                    Comparator.comparingInt((GcCompat.BodyInfo body) -> body.tierRequirement)
+                        .thenComparing(body -> body.name));
                 int index = 0;
-                for (GcCompat.BodyInfo body : GcCompat.listReachableBodies()) {
+                for (GcCompat.BodyInfo body : bodies) {
                     List<WorldgenGTOreLayer> veins = new ArrayList<>();
                     for (WorldgenGTOreLayer layer : WorldgenGTOreLayer.sList) {
                         if (layer.canGenerateIn(body.name)) veins.add(layer);
@@ -108,6 +128,7 @@ public final class PlanetRegistry {
                         // 维度未注册（对应星球模组没装）时 GetDimension 可能失败，安静跳过油田
                         GTLoggers.GT_FML_LOGGER.debug("spacecenter: fluids lookup failed for {}", body.name, t);
                     }
+                    fluids.sort(FLUID_ORDER);
                     // 没矿也没油的星球没有远程开采价值
                     if (veins.isEmpty() && fluids.isEmpty()) continue;
                     result.add(new PlanetInfo(body.name, body.dimensionId, body.tierRequirement, veins, fluids, index));
@@ -126,14 +147,12 @@ public final class PlanetRegistry {
         return null;
     }
 
-    /** 客户端也能安全调：注册表只在服务端有数据，客户端拿到的是空表（展示走 GUI 同步）。 */
-    public static boolean isBuilt() {
-        return planets != null;
-    }
-
-    /** GUI 同步用的稳定星球 id：名字哈希。 */
-    public static long nameKey(String dimName) {
-        return Fnv1a64.hashStep(Fnv1a64.initialState(), dimName.hashCode());
+    /**
+     * 星球在图标图集里的格位（按名字哈希，两端无需同步就能算出同一个值）。
+     * 服务端把它放进控制器的 custom data 同步给客户端，供全息投影取图。
+     */
+    public static int iconSlotOf(String dimName) {
+        return Math.floorMod(dimName.hashCode(), ICON_SLOTS);
     }
 
     /** 尝试从已加载维度补抓种子（指挥中心 tick 时对缺种子的星球兜底）。 */
