@@ -17,6 +17,7 @@ import com.futa_gtnh.FutaGtnhMod;
 import com.futa_gtnh.block.BlockSpaceCenterPart;
 import com.futa_gtnh.spacecenter.MTESpaceMiningCenter;
 import com.futa_gtnh.spacecenter.PlanetIconWidget;
+import com.futa_gtnh.spacecenter.SpaceCenterGeometry;
 
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.relauncher.Side;
@@ -30,7 +31,7 @@ import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
  * <li><b>星环</b>：每个全息投影核心外面两道倾角相反的轨道，亮头拖着彗尾沿轨道跑——
  * 均匀的环绕自己的轴转是看不出来的，动感的来源是亮度沿轨道流动；</li>
  * <li><b>上行链路</b>：顶盖每根天线射出一道细光并带着错相的上行脉冲，只在机器运行时出现；</li>
- * <li><b>全息星球</b>：从顶盖十字中心张开的投影锥托着一颗缓缓旋转的星球，
+ * <li><b>全息星球</b>：从顶盖中心天线张开的投影锥托着一颗缓缓旋转的星球，
  * 显示的是这台机器当前在开采的那一颗（图标槽位由服务端经 GT 的 custom data 同步）。</li>
  * </ul>
  *
@@ -44,8 +45,10 @@ import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
  *
  * <p>
  * <b>锚点不靠同步、靠扫描。</b>客户端的 MTE 没有成型的层数与朝向（{@code mMachine}、
- * {@code height} 都不同步），所以这里顺着控制器往上摸：中轴柱的全息核心一路到顶盖，
- * 再在顶盖那一层找出背向控制器的方向，扫出十字与天线环。每 {@value #SCAN_INTERVAL} tick
+ * {@code height} 都不同步），所以直接摸方块：背向控制器的方向、结构中心那一列
+ * （控制器往后 3 格）上的全息柱、顶盖内圈的全息核心环与天线——这套几何在
+ * {@link SpaceCenterGeometry}（两端共用的纯逻辑，回归检查拿真实形状核对过），
+ * 这里只负责喂 {@code partMeta} 闭包和拿结果。每 {@value #SCAN_INTERVAL} tick
  * 扫一次（一台机器不到一百次方块查询），其余帧只画。
  *
  * <p>
@@ -75,8 +78,6 @@ public class SpaceCenterEffects {
     private static final double HOLO_HEIGHT = 2.2D;
     private static final double HOLO_SIZE = 1.5D;
 
-    private static final int[][] HORIZONTAL = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
-
     /** 出过异常就闭嘴，避免每帧刷日志把游戏卡死。 */
     private static boolean loggedFailure;
 
@@ -87,11 +88,11 @@ public class SpaceCenterEffects {
         final boolean active;
         /** 全息星球图标槽位；-1 = 不投影。 */
         final int iconSlot;
-        /** 顶盖十字中心（世界坐标）；{@link #hasTop} 为 false 时无意义。 */
+        /** 结构的水平中心（控制器往后 3 格；世界坐标）；{@link #hasTop} 为 false 时无意义。 */
         int centerX, centerZ;
         int topY;
         boolean hasTop;
-        /** 全息核心：中轴柱 + 顶盖十字。 */
+        /** 全息核心：各中间层正中的那一列 + 顶盖内圈的一环。 */
         final List<int[]> holo = new ArrayList<>();
         final List<int[]> antennas = new ArrayList<>();
         double distanceSq;
@@ -166,49 +167,23 @@ public class SpaceCenterEffects {
         }
     }
 
-    /** @return 结构不完整（控制器上方既没有全息柱也没有顶盖）时 null。 */
+    /**
+     * @return 结构不完整（找不到底座中心的全息柱与顶盖）时 null
+     */
     private static Rig scanRig(World world, int x, int y, int z, boolean active, int iconSlot) {
+        // 几何全在 SpaceCenterGeometry：从底座找出背向控制器的方向，再顺结构中心那一列
+        // （控制器往后 3 格）往上找全息柱与顶盖——不是在控制器正上方（那一列往上是桁架）
+        SpaceCenterGeometry.Anchors anchors = SpaceCenterGeometry
+            .scan((wx, wy, wz) -> BlockSpaceCenterPart.partMeta(world, wx, wy, wz), x, y, z);
+        if (anchors == null) return null;
+
         Rig rig = new Rig(x, y, z, active, iconSlot);
-
-        // 1) 中轴柱：控制器正上方每一层的全息核心，一直到顶盖那一层（顶盖前排正中是桁架）
-        int level = y + 1;
-        while (BlockSpaceCenterPart.partMeta(world, x, level, z) == BlockSpaceCenterPart.META_HOLO_CORE) {
-            rig.holo.add(new int[] { x, level, z });
-            level++;
-        }
-        if (BlockSpaceCenterPart.partMeta(world, x, level, z) != BlockSpaceCenterPart.META_TRUSS) return null;
-        rig.topY = level;
-
-        // 2) 背向控制器的方向：顶盖是 7×7、控制器在某一侧边的中点，所以「后退 3 格」还在顶盖里
-        int backX = 0, backZ = 0;
-        boolean found = false;
-        for (int[] dir : HORIZONTAL) {
-            if (BlockSpaceCenterPart.isPart(world, x + 3 * dir[0], rig.topY, z + 3 * dir[1])) {
-                backX = dir[0];
-                backZ = dir[1];
-                found = true;
-                break;
-            }
-        }
-        if (!found) return rig;
-        int sideX = -backZ, sideZ = backX;
-
-        // 3) 顶盖那一层：十字上的全息核心 + 外围一圈天线
-        for (int back = 0; back <= 6; back++) {
-            for (int side = -3; side <= 3; side++) {
-                int wx = x + backX * back + sideX * side;
-                int wz = z + backZ * back + sideZ * side;
-                int meta = BlockSpaceCenterPart.partMeta(world, wx, rig.topY, wz);
-                if (meta == BlockSpaceCenterPart.META_ANTENNA) {
-                    rig.antennas.add(new int[] { wx, rig.topY, wz });
-                } else if (meta == BlockSpaceCenterPart.META_HOLO_CORE) {
-                    rig.holo.add(new int[] { wx, rig.topY, wz });
-                }
-            }
-        }
-        rig.centerX = x + 3 * backX;
-        rig.centerZ = z + 3 * backZ;
+        rig.centerX = anchors.centerX;
+        rig.centerZ = anchors.centerZ;
+        rig.topY = anchors.topY;
         rig.hasTop = true;
+        rig.holo.addAll(anchors.holo);
+        rig.antennas.addAll(anchors.antennas);
         return rig;
     }
 
@@ -386,7 +361,7 @@ public class SpaceCenterEffects {
             index++;
         }
 
-        // 投影锥：从顶盖十字中心张到全息星球
+        // 投影锥：从顶盖中心张到全息星球
         beam(
             t,
             bx,

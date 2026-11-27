@@ -1,15 +1,27 @@
 package com.futa_gtnh.spacecenter;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import net.minecraft.nbt.NBTTagCompound;
 
+import com.gtnewhorizon.structurelib.structure.IStructureDefinition;
+import com.gtnewhorizon.structurelib.structure.IStructureElement;
+import com.gtnewhorizon.structurelib.structure.StructureUtility;
+
+import com.futa_gtnh.block.BlockSpaceCenterPart;
 import com.futa_gtnh.spacecenter.SpaceCenterMachine.OreChunk;
 
 /**
@@ -170,8 +182,11 @@ public final class SpaceCenterMachinesRegression {
         checks++;
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         tierNumbersMatchSpec();
+        structureDefinitionBuilds();
+        effectsGeometryMatchesStructure();
+        langPlaceholdersAreConsistent();
         heightResolutionMatchesStructure();
         minerDescendsThenMines();
         minerMissingPipePausesWithoutProgress();
@@ -208,6 +223,285 @@ public final class SpaceCenterMachinesRegression {
             driller.descendRemaining = 0;
             check(driller.cycleTicks() == 8, "driller bottom cycle T" + tier);
         }
+    }
+
+    /**
+     * 结构定义必须能装配，而且形状里的每一格都进了元素表。
+     *
+     * <p>
+     * 2.1.0 的中间层用 '.' 表示空气却没有绑定元素，StructureLib 在 build() 时抛
+     * Missing Structure Element bindings。这个构建是惰性的：编译、注册、服务端冒烟全碰不到，
+     * 直到玩家在 NEI 里按 R 看多方块预览、或者第一次成型检查才崩。所以这里拿真实的
+     * StructureLib，把三个 piece 完整装配一遍（元素本体换成哑元），按元素实例反查
+     * 「哪个字符落进了元素表、落了几格」，并钉住形状里的硬性约定。
+     */
+    private static void structureDefinitionBuilds() {
+        check(
+            SpaceCenterStructure.kindOf(SpaceCenterStructure.AIR) == SpaceCenterStructure.Kind.AIR,
+            "air is a registered structure element");
+
+        // 每个字符一个独立的哑元素：装配后再按实例反查字符。
+        // isAir() 是单例，直接用的话五个字符会共用一个实例，所以用 ofChain 各包一层拿到新实例
+        Map<IStructureElement<Object>, Character> byElement = new HashMap<>();
+        IStructureDefinition<Object> definition = SpaceCenterStructure.build(kind -> {
+            IStructureElement<Object> element = StructureUtility.ofChain(StructureUtility.isAir());
+            for (char c : new char[] { SpaceCenterStructure.TRUSS, SpaceCenterStructure.HOLO,
+                SpaceCenterStructure.ANTENNA, SpaceCenterStructure.AIR, SpaceCenterStructure.HATCH }) {
+                if (SpaceCenterStructure.kindOf(c) == kind) byElement.put(element, c);
+            }
+            return element;
+        });
+
+        // 底座 7×7：25 个桁架 + 23 个可贴仓/口的位置（第 24 个被控制器占着）
+        check(
+            cells(definition, SpaceCenterStructure.PIECE_BASE, byElement).equals(cellsOf("C=25", "H=23")),
+            "base piece cells: " + cells(definition, SpaceCenterStructure.PIECE_BASE, byElement));
+        // 中间层 7×7：24 个桁架 + 24 格空气 + 正中 1 个全息核心（2.1.0 崩的就是这 24 格空气）
+        check(
+            cells(definition, SpaceCenterStructure.PIECE_LAYER, byElement).equals(cellsOf("C=24", ".=24", "K=1")),
+            "layer piece cells: " + cells(definition, SpaceCenterStructure.PIECE_LAYER, byElement));
+        // 顶盖 7×7：24 个桁架 + 内圈 8 个全息核心 + 外圈 16 根天线 + 正中 1 根天线
+        check(
+            cells(definition, SpaceCenterStructure.PIECE_TOP, byElement).equals(cellsOf("C=24", "K=8", "A=17")),
+            "top piece cells: " + cells(definition, SpaceCenterStructure.PIECE_TOP, byElement));
+
+        // 形状约定：三个 piece 都是 7×7 的单层，共用同一套水平 footprint；
+        // 控制器只有一个，在底座最前排的正中（= 偏移量）
+        for (String[][] shape : new String[][][] { SpaceCenterStructure.BASE, SpaceCenterStructure.LAYER,
+            SpaceCenterStructure.TOP }) {
+            check(shape.length == 1 && shape[0].length == 7, "each piece is a single 7-deep level");
+            for (String row : shape[0]) check(row.length() == 7, "every row is 7 wide");
+        }
+        check(
+            countChar(SpaceCenterStructure.BASE, SpaceCenterStructure.CONTROLLER) == 1
+                && countChar(SpaceCenterStructure.LAYER, SpaceCenterStructure.CONTROLLER) == 0
+                && countChar(SpaceCenterStructure.TOP, SpaceCenterStructure.CONTROLLER) == 0,
+            "exactly one controller in the structure");
+        check(
+            SpaceCenterStructure.BASE[0][SpaceCenterStructure.DEPTH_OFFSET]
+                .charAt(SpaceCenterStructure.HORIZONTAL_OFFSET) == SpaceCenterStructure.CONTROLLER,
+            "controller sits at (HORIZONTAL_OFFSET, DEPTH_OFFSET)");
+
+        // 位置约定：控制器在前缘，全息核心在底座中心（控制器往后 3 格）——特效的锚点扫描靠这一条；
+        // 中间层内部除它以外全是空气；顶盖中心是天线，外面一圈全息核心
+        int center = SpaceCenterStructure.WIDTH / 2;
+        check(center - SpaceCenterStructure.DEPTH_OFFSET == 3, "center is 3 blocks behind the controller");
+        for (int row = 1; row < SpaceCenterStructure.WIDTH - 1; row++) {
+            for (int col = 1; col < SpaceCenterStructure.WIDTH - 1; col++) {
+                int ring = Math.max(Math.abs(row - center), Math.abs(col - center));
+                check(
+                    SpaceCenterStructure.LAYER[0][row].charAt(col) == (ring == 0 ? SpaceCenterStructure.HOLO
+                        : SpaceCenterStructure.AIR),
+                    "layer interior at (" + row + "," + col + ")");
+                check(
+                    SpaceCenterStructure.TOP[0][row].charAt(col) == (ring == 1 ? SpaceCenterStructure.HOLO
+                        : SpaceCenterStructure.ANTENNA),
+                    "top interior at (" + row + "," + col + ")");
+            }
+        }
+
+        // 数量口径：最矮 49 个桁架、每多一层 +24
+        check(SpaceCenterStructure.TRUSS_MIN == 49, "truss count of the 2-layer structure");
+        check(SpaceCenterStructure.TRUSS_PER_LAYER == 24, "truss per extra layer");
+    }
+
+    /**
+     * 一个 piece 的元素表里，按字符统计的格数。
+     *
+     * <p>
+     * 元素表里除了形状的格子，还有 StructureLib 自己挂的条目（控制器、以及每块固定带着的几个内部元素），
+     * 它们不在反查表里、不参与统计——这里只回答「形状里的每个格子是不是都带着正确的元素进了表」。
+     */
+    private static Map<Character, Integer> cells(IStructureDefinition<Object> definition, String piece,
+        Map<IStructureElement<Object>, Character> byElement) {
+        Map<Character, Integer> counts = new TreeMap<>();
+        for (IStructureElement<Object> cell : definition.getStructureFor(piece)) {
+            Character c = cell == null ? null : byElement.get(cell);
+            if (c != null) counts.merge(c, 1, Integer::sum);
+        }
+        return counts;
+    }
+
+    /** {"C=25", "H=24"} → {'C': 25, 'H': 24} */
+    private static Map<Character, Integer> cellsOf(String... entries) {
+        Map<Character, Integer> counts = new TreeMap<>();
+        for (String entry : entries) counts.put(entry.charAt(0), Integer.parseInt(entry.substring(2)));
+        return counts;
+    }
+
+    private static int countChar(String[][] shape, char c) {
+        int n = 0;
+        for (String[] level : shape) {
+            for (String row : level) n += countChar(row, c);
+        }
+        return n;
+    }
+
+    private static int countChar(String row, char c) {
+        int n = 0;
+        for (int i = 0; i < row.length(); i++) {
+            if (row.charAt(i) == c) n++;
+        }
+        return n;
+    }
+
+    /**
+     * 特效的锚点扫描（{@link SpaceCenterGeometry}）必须和真实形状对上。
+     *
+     * <p>
+     * 用形状字符串在内存里搭出真机网格：控制器在 (0,0,0)、结构沿背向展开，四个朝向 ×
+     * 两种高度都摸一遍，'H' 槽位「全摆桁架」和「摆的是仓（摸出来是别的方块）」各来一遍，
+     * 钉住背向、结构中心列、顶盖 y、全息核心与天线的数量和具体位置。
+     *
+     * <p>
+     * 2.1.0 的特效把锚点钉在控制器正上方——网格里那一列往上只有桁架，扫描会直接摸空
+     * 返回 null，这里的断言一条也过不去；所以它是那次「特效全都没了」的回归门。
+     */
+    private static void effectsGeometryMatchesStructure() {
+        for (int[] dir : new int[][] { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) {
+            SpaceCenterGeometry.Anchors anchors = SpaceCenterGeometry.scan(grid(dir, 4, true), 0, 0, 0);
+            String where = "grid facing " + dir[0] + "," + dir[1];
+            check(anchors != null, "scan finds anchors: " + where);
+            check(anchors.backX == dir[0] && anchors.backZ == dir[1], "back direction of " + where);
+            check(anchors.centerX == 3 * dir[0] && anchors.centerZ == 3 * dir[1], "center column of " + where);
+            check(anchors.topY == 3, "top y of " + where);
+            check(anchors.holo.size() == 2 + 8, "holo cores of " + where + ": " + anchors.holo.size());
+            check(anchors.antennas.size() == 17, "antennas of " + where + ": " + anchors.antennas.size());
+        }
+
+        // 具体位置：中心列的全息核心逐层在 (3,1,0)、(3,2,0)；顶盖中心天线在 (3,3,0)
+        SpaceCenterGeometry.Anchors anchors = SpaceCenterGeometry.scan(grid(new int[] { 1, 0 }, 4, true), 0, 0, 0);
+        check(has(anchors.holo, 3, 1, 0) && has(anchors.holo, 3, 2, 0), "column holo cores at (3,1,0) and (3,2,0)");
+        check(has(anchors.antennas, 3, 3, 0), "top-center antenna at (3,3,0)");
+
+        // 最矮的两层机（没有中间层）：中心列直接顶到顶盖
+        SpaceCenterGeometry.Anchors minimal = SpaceCenterGeometry.scan(grid(new int[] { 1, 0 }, 2, true), 0, 0, 0);
+        check(minimal != null && minimal.topY == 1, "two-layer machine scans to top y 1");
+        check(minimal.holo.size() == 8, "two-layer machine has only the top holo ring");
+
+        // 'H' 槽位摆的是仓（摸出来不是桁架）也照样能摸：背向判定不依赖那圈
+        SpaceCenterGeometry.Anchors hatched = SpaceCenterGeometry.scan(grid(new int[] { 1, 0 }, 4, false), 0, 0, 0);
+        check(hatched != null && hatched.backX == 1 && hatched.topY == 3, "scan works with hatch-filled base edges");
+
+        // 摸不到就该闭嘴：空世界、没盖顶盖、顶盖正中缺天线，全都返回 null
+        check(SpaceCenterGeometry.scan((x, y, z) -> -1, 0, 0, 0) == null, "scan of an empty world is null");
+        SpaceCenterGeometry.PartMetaLookup withoutTop = (wx, wy, wz) -> wy >= 3
+            ? -1
+            : grid(new int[] { 1, 0 }, 4, true).metaAt(wx, wy, wz);
+        check(SpaceCenterGeometry.scan(withoutTop, 0, 0, 0) == null, "scan without the top layer is null");
+        SpaceCenterGeometry.PartMetaLookup brokenTopCenter = (wx, wy, wz) -> wx == 3 && wy == 3 && wz == 0
+            ? BlockSpaceCenterPart.META_TRUSS
+            : grid(new int[] { 1, 0 }, 4, true).metaAt(wx, wy, wz);
+        check(SpaceCenterGeometry.scan(brokenTopCenter, 0, 0, 0) == null, "scan without the top-center antenna is null");
+    }
+
+    /**
+     * 按真实形状在内存里搭一台指挥中心：控制器在 (0,0,0)，背向 = dir（结构往 dir 方向展开）。
+     *
+     * <p>
+     * 世界坐标 → 形状坐标的反变换用两个正交的单位向量内积搞定：
+     * 行（纵深）= 沿背向的投影，列（水平）= 沿侧向的投影 + 中心列偏移。
+     * '~' 是控制器本体、'.' 是空气、底座边缘的 'H' 槽位看 {@code hatchSlotsAreTruss}，
+     * 摸出来都不是桁架之外的形态方块。
+     */
+    private static SpaceCenterGeometry.PartMetaLookup grid(int[] dir, int height, boolean hatchSlotsAreTruss) {
+        int dx = dir[0], dz = dir[1];
+        return (wx, wy, wz) -> {
+            int row = wx * dx + wz * dz;
+            int col = -wx * dz + wz * dx + SpaceCenterStructure.WIDTH / 2;
+            if (row < 0 || row >= SpaceCenterStructure.WIDTH || col < 0 || col >= SpaceCenterStructure.WIDTH || wy < 0
+                || wy >= height) return -1;
+            char c;
+            if (wy == 0) c = SpaceCenterStructure.BASE[0][row].charAt(col);
+            else if (wy == height - 1) c = SpaceCenterStructure.TOP[0][row].charAt(col);
+            else c = SpaceCenterStructure.LAYER[0][row].charAt(col);
+            switch (c) {
+                case SpaceCenterStructure.TRUSS:
+                    return BlockSpaceCenterPart.META_TRUSS;
+                case SpaceCenterStructure.HOLO:
+                    return BlockSpaceCenterPart.META_HOLO_CORE;
+                case SpaceCenterStructure.ANTENNA:
+                    return BlockSpaceCenterPart.META_ANTENNA;
+                case SpaceCenterStructure.HATCH:
+                    return hatchSlotsAreTruss ? BlockSpaceCenterPart.META_TRUSS : -1;
+                default:
+                    return -1; // '~' 是控制器本体、'.' 是空气，都不是形态方块组
+            }
+        };
+    }
+
+    private static boolean has(List<int[]> list, int x, int y, int z) {
+        for (int[] p : list) {
+            if (p[0] == x && p[1] == y && p[2] == z) return true;
+        }
+        return false;
+    }
+
+    private static final String LANG_DIR = "src/main/resources/assets/futa_gtnh/lang/";
+    private static final String LANG_PREFIX = "futa_gtnh.space_center.";
+    private static final Pattern PLACEHOLDER = Pattern.compile("%(?:\\d+\\$)?s");
+
+    /**
+     * 语言文件的占位符必须和代码传参对得上。
+     *
+     * <p>
+     * 带参数的词条靠 String.format 填值，占位符比参数多就是 MissingFormatArgumentException，
+     * 而它跑在界面的重绘里——2.1.0 钻机那一行的 tooltip 就是这么悬停即崩的。
+     * SpaceCenterGui 里现在对格式化失败做了兜底（不再崩），但兜底只是难看，不该当成正常：
+     * 这里按调用点把参数个数钉死，并要求中英文词条的占位符个数一致。
+     */
+    private static void langPlaceholdersAreConsistent() throws Exception {
+        Map<String, String> zh = loadLang("zh_CN.lang");
+        Map<String, String> en = loadLang("en_US.lang");
+        check(zh.keySet().equals(en.keySet()), "zh/en key sets are identical");
+        check(zh.size() > 60, "lang files were actually loaded: " + zh.size());
+
+        // 调用点 → 参数个数（与 SpaceCenterGui 里的 tr(...) 调用一一对应）
+        Map<String, Integer> argCounts = new LinkedHashMap<>();
+        argCounts.put("gui.status.0", 4);
+        argCounts.put("gui.status.1", 2);
+        argCounts.put("gui.page", 3);
+        argCounts.put("gui.selected", 2);
+        argCounts.put("gui.locked", 1);
+        argCounts.put("gui.more_veins", 1);
+        argCounts.put("gui.tt.miner", 5);
+        argCounts.put("gui.tt.driller", 5);
+        argCounts.put("gui.more_machines", 1);
+        for (Map.Entry<String, Integer> entry : argCounts.entrySet()) {
+            String key = LANG_PREFIX + entry.getKey();
+            check(placeholders(zh.get(key)) == entry.getValue(), "zh placeholders of " + entry.getKey());
+            check(placeholders(en.get(key)) == entry.getValue(), "en placeholders of " + entry.getKey());
+        }
+        // 其余词条不带参数：新加了带占位符的词条就要同步登记到上面的表里，别让调用点漏掉
+        for (String key : zh.keySet()) {
+            if (argCounts.containsKey(key.substring(LANG_PREFIX.length()))) continue;
+            int zhCount = placeholders(zh.get(key));
+            int enCount = placeholders(en.get(key));
+            check(zhCount == enCount, "zh/en placeholder parity of " + key);
+            check(zhCount == 0, "formatted entry is not registered in the arity table: " + key);
+        }
+    }
+
+    private static int placeholders(String value) {
+        if (value == null) return -1;
+        int n = 0;
+        Matcher matcher = PLACEHOLDER.matcher(value);
+        while (matcher.find()) n++;
+        return n;
+    }
+
+    /** 读 .lang：跳过空行与 # 注释，按第一个 = 切开。 */
+    private static Map<String, String> loadLang(String name) throws Exception {
+        Map<String, String> entries = new LinkedHashMap<>();
+        for (String line : Files.readAllLines(new File(LANG_DIR + name).toPath(), StandardCharsets.UTF_8)) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+            int eq = trimmed.indexOf('=');
+            if (eq < 0) continue;
+            String key = trimmed.substring(0, eq).trim();
+            if (key.startsWith(LANG_PREFIX)) entries.put(key, trimmed.substring(eq + 1));
+        }
+        return entries;
     }
 
     /** 多方块的层数判定：用「底座上方第 n 格是什么」的谓词模拟各种搭法。 */

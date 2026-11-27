@@ -1,6 +1,7 @@
 package com.futa_gtnh.spacecenter;
 
 import java.util.ArrayList;
+import java.util.IllegalFormatException;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -592,8 +593,22 @@ public class SpaceCenterGui extends MTEMultiBlockBaseGui<MTESpaceMiningCenter> {
     // 客户端格式化（本地化都在这里做；只读同步串，不碰星球表）
     // ------------------------------------------------------------------
 
+    /**
+     * 取词条并填参数。
+     *
+     * <p>
+     * 占位符和传参对不上（改文案漏了一个、或者换语言后数量不一致）时 {@link String#format} 会抛
+     * {@link IllegalFormatException}——那是每一次重绘都会走到的地方，等于界面一打开就崩。
+     * 这里改成把原文和参数原样显示出来：难看，但看得见是哪条词条出了问题。
+     */
     private static String tr(String key, Object... args) {
-        return StatCollector.translateToLocalFormatted(key, args);
+        String pattern = StatCollector.translateToLocal(key);
+        if (args.length == 0) return pattern;
+        try {
+            return String.format(pattern, args);
+        } catch (IllegalFormatException e) {
+            return pattern + " " + java.util.Arrays.toString(args);
+        }
     }
 
     private static String[] planetRows(String raw) {
@@ -732,11 +747,14 @@ public class SpaceCenterGui extends MTEMultiBlockBaseGui<MTESpaceMiningCenter> {
                         side * side)));
         } else {
             int range = SpaceCenterMachine.DRILLER_RANGE_CHUNKS[tier - 1];
+            // 词条是「EU/t · R×R = 面积 · 系数」共 5 个占位符：2.1.0 这里少传了一个 R，
+            // 悬停钻机行就是一次 MissingFormatArgumentException
             tooltip.addLine(
                 IKey.dynamic(
                     () -> tr(
                         "futa_gtnh.space_center.gui.tt.driller",
                         SpaceCenterMachine.drillerEu(tier),
+                        range,
                         range,
                         range * range,
                         com.futa_gtnh.Config.spaceCenterOilYieldFactor)));

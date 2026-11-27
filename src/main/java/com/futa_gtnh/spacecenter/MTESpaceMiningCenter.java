@@ -1,7 +1,11 @@
 package com.futa_gtnh.spacecenter;
 
+import static com.futa_gtnh.spacecenter.SpaceCenterStructure.DEPTH_OFFSET;
+import static com.futa_gtnh.spacecenter.SpaceCenterStructure.HORIZONTAL_OFFSET;
+import static com.futa_gtnh.spacecenter.SpaceCenterStructure.PIECE_BASE;
+import static com.futa_gtnh.spacecenter.SpaceCenterStructure.PIECE_LAYER;
+import static com.futa_gtnh.spacecenter.SpaceCenterStructure.PIECE_TOP;
 import static com.gtnewhorizon.structurelib.structure.StructureUtility.ofBlock;
-import static com.gtnewhorizon.structurelib.structure.StructureUtility.transpose;
 import static gregtech.api.enums.HatchElement.Energy;
 import static gregtech.api.enums.HatchElement.ExoticEnergy;
 import static gregtech.api.enums.HatchElement.InputBus;
@@ -34,7 +38,6 @@ import com.futa_gtnh.spacecenter.SpaceCenterMachine.OreChunk;
 import com.gtnewhorizon.structurelib.alignment.constructable.ISurvivalConstructable;
 import com.gtnewhorizon.structurelib.structure.IStructureDefinition;
 import com.gtnewhorizon.structurelib.structure.ISurvivalBuildEnvironment;
-import com.gtnewhorizon.structurelib.structure.StructureDefinition;
 
 import gregtech.api.casing.Casings;
 import gregtech.api.enums.Materials;
@@ -73,12 +76,10 @@ import gregtech.common.misc.GTStructureChannels;
  * <ul>
  * <li>底座：采掘桁架地板，控制器在前缘正中，边缘可贴输入总线/输入仓/输出总线/输出仓/维护/能源仓；</li>
  * <li>中间层：桁架边框 + 中央全息投影核心柱；</li>
- * <li>顶盖：桁架边框 + 全息核心十字 + 外围一圈信号天线阵列。</li>
+ * <li>顶盖：桁架边框 + 内圈的全息核心环 + 正中与外围一圈的信号天线阵列。</li>
  * </ul>
  * 整体随控制器朝向旋转：{@code '~'} 在深度第 0 行（最前排），结构朝控制器背面延伸。
- * 形状数组的约定是 {@code String[层(上→下)][深度行(前→后)][水平列]}，
- * 偏移量直接按这个输入数组的下标给——这是 StructureLib {@code transpose} 的输入约定，
- * 不是转置之后的。
+ * 形状、字符含义与装配都在 {@link SpaceCenterStructure}（那边有数组约定与偏移量的说明）。
  *
  * <p>
  * 机位容量 = {@code baseCapacity + (height-2) * capacityPerLayer}（默认 8/层，9 层 64 台）。
@@ -87,16 +88,8 @@ import gregtech.common.misc.GTStructureChannels;
 public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMiningCenter>
     implements ISurvivalConstructable, MachineHost {
 
-    private static final String PIECE_BASE = "base";
-    private static final String PIECE_LAYER = "layer";
-    private static final String PIECE_TOP = "top";
-    private static final int HORIZONTAL_OFFSET = 3;
-    private static final int DEPTH_OFFSET = 0;
     /** 层数硬上限（形状与 tooltip 都按它写）。 */
     private static final int MAX_HEIGHT = 9;
-    /** 最矮结构（底座 + 顶盖）的桁架数：底座 25 + 顶盖 24；每多一层再 +24。 */
-    private static final int TRUSS_MIN = 49;
-    private static final int TRUSS_PER_LAYER = 24;
 
     private static IStructureDefinition<MTESpaceMiningCenter> structureDefinition;
 
@@ -180,47 +173,37 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
     @Override
     public IStructureDefinition<MTESpaceMiningCenter> getStructureDefinition() {
         if (structureDefinition == null) {
-            structureDefinition = StructureDefinition.<MTESpaceMiningCenter>builder()
-                // spotless:off
-                // String[层(上→下)][深度行(前→后)][水平列]；'~' 必须落在 (HORIZONTAL_OFFSET, 0, DEPTH_OFFSET) 上
-                .addShape(PIECE_BASE, transpose(new String[][] {
-                    { "HHH~HHH",
-                      "HCCCCCH",
-                      "HCCCCCH",
-                      "HCCCCCH",
-                      "HCCCCCH",
-                      "HCCCCCH",
-                      "HHHHHHH" } }))
-                .addShape(PIECE_LAYER, transpose(new String[][] {
-                    { "CCCCCCC",
-                      "C.....C",
-                      "C.....C",
-                      "C..K..C",
-                      "C.....C",
-                      "C.....C",
-                      "CCCCCCC" } }))
-                .addShape(PIECE_TOP, transpose(new String[][] {
-                    { "CCCCCCC",
-                      "CAAAAAC",
-                      "CAKKKAC",
-                      "CAKAKAC",
-                      "CAKKKAC",
-                      "CAAAAAC",
-                      "CCCCCCC" } }))
-                // spotless:on
-                .addElement('C', lazyOfTruss())
-                .addElement('K', lazyOfHolo())
-                .addElement('A', lazyOfAntenna())
-                .addElement(
-                    'H',
-                    buildHatchAdder(MTESpaceMiningCenter.class)
-                        .atLeast(Maintenance, InputBus, InputHatch, OutputBus, OutputHatch, Energy.or(ExoticEnergy))
-                        .casingIndex(Casings.SolidSteelMachineCasing.textureId)
-                        .hint(1)
-                        .buildAndChain(lazyOfTruss()))
-                .build();
+            structureDefinition = SpaceCenterStructure.build(MTESpaceMiningCenter::structureElement);
         }
         return structureDefinition;
+    }
+
+    /**
+     * 结构里的每一种元素具体是什么。形状里会出现哪些字符由 {@link SpaceCenterStructure} 决定，
+     * 这里只管「每一种都得给出实现」——漏一种，装配时就会明确报出是哪一种。
+     */
+    private static com.gtnewhorizon.structurelib.structure.IStructureElement<MTESpaceMiningCenter> structureElement(
+        SpaceCenterStructure.Kind kind) {
+        switch (kind) {
+            case TRUSS:
+                return lazyOfTruss();
+            case HOLO_CORE:
+                return lazyOfHolo();
+            case ANTENNA:
+                return lazyOfAntenna();
+            // 中间层的内部必须留空。这一条在 2.1.0 里是缺的：StructureLib 要求形状里的每个字符都有元素，
+            // 于是结构定义一装配就抛 Missing Structure Element bindings，成型检查和 NEI 的多方块预览都会崩
+            case AIR:
+                return com.gtnewhorizon.structurelib.structure.StructureUtility.isAir();
+            case HATCH_OR_TRUSS:
+                return buildHatchAdder(MTESpaceMiningCenter.class)
+                    .atLeast(Maintenance, InputBus, InputHatch, OutputBus, OutputHatch, Energy.or(ExoticEnergy))
+                    .casingIndex(Casings.SolidSteelMachineCasing.textureId)
+                    .hint(1)
+                    .buildAndChain(lazyOfTruss());
+            default:
+                return null;
+        }
     }
 
     private static com.gtnewhorizon.structurelib.structure.IStructureElement<MTESpaceMiningCenter> lazyOfTruss() {
@@ -743,7 +726,7 @@ public class MTESpaceMiningCenter extends MTEEnhancedMultiBlockBase<MTESpaceMini
             .addSeparator()
             .beginStructureBlock(7, 2, 7, false)
             .addController(front)
-            .addCasingInfoMin(truss, TRUSS_MIN, false)
+            .addCasingInfoMin(truss, SpaceCenterStructure.TRUSS_MIN, false)
             .addOtherStructurePart(holo, centerColumn)
             .addOtherStructurePart(antenna, topCenter)
             .addInputBus(baseEdge, 1)
