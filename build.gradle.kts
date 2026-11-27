@@ -551,3 +551,53 @@ tasks.register<JavaExec>("verifyPlantAuraOptional") {
         }
 }
 tasks.named("check") { dependsOn("verifyPlantAuraOptional") }
+
+tasks.register<JavaExec>("verifyNeoEcoAeCompat") {
+    group = "verification"
+    description = "Checks NeoECOAE pattern upload ore-dict alt matching and Mixin guard isolation"
+    dependsOn(compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.ae2.NeoEcoAeCompatRegression")
+    classpath = files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+tasks.named("check") { dependsOn("verifyNeoEcoAeCompat") }
+
+if (providers.gradleProperty("neoEcoAeJar").isPresent) {
+    val neoEcoAeCheckDependencies = configurations.create("neoEcoAeCheckDependencies") {
+        isTransitive = false
+    }
+    dependencies.add(neoEcoAeCheckDependencies.name, files(providers.gradleProperty("neoEcoAeJar").get()))
+    if (providers.gradleProperty("progHatchesJar").isPresent) {
+        dependencies.add(neoEcoAeCheckDependencies.name, files(providers.gradleProperty("progHatchesJar").get()))
+    }
+
+    val compileNeoEcoAeChecks = tasks.register<JavaCompile>("compileNeoEcoAeChecks") {
+        dependsOn(tasks.named("classes"))
+        source(fileTree("tools/neoecoae-upload-check") { include("**/*.java") })
+        classpath = sourceSets["main"].output + neoEcoAeCheckDependencies +
+            sourceSets["main"].compileClasspath.filter { !it.name.startsWith("jabel-") }
+        destinationDirectory.set(layout.buildDirectory.dir("neoecoae-upload-check/classes"))
+        sourceCompatibility = "1.8"
+        targetCompatibility = "1.8"
+        options.encoding = "UTF-8"
+        options.compilerArgs.add("-proc:none")
+    }
+
+    tasks.register<JavaExec>("verifyNeoEcoAeRealJar") {
+        group = "verification"
+        description = "Checks real NeoECOAE jar Mixin transformation without starting a game"
+        dependsOn(compileNeoEcoAeChecks, compileProspectorChecks, "extractTerminalClickLwjgl")
+        mainClass.set("com.futa_gtnh.common.ProspectorCheckLauncher")
+        args(
+            "--tweakClass",
+            "com.futa_gtnh.neoecoaecheck.NeoEcoAeUploadCheckTweaker",
+            "--tweakClass",
+            "org.spongepowered.asm.launch.MixinTweaker")
+        classpath = files(layout.buildDirectory.dir("terminal-click-check/lwjgl")) +
+            files(compileNeoEcoAeChecks.flatMap { it.destinationDirectory }) +
+            files(compileProspectorChecks.flatMap { it.destinationDirectory }) +
+            files("tools/neoecoae-upload-check") + neoEcoAeCheckDependencies +
+            sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+    }
+}

@@ -278,6 +278,54 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         return false;
     }
 
+    private static Boolean neoEcoAeUploadCompatible;
+
+    private static final String[][] NEO_ECO_AE_REQUIRED_MEMBERS = {
+        { "cn/dancingsnow/neoecoae/platform/gt/upload/GtCircuits", "normalizeForRecipe",
+            "(Lnet/minecraft/item/ItemStack;)Lnet/minecraft/item/ItemStack;" },
+        { "cn/dancingsnow/neoecoae/platform/gt/upload/GtCircuits", "unwrap",
+            "(Lnet/minecraft/item/ItemStack;)Lnet/minecraft/item/ItemStack;" },
+        { "cn/dancingsnow/neoecoae/platform/gt/upload/GtRecipeVerifier", "ratio",
+            "(Lgregtech/api/util/GTRecipe;Lcn/dancingsnow/neoecoae/platform/gt/upload/GtRecipeVerifier$Pattern;)Lcn/dancingsnow/neoecoae/platform/gt/upload/GtRecipeVerifier$Verdict;" },
+        { "cn/dancingsnow/neoecoae/platform/gt/upload/GtRecipeVerifier", "sameItem",
+            "(Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ItemStack;)Z" },
+        { "cn/dancingsnow/neoecoae/platform/gt/upload/GtPatternRoutes", "evaluate",
+            "(Lcn/dancingsnow/neoecoae/platform/gt/upload/GtRecipeVerifier$Cache;Lcn/dancingsnow/neoecoae/platform/gt/upload/GtPatternRoutes$Route;Lcn/dancingsnow/neoecoae/crafting/upload/PatternContext;Ljava/lang/String;Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ItemStack;ZZ)Lcn/dancingsnow/neoecoae/platform/gt/upload/GtPatternRoutes$Candidate;" },
+        { "cn/dancingsnow/neoecoae/compat/proghatches/upload/ProgrammableHatchUpload", "unwrap",
+            "(Lnet/minecraft/item/ItemStack;)Lnet/minecraft/item/ItemStack;" },
+        { "cn/dancingsnow/neoecoae/compat/proghatches/upload/ProgrammableHatchUpload", "isProgrammingInput",
+            "(Ljava/lang/Object;)Z" } };
+
+    private static boolean neoEcoAeUploadCompatible() {
+        if (neoEcoAeUploadCompatible != null) return neoEcoAeUploadCompatible;
+        if (Launch.classLoader == null) return false;
+        try {
+            Map<String, ClassNode> cache = new HashMap<>();
+            for (String[] required : NEO_ECO_AE_REQUIRED_MEMBERS) {
+                ClassNode node = cache.get(required[0]);
+                if (node == null) {
+                    node = readSkeleton(required[0]);
+                    if (node == null) return neoEcoAeUploadCompatible = false;
+                    cache.put(required[0], node);
+                }
+                if (!hasMinerMeMethod(node, required[1], required[2])) {
+                    org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                        .warn(
+                            "NeoECOAE upload hook skipped because {}#{}{} is missing",
+                            required[0],
+                            required[1],
+                            required[2]);
+                    return neoEcoAeUploadCompatible = false;
+                }
+            }
+            return neoEcoAeUploadCompatible = true;
+        } catch (Exception error) {
+            org.apache.logging.log4j.LogManager.getLogger("futa_gtnh")
+                .warn("Unable to inspect NeoECOAE upload classes; compatibility hooks disabled", error);
+            return false;
+        }
+    }
+
     private static boolean tinkersPresent() {
         if (present) return true;
 
@@ -391,6 +439,7 @@ public class FutaGtnhMixinPlugin implements IMixinConfigPlugin {
         if ("com.futa_gtnh.mixins.MixinMinerMeOutputBus".equals(mixinClassName)
             || "com.futa_gtnh.mixins.MixinMinerMeOutputProvider".equals(mixinClassName))
             return minerMeOutputCompatible();
+        if (mixinClassName.startsWith("com.futa_gtnh.mixins.MixinNeoEcoAe")) return neoEcoAeUploadCompatible();
         if ("com.futa_gtnh.mixins.MixinAeStorageBusSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkMonitorSupply".equals(mixinClassName)) return true;
         if ("com.futa_gtnh.mixins.MixinAeNetworkInventorySupply".equals(mixinClassName)) return true;
