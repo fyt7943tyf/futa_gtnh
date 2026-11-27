@@ -1,6 +1,7 @@
 package com.futa_gtnh.spacecenter;
 
 import java.util.ArrayList;
+import java.util.IllegalFormatException;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -186,6 +187,22 @@ public class SpaceCenterGui extends MTEMultiBlockBaseGui<MTESpaceMiningCenter> {
             .onMousePressed(onClick);
     }
 
+    /**
+     * Flow 行内用的按钮：<b>绝不能带显式 pos</b>。
+     *
+     * <p>
+     * Flow 只对流式子控件做顺序布局；带了 pos 的子控件按绝对定位处理，全部钉死在那个坐标上。
+     * 2.1.0 的三个页签按钮用 {@link #button}（始终 pos(0,0)）放进 {@link Flow#row()}，
+     * 于是「星球 / 配置 / 运行」三个按钮整个叠印在同一处，文字糊成一团——只有页签 1 的底
+     * 露在外面。ParentWidget 页面里的按钮是绝对定位容器，用 {@link #button} 没问题。
+     */
+    private static ButtonWidget<?> flowButton(int width, int height, IDrawable label,
+        com.cleanroommc.modularui.api.widget.IGuiAction.MousePressed onClick) {
+        return new ButtonWidget<>().size(width, height)
+            .overlay(label)
+            .onMousePressed(onClick);
+    }
+
     private Flow tabRow(PagedWidget<?> pages) {
         String[] keys = { "futa_gtnh.space_center.gui.tab.planets", "futa_gtnh.space_center.gui.tab.config",
             "futa_gtnh.space_center.gui.tab.run" };
@@ -195,7 +212,7 @@ public class SpaceCenterGui extends MTEMultiBlockBaseGui<MTESpaceMiningCenter> {
         for (int i = 0; i < keys.length; i++) {
             int idx = i;
             // 显示哪一页纯粹是客户端的事，服务端不关心，不需要同步值
-            row.child(button(72, 14, 0, 0, IKey.lang(keys[i]), b -> {
+            row.child(flowButton(72, 14, IKey.lang(keys[i]), b -> {
                 pages.setPage(idx);
                 return true;
             }));
@@ -592,8 +609,22 @@ public class SpaceCenterGui extends MTEMultiBlockBaseGui<MTESpaceMiningCenter> {
     // 客户端格式化（本地化都在这里做；只读同步串，不碰星球表）
     // ------------------------------------------------------------------
 
+    /**
+     * 取词条并填参数。
+     *
+     * <p>
+     * 占位符和传参对不上（改文案漏了一个、或者换语言后数量不一致）时 {@link String#format} 会抛
+     * {@link IllegalFormatException}——那是每一次重绘都会走到的地方，等于界面一打开就崩。
+     * 这里改成把原文和参数原样显示出来：难看，但看得见是哪条词条出了问题。
+     */
     private static String tr(String key, Object... args) {
-        return StatCollector.translateToLocalFormatted(key, args);
+        String pattern = StatCollector.translateToLocal(key);
+        if (args.length == 0) return pattern;
+        try {
+            return String.format(pattern, args);
+        } catch (IllegalFormatException e) {
+            return pattern + " " + java.util.Arrays.toString(args);
+        }
     }
 
     private static String[] planetRows(String raw) {
@@ -732,11 +763,14 @@ public class SpaceCenterGui extends MTEMultiBlockBaseGui<MTESpaceMiningCenter> {
                         side * side)));
         } else {
             int range = SpaceCenterMachine.DRILLER_RANGE_CHUNKS[tier - 1];
+            // 词条是「EU/t · R×R = 面积 · 系数」共 5 个占位符：2.1.0 这里少传了一个 R，
+            // 悬停钻机行就是一次 MissingFormatArgumentException
             tooltip.addLine(
                 IKey.dynamic(
                     () -> tr(
                         "futa_gtnh.space_center.gui.tt.driller",
                         SpaceCenterMachine.drillerEu(tier),
+                        range,
                         range,
                         range * range,
                         com.futa_gtnh.Config.spaceCenterOilYieldFactor)));

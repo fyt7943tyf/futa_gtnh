@@ -19,7 +19,7 @@ import cpw.mods.fml.relauncher.SideOnly;
  * <li><b>桁架（meta 0）</b>：满格外壳，直接走原版 {@code renderStandardBlock}；</li>
  * <li><b>全息投影核心（meta 1）</b>：居中一根 4×16×4 的能量柱，贴图是带下扫扫描线的动画条带；
  * 相邻两个全息核心之间自动连出一根 4×4 的横梁，所以中轴是一根通到底的光柱、
- * 顶盖上的「十字」连成一个整体，而不是一串互不相干的方块；</li>
+ * 顶盖内圈的 8 个连成一整环，而不是一串互不相干的方块；</li>
  * <li><b>信号天线阵列（meta 2）</b>：基座 + 桅杆 + 发射头三段造型，发射头贴呼吸灯动画条带、
  * 自发光（不受环境光影响）。</li>
  * </ul>
@@ -112,7 +112,7 @@ public class SpaceCenterPartRenderer implements ISimpleBlockRenderingHandler {
         // 能量柱：4×16×4 居中
         box(t, 6, 0, 6, 10, 16, 10, pillar, cap, light);
 
-        // 横梁：只朝「相邻也是全息核心」的方向伸到格子边缘（顶盖十字靠它连成一体）
+        // 横梁：只朝「相邻也是全息核心」的方向伸到格子边缘（顶盖内圈那一环靠它连成一体）
         if (BlockSpaceCenterPart.partMeta(world, x + 1, y, z) == BlockSpaceCenterPart.META_HOLO_CORE) {
             box(t, 10, 6, 6, 16, 10, 10, cap, cap, light);
         }
