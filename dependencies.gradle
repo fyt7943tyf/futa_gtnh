@@ -195,6 +195,13 @@ dependencies {
     compileOnly(files("vendor/vendingmachine-0.4.82-local-dev.jar"))
     runtimeOnlyNonPublishable(files("vendor/vendingmachine-0.4.82-local-dev.jar"))
 
+    // ---- Galacticraft（深空采矿指挥中心）----
+    // 星球表与火箭等级来自 GC API（GalaxyRegistry/CelestialBody），类型引用全部隔离在
+    // com.futa_gtnh.spacecenter.GcCompat 一个类里，没装 GC 时整个功能组不注册。
+    // 版本对齐 GTNH 2.9.1 正式包（3.4.39-GTNH）。
+    compileOnly("com.github.GTNewHorizons:Galacticraft:3.4.39-GTNH:dev") { transitive = false }
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Galacticraft:3.4.39-GTNH:dev") { transitive = false }
+
     // ---- runClient / runServer 里真正要加载的模组 ----
     //
     // ★ 这几行是必需的，不是可选的。

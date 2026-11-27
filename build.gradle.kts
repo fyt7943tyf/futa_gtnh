@@ -44,12 +44,24 @@ tasks.register<JavaExec>("verifySharedStorageReadApi") {
         sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
 }
 
+// Drives the virtual miner/driller state machines against an in-memory host (no world, no GT worldgen).
+tasks.register<JavaExec>("verifySpaceCenterMachines") {
+    group = "verification"
+    description = "Checks virtual miner/driller state machines: descent, mining, save/load resume, era reset, fluid selection"
+    dependsOn(compileReadApiChecks)
+    mainClass.set("com.futa_gtnh.shared.ReadApiCheckLauncher")
+    args("com.futa_gtnh.spacecenter.SpaceCenterMachinesRegression")
+    classpath = files(compileReadApiChecks.flatMap { it.destinationDirectory }) +
+        sourceSets["main"].runtimeClasspath + sourceSets["main"].compileClasspath
+}
+
 tasks.named("check") {
     dependsOn(tasks.named("verifyLocatorChests"))
     dependsOn(tasks.named("verifyCosmeticArmor"), tasks.named("verifyCosmeticArmorOptional"))
     dependsOn(tasks.named("verifyTerminalIo"))
     dependsOn(tasks.named("verifyProspectorChineseNames"))
     dependsOn(tasks.named("verifySharedStorageReadApi"))
+    dependsOn(tasks.named("verifySpaceCenterMachines"))
     dependsOn(tasks.named("verifyDisassembler"))
     dependsOn(tasks.named("verifyDisassemblerUi"))
     dependsOn(tasks.named("verifyTerminalClicks"))
